@@ -4,6 +4,7 @@ use crate::analysis::scalars::{
     BooleanSet,
     data::{Pattern, PatternFacts},
 };
+use storage::BooleanValue;
 
 impl<'a, 'g> Check<'a, 'g> {
     pub(super) fn conditional(
@@ -82,6 +83,11 @@ impl<'a, 'g> Check<'a, 'g> {
         path: &[ResultComponent<'g>],
         value: bool,
     ) -> Work<()> {
+        // Callers that establish a definite value for an existing scalar
+        // also refine its copies; a write takes the old value first.
+        if let Some(copy) = state.boolean_copy_at(root, path, self.budget)? {
+            return state.refine_boolean_copy(&copy, value, self.budget);
+        }
         self.budget.reserve(1)?;
         state.store(
             root,
@@ -89,6 +95,20 @@ impl<'a, 'g> Check<'a, 'g> {
             Content::Test(Arc::new(Constructor::Boolean(value)), true),
             self.budget,
         )
+    }
+
+    pub(super) fn install_boolean(
+        &mut self,
+        state: &mut Residence<'g>,
+        root: Root<'g>,
+        value: BooleanValue,
+    ) -> Work<()> {
+        match value {
+            BooleanValue::Known(truth) => self.record_boolean(state, root, &[], truth),
+            BooleanValue::Copy(copy) => {
+                state.store(root, &[], Content::BooleanCopy(copy), self.budget)
+            }
+        }
     }
 
     pub(super) fn branch_condition(
@@ -104,15 +124,20 @@ impl<'a, 'g> Check<'a, 'g> {
         let root = Root::Temporary(node);
         let mut result = Vec::new();
         for mut state in self.expression(node, state, depth)? {
-            let known = state.test(root, &[], &Constructor::Boolean(true), self.budget)?;
+            let value_at_read = state.boolean_value(root, &[], self.budget)?;
             state.take(root, &[], self.budget)?;
             let address = self.address(&state, value.and_then(|value| value.path.as_ref()))?;
             for (outcome, feasible) in [(false, truth.can_be_false()), (true, truth.can_be_true())]
             {
-                if !feasible || known.is_some_and(|known| known != outcome) {
+                if !feasible
+                    || matches!(value_at_read, Some(BooleanValue::Known(known)) if known != outcome)
+                {
                     continue;
                 }
                 let mut branch = state.fork(self.budget)?;
+                if let Some(BooleanValue::Copy(copy)) = &value_at_read {
+                    branch.refine_boolean_copy(copy, outcome, self.budget)?;
+                }
                 if let Some((root, path)) = &address
                     && branch
                         .test(*root, path, &Constructor::Boolean(true), self.budget)?

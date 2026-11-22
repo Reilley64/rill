@@ -8,6 +8,7 @@ use crate::analysis::ordinary::RequirementTarget;
 use crate::analysis::scalars::CallFacts;
 
 mod references;
+mod results;
 use references::shared_i32;
 
 pub(super) type PairBodies<'g> = BTreeMap<&'g DeclarationId, PairBody<'g>>;
@@ -55,6 +56,8 @@ pub struct ScopedJoinSlot<'g> {
     pub send_result: GoalId,
     /// Exact source for a checked shared descriptor result, if this is a reference pair.
     pub reference_result: Option<ScopedJoinReference<'g>>,
+    /// Original construction for a checked fresh Result, before slot publication.
+    pub result_origin: Option<Site<'g>>,
     pub(in crate::analysis) child: PairChild<'g>,
 }
 
@@ -511,6 +514,7 @@ impl<'a, 'g> Check<'a, 'g> {
         }
         let references = scoped.is_some()
             && matches!(value.ty.as_ref(),TypeTerm::Tuple(items) if matches!(items.as_slice(),[a,b] if shared_i32(a) && shared_i32(b)));
+        let fresh_result = scoped.and_then(|_| self.fresh_result_slot(&value.ty));
         let compared = if scoped.is_some()
             && let TypeTerm::Tuple(items) = value.ty.as_ref()
             && let [a, b] = items.as_slice()
@@ -524,7 +528,7 @@ impl<'a, 'g> Check<'a, 'g> {
         } else {
             None
         };
-        let (tuple, tuple_depth) = if references || compared.is_some() {
+        let (tuple, tuple_depth) = if references || compared.is_some() || fresh_result.is_some() {
             self.value_root_at(*argument, depth + 1)?
         } else {
             (self.ungroup_value(*argument)?, depth + 1)
@@ -577,15 +581,24 @@ impl<'a, 'g> Check<'a, 'g> {
             return Ok(false);
         }
         let elements = [*first, *second];
-        let [first, second] = if let Some(shapes) = shapes {
-            shapes.map(|s| s.origin)
+        let [(first, first_depth), (second, second_depth)] = if fresh_result.is_some() {
+            [
+                self.value_root_at(*first, tuple_depth + 1)?,
+                self.value_root_at(*second, tuple_depth + 1)?,
+            ]
+        } else if let Some(shapes) = shapes {
+            shapes.map(|s| (s.origin, depth + 1))
         } else {
-            [self.ungroup_value(*first)?, self.ungroup_value(*second)?]
+            [
+                (self.ungroup_value(*first)?, depth + 1),
+                (self.ungroup_value(*second)?, depth + 1),
+            ]
         };
         if first == second {
             return Ok(false);
         }
         let mut reference_plans = [None, None];
+        let mut fresh_plans = [None, None];
         let mut outputs = [Vec::new(), Vec::new()];
         let mut children = [None, None];
         let mut scoped_slots = [None, None];
@@ -615,9 +628,17 @@ impl<'a, 'g> Check<'a, 'g> {
                 || arrow.site.node != origin
                 || arrow.premise.is_some()
                 || !arrow.parameters.is_empty()
-                || !self.same_job(job, job_sub, references, depth + 1)?
-                || !self.result_agrees(output, result_sub, references, depth + 1)?
-                || !self.result_agrees(output, &arrow.result, references, depth + 1)?
+                || if fresh_result.is_some() {
+                    !matches!(job.as_ref(), TypeTerm::Callable { mode, parameters, result }
+                        if Some(*mode) == arrow.mode && parameters.is_empty() && result == output)
+                        || job != job_sub
+                        || output != result_sub
+                        || output != &arrow.result
+                } else {
+                    !self.same_job(job, job_sub, references, depth + 1)?
+                        || !self.result_agrees(output, result_sub, references, depth + 1)?
+                        || !self.result_agrees(output, &arrow.result, references, depth + 1)?
+                }
             {
                 return Ok(false);
             }
@@ -654,7 +675,22 @@ impl<'a, 'g> Check<'a, 'g> {
                 return Ok(false);
             };
             let slot_path = ResultComponent::TupleElement(i);
-            let (expression, result, reference_result) = if let Some(shapes) = shapes {
+            let mut result_origin = None;
+            let (expression, result, reference_result) = if let Some(result_slot) = fresh_result {
+                let Some(plan) = self.fresh_pair_plan(
+                    origin,
+                    arrow,
+                    (&stored, slot_path),
+                    i == result_slot,
+                    [first_depth, second_depth][i],
+                )?
+                else {
+                    return Ok(false);
+                };
+                let plan = fresh_plans[i].insert(plan);
+                result_origin = plan.construction;
+                (Some(plan.expression), Vec::new(), None)
+            } else if let Some(shapes) = shapes {
                 let Some(plan) =
                     self.reference_plan(shapes[i], arrow, (&stored, slot_path), state, depth + 1)?
                 else {
@@ -698,9 +734,20 @@ impl<'a, 'g> Check<'a, 'g> {
                     send_job: send_job.clone(),
                     send_result: send_result.clone(),
                     reference_result,
+                    result_origin,
                 });
             } else {
                 children[i] = child;
+            }
+        }
+        // Neither isolated child checker is needed until both source jobs,
+        // their environments, and their selected premises pass preflight.
+        if let [Some(left), Some(right)] = fresh_plans {
+            for (output, plan) in outputs.iter_mut().zip([left, right]) {
+                let Some(proved) = self.prove_fresh_pair_plan(plan, state)? else {
+                    return Ok(false);
+                };
+                *output = proved;
             }
         }
         if let [Some(left), Some(right)] = reference_plans {

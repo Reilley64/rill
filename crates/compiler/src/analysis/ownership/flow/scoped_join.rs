@@ -14,6 +14,8 @@ pub(in crate::analysis::ownership) mod tests;
 struct ResultSlot<'g> {
     slot: usize,
     from: Place<'g>,
+    origin: ValueOrigin,
+    retirement: Cleanup<'g>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -24,8 +26,9 @@ struct ResultExport<'g> {
 
 #[derive(Clone, Copy)]
 struct Child<'g> {
-    backing: Place<'g>,
+    backing: Option<Place<'g>>,
     export: ResultExport<'g>,
+    value: bool,
     reference: bool,
     exclusive: bool,
     end_view: Cleanup<'g>,
@@ -129,10 +132,11 @@ impl<'g> Child<'g> {
         let [end_view @ Cleanup::EndStorage(ended)] = cleanup.as_slice() else {
             return Err(pending);
         };
-        if !at_root(view, frame.capture.root)
+        let capture = frame.capture.ok_or(pending.clone())?;
+        if !at_root(view, capture.root)
             || output.projection.is_some()
             || !at_root(*from, output.root)
-            || !at_root(*ended, frame.capture.root)
+            || !at_root(*ended, capture.root)
         {
             return Err(pending);
         }
@@ -143,10 +147,16 @@ impl<'g> Child<'g> {
         // also the entire cleanup on delivery at child entry.
         Ok(Self {
             backing: frame.backing,
+            value: false,
             reference: frame.incoming_list_backing.is_none(),
             exclusive: frame.exclusive,
             export: ResultExport {
-                stage: ResultSlot { slot, from: *from },
+                stage: ResultSlot {
+                    slot,
+                    from: *from,
+                    origin: ValueOrigin::Untracked,
+                    retirement: Cleanup::EndStorage(*from),
+                },
                 into: frame.result,
             },
             end_view: *end_view,
@@ -154,6 +164,164 @@ impl<'g> Child<'g> {
             returned: returned.site,
         })
     }
+
+    fn check_value(
+        frame: &ScopedJoinFrame<'g>,
+        slot: usize,
+        destination: StorageCleanup<'g>,
+        node: NodeId,
+        budget: &mut Budget,
+    ) -> ResultOf<Self> {
+        let pending = Stop::Pending(node);
+        let blocks = &frame.body.blocks;
+        let fresh = frame.result_origin;
+        budget.step(4 + usize::from(fresh.is_some()))?;
+        if blocks.len() != 4 + usize::from(fresh.is_some()) {
+            return Err(pending);
+        }
+        let successor = |block: &Block<'g>| match block.terminator {
+            Terminator::Goto(next) => blocks.get(next).ok_or(Stop::Pending(node)),
+            _ => Err(Stop::Pending(node)),
+        };
+        let entry = blocks.get(frame.body.entry).ok_or(pending.clone())?;
+        let initial = match (&entry.operation, frame.capture) {
+            (Operation::Initialize(place), None) => *place,
+            (
+                Operation::Copy {
+                    from,
+                    into: Some(place),
+                },
+                Some(capture),
+            ) if fresh.is_none()
+                && at_root(*from, capture.root)
+                && at_root(capture, frame.origin) =>
+            {
+                *place
+            }
+            _ => return Err(pending),
+        };
+        if same_root(initial.root, frame.origin) {
+            return Err(pending);
+        }
+        let (construct, export) = if let Some(occurrence) = fresh {
+            let construct = successor(entry)?;
+            if !same_root(construct.site, occurrence) {
+                return Err(pending);
+            }
+            (Some(construct), successor(construct)?)
+        } else {
+            (None, successor(entry)?)
+        };
+        let end = successor(export)?;
+        let returned = successor(end)?;
+        let (
+            Operation::StageScopedValue { from, retirement },
+            Operation::Cleanup(cleanup),
+            Operation::None,
+            Terminator::Return,
+        ) = (
+            &export.operation,
+            &end.operation,
+            &returned.operation,
+            returned.terminator,
+        )
+        else {
+            return Err(pending);
+        };
+        let [end_view @ Cleanup::EndStorage(environment)] = cleanup.as_slice() else {
+            return Err(pending);
+        };
+        if !at_root(*environment, frame.origin) || from.projection.is_some() {
+            return Err(pending);
+        }
+        let origin = match (construct.map(|b| &b.operation), retirement, destination) {
+            (None, Cleanup::EndStorage(operand), StorageCleanup::End)
+                if at_root(*from, initial.root) && at_root(*operand, from.root) =>
+            {
+                ValueOrigin::Untracked
+            }
+            (
+                Some(Operation::ConstructVariant {
+                    variant,
+                    payload: Some(payload),
+                    into,
+                }),
+                Cleanup::EndStorage(operand),
+                StorageCleanup::FreshBoolResult(storage),
+            ) if *variant != storage.err
+                && at_root(*payload, initial.root)
+                && at_root(*into, from.root)
+                && at_root(*operand, from.root) =>
+            {
+                ValueOrigin::FreshResultOk
+            }
+            (
+                Some(Operation::ConstructResultError {
+                    variant,
+                    wrapper,
+                    payload,
+                    into,
+                    ..
+                }),
+                Cleanup::DropFreshResultError {
+                    operand,
+                    origin,
+                    variant: drop_variant,
+                    wrapper: drop_wrapper,
+                    storage_source,
+                },
+                StorageCleanup::FreshBoolResult(storage),
+            ) if same_root(*origin, fresh.ok_or(pending.clone())?)
+                && *variant == storage.err
+                && *drop_variant == storage.err
+                && *wrapper == storage.wrapper
+                && *drop_wrapper == storage.wrapper
+                && *storage_source == storage.storage_source
+                && at_root(*payload, initial.root)
+                && at_root(*into, from.root)
+                && at_root(*operand, from.root) =>
+            {
+                ValueOrigin::FreshResultErr(origin.node)
+            }
+            _ => return Err(pending),
+        };
+        Ok(Self {
+            backing: None,
+            export: ResultExport {
+                stage: ResultSlot {
+                    slot,
+                    from: *from,
+                    origin,
+                    retirement: *retirement,
+                },
+                into: frame.result,
+            },
+            value: true,
+            reference: false,
+            exclusive: false,
+            end_view: *end_view,
+            entry: frame.body_site,
+            returned: returned.site,
+        })
+    }
+}
+
+pub(super) fn check_value_receiver(
+    slots: &[Local<'_>],
+    input: &[State],
+    receiver: Slot,
+    node: NodeId,
+    budget: &mut Budget,
+) -> ResultOf<()> {
+    budget.step(1)?;
+    let expected = Held {
+        callable_owner: Some(CallableOwner::ScopedValue(slots[receiver].node)),
+        ..Held::default()
+    };
+    if initialized(&input[receiver], node)? != &expected {
+        return Err(Stop::Pending(node));
+    }
+    Ok(())
 }
 
 fn check_receiver<'g>(
@@ -166,6 +334,19 @@ fn check_receiver<'g>(
 ) -> ResultOf<()> {
     budget.step(1)?;
     let environment = parent.slots[receiver].place(parent.module);
+    if frame.value {
+        if !at_root(frame.environment, environment.root)
+            || !same_root(frame.origin, environment.root)
+            || frame.backing.is_some()
+            || frame.incoming_list_backing.is_some()
+            || frame.exclusive
+        {
+            return Err(Stop::Pending(node));
+        }
+        return check_value_receiver(parent.slots, input, receiver, node, budget);
+    }
+    let backing = frame.backing.ok_or(Stop::Pending(node))?;
+    let capture = frame.capture.ok_or(Stop::Pending(node))?;
     let held = initialized(&input[receiver], node)?;
     let [
         Loan {
@@ -183,16 +364,13 @@ fn check_receiver<'g>(
         || !at_root(frame.environment, environment.root)
         || !same_root(frame.origin, environment.root)
         || held.callable_owner != Some(CallableOwner::ListArrow(environment.root.node))
-        || !at_root(
-            frame.backing,
-            parent.slots[*source].place(parent.module).root,
-        )
+        || !at_root(backing, parent.slots[*source].place(parent.module).root)
     {
         return Err(Stop::Pending(node));
     }
     match (frame.incoming_list_backing, kind) {
         (Some(_), LoanKind::Backing)
-            if same_root(frame.capture.root, site_at(parent.module, *acquisition))
+            if same_root(capture.root, site_at(parent.module, *acquisition))
                 && matches!(
                     parent.slots[*source].cleanup,
                     StorageCleanup::DisposeListI32(_)
@@ -225,7 +403,7 @@ fn parent_exit<'g>(
             .checked_mul(membership_work(parent))
             .ok_or(Stop::Limit)?,
     )?;
-    if !parent.check(&terminal, node, budget)? {
+    if !parent.check_initialized(&terminal, node, true, budget)? {
         return Err(Stop::Pending(node));
     }
     let exit = parent.exit(Cow::Owned(terminal), node, budget)?;
@@ -325,7 +503,7 @@ impl<'g> Staged<'g> {
         if receivers[0] == receivers[1]
             || same_root(frames[0].environment.root, frames[1].environment.root)
             || ((frames[0].exclusive || frames[1].exclusive)
-                && same_root(frames[0].backing.root, frames[1].backing.root))
+                && matches!((frames[0].backing, frames[1].backing), (Some(a), Some(b)) if same_root(a.root, b.root)))
             || !parent.retained.is_empty()
             || parent.slots[into].members != 2
             || parent.slots[into].custom_disposer.is_some()
@@ -342,8 +520,15 @@ impl<'g> Staged<'g> {
             let frame = &frames[i];
             initialized(&input[receivers[i]], node)?;
             let result = parent.slots[into + 1 + i].place(parent.module);
-            if parent.slots[into + 1 + i].members != 0
-                || !matches!(parent.slots[into + 1 + i].cleanup, StorageCleanup::End)
+            let destination = parent.slots[into + 1 + i];
+            if destination.members != 0
+                || !match frame.result_origin {
+                    None => destination.cleanup == StorageCleanup::End,
+                    Some(_) => {
+                        frame.value
+                            && matches!(destination.cleanup, StorageCleanup::FreshBoolResult(_))
+                    }
+                }
                 || !same_root(frame.result.root, result.root)
                 || result.tuple_element() != Some(i)
                 || frame.result.tuple_element() != Some(i)
@@ -351,11 +536,15 @@ impl<'g> Staged<'g> {
                 return Err(pending);
             }
         }
-        let [left, right] = frames;
-        let children = [
-            Child::check(left, 0, node, budget)?,
-            Child::check(right, 1, node, budget)?,
-        ];
+        let mut child = |i: usize| {
+            let frame = &frames[i];
+            if frame.value {
+                Child::check_value(frame, i, parent.slots[into + 1 + i].cleanup, node, budget)
+            } else {
+                Child::check(frame, i, node, budget)
+            }
+        };
+        let children = [child(0)?, child(1)?];
 
         // At an entry delivery, end the staged environments before
         // parent cleanup. After commit the children, not the parent, end
@@ -521,23 +710,25 @@ impl ChildState<'_> {
 }
 
 impl<'g> Waiting<'g> {
-    fn backings(&self) -> [Place<'g>; 2] {
+    fn backings(&self) -> [Option<Place<'g>>; 2] {
         self.proof.children.each_ref().map(|child| child.backing)
     }
 
     fn environment_backings(&self) -> [Option<Place<'g>>; 2] {
         std::array::from_fn(|i| {
-            self.children[i]
-                .environment()
-                .map(|_| self.proof.children[i].backing)
+            self.children[i].environment()?;
+            self.proof.children[i].backing
         })
     }
 
     fn exclusive_backings(&self) -> [Option<Place<'g>>; 2] {
         std::array::from_fn(|i| {
             let environment = self.children[i].environment()?;
-            matches!(environment.loans.as_ref(), [loan] if loan.exclusive)
-                .then_some(self.proof.children[i].backing)
+            if matches!(environment.loans.as_ref(), [loan] if loan.exclusive) {
+                self.proof.children[i].backing
+            } else {
+                None
+            }
         })
     }
 
@@ -546,7 +737,11 @@ impl<'g> Waiting<'g> {
             let stage = stage.as_ref()?;
             // The checked copy admits only the immutable caller source
             // carried by this slot's actual environment.
-            (!stage.loans.is_empty()).then_some(self.proof.children[stage.place.slot].backing)
+            if stage.loans.is_empty() {
+                None
+            } else {
+                self.proof.children[stage.place.slot].backing
+            }
         })
     }
 
@@ -605,11 +800,15 @@ impl<'g> Waiting<'g> {
                         },
                         ChildEvent::EndView,
                     ) => {
-                        if !matches!(environment.loans.as_ref(), [loan]
-                        if loan.exclusive == proof.exclusive && if proof.reference {
-                            loan.kind == LoanKind::IncomingSharedI32
+                        if !(if proof.value {
+                            environment.loans.is_empty()
                         } else {
-                            loan.kind == LoanKind::Backing && loan.site == view.root.node
+                            matches!(environment.loans.as_ref(), [loan]
+                            if loan.exclusive == proof.exclusive && if proof.reference {
+                                loan.kind == LoanKind::IncomingSharedI32
+                            } else {
+                                loan.kind == LoanKind::Backing && loan.site == view.root.node
+                            })
                         }) {
                             return Err(pending);
                         }
@@ -655,6 +854,7 @@ impl<'g> Waiting<'g> {
             let i = stage.place.slot;
             self.proof.parent_state[into + 1 + i] = State::Initialized(Held {
                 loans: stage.loans,
+                origin: stage.place.origin,
                 ..Held::default()
             });
             self.proof.children[i].export
@@ -665,10 +865,11 @@ impl<'g> Waiting<'g> {
                 budget.step(1)?;
                 let value =
                     initialized(&self.proof.parent_state[into + 1 + i], self.proof.site.node)?;
-                if !matches!(value.loans.as_ref(), [loan] if loan.site == child.backing.root.node) {
+                let backing = child.backing.ok_or(pending.clone())?;
+                if !matches!(value.loans.as_ref(), [loan] if loan.site == backing.root.node) {
                     return Err(pending);
                 }
-                retained_results[i] = Some(child.backing);
+                retained_results[i] = Some(backing);
             }
         }
         Ok(Successor::Publish {

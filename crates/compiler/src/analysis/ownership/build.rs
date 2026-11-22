@@ -19,13 +19,17 @@ use crate::analysis::typed::{
     OwnershipRule, Primitive, PrimitiveCoverage, PrimitiveOperation, PrimitiveRole, ResultRole,
 };
 use crate::analysis::{MemberType, Payload};
-use crate::loader::Origin;
+use crate::loader::{Intrinsic, Origin};
 use crate::parser::NodeKind;
 use std::sync::Arc;
 
+mod i32_arithmetic;
 mod iteration;
 mod list_arrows;
 mod list_source;
+mod option_calls;
+mod scoped_result;
+pub(super) use scoped_result::lower_fresh_scoped_children;
 mod reference_results;
 pub(super) use list_arrows::{ArrowBody, ListArrowPair, reached_exclusive_pair};
 pub(super) use reference_results::{check_scoped_reference_results, lower_reference_child};
@@ -99,9 +103,10 @@ enum OptionPayload<'t, 'g> {
 }
 
 #[derive(Clone, Copy)]
-enum OptionTakeSource {
+enum OptionTakeSource<'a, 'g> {
     Move(Slot),
     ReadReferenceCarrier(NodeId, Slot),
+    SharedCall(option_calls::SharedOptionCall<'a, 'g>),
     Constructor,
     Factory,
     PipeStep,
@@ -117,7 +122,95 @@ struct CheckedPropagation<'a, 'g> {
     source: NodeId,
     operand: &'a Type<'g>,
     wrapper: Option<&'g DeclarationId>,
-    option_take: Option<(&'a Type<'g>, OptionTakeSource)>,
+    option_take: Option<(&'a Type<'g>, OptionTakeSource<'a, 'g>)>,
+}
+
+// The caller has already proved the canonical parent and i32 error type.
+fn bool_result_error<'g>(ty: &TypeTerm<'g>) -> Option<&'g Intrinsic> {
+    let parent = match ty {
+        TypeTerm::Variant { parent, .. } => parent.as_ref(),
+        parent => parent,
+    };
+    let TypeTerm::Nominal { arguments, .. } = parent else {
+        return None;
+    };
+    let [success, error] = arguments.as_slice() else {
+        return None;
+    };
+    match error.as_ref() {
+        TypeTerm::Primitive(error) if scalar::scalar(success) == Some(Primitive::Bool) => {
+            Some(*error)
+        }
+        _ => None,
+    }
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct DisposerLookup<'a, 'g> {
+    pub(super) typed: &'a TypedReport<'g>,
+    pub(super) dispose: Option<&'g DeclarationId>,
+}
+
+impl<'g> DisposerLookup<'_, 'g> {
+    pub(super) fn prove_fresh_error_drop(
+        self,
+        storage: FreshResultStorage<'g>,
+        node: NodeId,
+        budget: &mut Budget,
+    ) -> ResultOf<()> {
+        // This residence was checked for the canonical Result<bool, i32>.
+        // Select on its actual Err<i32> wrapper, not the Result or its payload.
+        budget.reserve(3)?;
+        let wrapper = Arc::new(TypeTerm::Nominal {
+            declaration: storage.wrapper,
+            arguments: vec![Arc::new(TypeTerm::Primitive(storage.payload))],
+        });
+        if self.select(node, &wrapper, budget)?.is_some() {
+            return Err(Stop::Pending(node));
+        }
+        Ok(())
+    }
+
+    fn select(
+        self,
+        node: NodeId,
+        ty: &Type<'g>,
+        budget: &mut Budget,
+    ) -> ResultOf<Option<&'g DeclarationId>> {
+        let inventory = self.typed.inventory();
+        let dispose = self.dispose.ok_or(Stop::Pending(node))?;
+        let family = ordinary::source::admitted_family(inventory, dispose, budget)?
+            .map_err(|_| Stop::Pending(node))?;
+        budget.reserve(1)?;
+        let viable = ordinary::source::project(family, &[Some(ty.clone())], &[], budget)?;
+        match ordinary::source::rank(family, &viable, budget)? {
+            Some(HypotheticalOutcome::NoMatch) => Ok(None),
+            Some(HypotheticalOutcome::Winner(winner)) => {
+                // A selected but conditional implementation is not proof of a
+                // custom disposer. Keep substitution/evidence-dependent cases open.
+                budget.step(viable.len())?;
+                let selected = viable
+                    .iter()
+                    .find(|choice| &choice.body.source.declaration == winner && choice.covers)
+                    .ok_or(Stop::Pending(node))?;
+                budget.step(2)?;
+                if selected.body.header.binders.is_empty()
+                    && selected.substitution.is_empty()
+                    && [dispose, winner].into_iter().all(|id| {
+                        inventory
+                            .headers()
+                            .get(id)
+                            .is_some_and(|h| h.requirements.is_empty())
+                    })
+                {
+                    Ok(Some(winner))
+                } else {
+                    Err(Stop::Pending(node))
+                }
+            }
+            _ => Err(Stop::Pending(node)),
+        }
+    }
 }
 
 fn owns_text(ty: &TypeTerm<'_>) -> bool {
@@ -435,6 +528,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             incoming_list_arrow: None,
             cleanups: Vec::new(),
             body_scope: None,
+            forwarding_statement: None,
             list_delivery_loop: None,
             scalar_copy_read: None,
             copied_origins: BTreeSet::new(),
@@ -520,6 +614,9 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
     pub(super) fn parameter(&mut self, parameter: &'a MemberType<'g>) -> ResultOf<Slot> {
         let node = parameter.declaration.node;
         let ty = &parameter.ty;
+        if let Some(iteration) = parameter.option_iteration_source {
+            return self.option_list_parameter(parameter, iteration);
+        }
         if self.is_list_text(ty) {
             if !parameter.text_iteration_source {
                 return Err(Stop::Pending(node));
@@ -823,9 +920,21 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 self.prove_no_variant_disposer(node, ty, [role.ok, role.err])?;
                 if variant == Some(&role.ok.id) {
                     (false, StorageCleanup::End)
+                } else if let Some(representation) = role.representation
+                    && let Some(payload) = bool_result_error(ty)
+                {
+                    // Only checked construction in flow permits local retirement.
+                    let _: fn(rill_error_storage::OwnedErr<i32>) = std::mem::drop;
+                    (
+                        true,
+                        StorageCleanup::FreshBoolResult(FreshResultStorage {
+                            err: &role.err.id,
+                            wrapper: &role.wrapper.id,
+                            payload,
+                            storage_source: representation.storage_source,
+                        }),
+                    )
                 } else {
-                    // Storage may contain a sealed Err, which this slice can
-                    // transfer but cannot dispose.
                     (true, StorageCleanup::Unlowered)
                 }
             }
@@ -1387,39 +1496,11 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         node: NodeId,
         ty: &Type<'g>,
     ) -> ResultOf<Option<&'g DeclarationId>> {
-        let inventory = self.typed.inventory();
-        let dispose = self.dispose.ok_or(Stop::Pending(node))?;
-        let family = ordinary::source::admitted_family(inventory, dispose, self.budget)?
-            .map_err(|_| Stop::Pending(node))?;
-        self.budget.reserve(1)?;
-        let viable = ordinary::source::project(family, &[Some(ty.clone())], &[], self.budget)?;
-        match ordinary::source::rank(family, &viable, self.budget)? {
-            Some(HypotheticalOutcome::NoMatch) => Ok(None),
-            Some(HypotheticalOutcome::Winner(winner)) => {
-                // A selected but conditional implementation is not proof of a
-                // custom disposer. Keep substitution/evidence-dependent cases open.
-                self.budget.step(viable.len())?;
-                let selected = viable
-                    .iter()
-                    .find(|choice| &choice.body.source.declaration == winner && choice.covers)
-                    .ok_or(Stop::Pending(node))?;
-                self.budget.step(2)?;
-                if selected.body.header.binders.is_empty()
-                    && selected.substitution.is_empty()
-                    && [dispose, winner].into_iter().all(|id| {
-                        inventory
-                            .headers()
-                            .get(id)
-                            .is_some_and(|h| h.requirements.is_empty())
-                    })
-                {
-                    Ok(Some(winner))
-                } else {
-                    Err(Stop::Pending(node))
-                }
-            }
-            _ => Err(Stop::Pending(node)),
+        DisposerLookup {
+            typed: self.typed,
+            dispose: self.dispose,
         }
+        .select(node, ty, self.budget)
     }
 
     fn value(&self, node: NodeId) -> ResultOf<&'a ExpressionFacts<'g>> {
@@ -2087,9 +2168,25 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
     ) -> ResultOf<Pc> {
         let mut locals = Vec::new();
         let mut prefix = children.len();
+        let mut straight = node == self.body;
+        let mut forwarding = None;
         for (index, &child) in children.iter().enumerate() {
             self.budget.step(1)?;
             let statement = &self.module.syntax.nodes[child];
+            if straight {
+                match (statement.kind, statement.children.as_slice()) {
+                    (NodeKind::ExpressionStatement, [value])
+                        if self.module.syntax.nodes[*value].kind == NodeKind::Call =>
+                    {
+                        straight = forwarding.replace(*value).is_none();
+                    }
+                    (
+                        NodeKind::ExpressionStatement | NodeKind::Binding { .. } | NodeKind::Return,
+                        _,
+                    ) => (),
+                    _ => straight = false,
+                }
+            }
             let control = if matches!(statement.kind, NodeKind::Binding { .. }) {
                 let initializer = *statement.children.last().unwrap();
                 self.declare_binding(child, initializer, &mut locals, depth + 2)?;
@@ -2129,6 +2226,9 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         };
         let mut tail = self.cleanup_scope(exit_site, &locals, next)?;
         if node == self.body {
+            if straight {
+                self.forwarding_statement = forwarding.map(|call| (call, prefix));
+            }
             if !locals.is_empty()
                 && let Action::EndScope(index) = self.code[tail].action
             {
@@ -2460,6 +2560,8 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                     let output = if let Some(from) = tuple_source {
                         self.clone_region(from, value)?
                     } else if let Some(slot) = self.nested_transfer_slot(value, value, result)? {
+                        slot
+                    } else if let Some(slot) = self.scoped_result_destination(value, value, &ty)? {
                         slot
                     } else {
                         self.slot(value, &ty)?
@@ -3149,6 +3251,10 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                     self.budget.reserve(1)?;
                     self.nested_tuple_bindings.insert(declaration, (slot, from));
                     slot
+                } else if let Some(slot) = self.scoped_result_destination(initializer, site, ty)? {
+                    self.budget.reserve(1)?;
+                    self.locals.insert(declaration, slot);
+                    slot
                 } else {
                     self.local(declaration, site, ty)?
                 };
@@ -3607,14 +3713,26 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             }
             let take = match payload {
                 OptionPayload::Bool => None,
-                OptionPayload::Reference { ty, .. } if syntax.kind == NodeKind::Propagate => {
-                    // These loans are checked only through a named whole carrier.
-                    let (name, _) = self.ungroup_expression_at(source, depth)?;
-                    let (_, path) = self.named_owned_place(name)?.ok_or(Stop::Pending(node))?;
-                    let from = self.resolve_place(name, path)?;
-                    // Stage under the source place's own classification: an
-                    // exclusive Some or parent moves, but known None copies.
-                    Some((ty, OptionTakeSource::ReadReferenceCarrier(name, from)))
+                OptionPayload::Reference { ty, exclusive }
+                    if syntax.kind == NodeKind::Propagate =>
+                {
+                    let (name, source_depth) = self.ungroup_expression_at(source, depth)?;
+                    let source = if !exclusive
+                        && self.module.syntax.nodes[name].kind == NodeKind::Call
+                    {
+                        OptionTakeSource::SharedCall(self.check_shared_option_call(
+                            node,
+                            name,
+                            operand,
+                            source_depth,
+                        )?)
+                    } else {
+                        let (_, path) = self.named_owned_place(name)?.ok_or(Stop::Pending(node))?;
+                        let from = self.resolve_place(name, path)?;
+                        // An exclusive Some or parent moves; a known None copies.
+                        OptionTakeSource::ReadReferenceCarrier(name, from)
+                    };
+                    Some((ty, source))
                 }
                 OptionPayload::Reference { .. } => return Err(Stop::Pending(node)),
                 OptionPayload::Text(ty) => {
@@ -3654,7 +3772,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         source: NodeId,
         operand: &Type<'g>,
         facts: &'a ExpressionFacts<'g>,
-    ) -> ResultOf<OptionTakeSource> {
+    ) -> ResultOf<OptionTakeSource<'a, 'g>> {
         self.budget.step(1)?;
         if let Some(path) = facts
             .path
@@ -3840,6 +3958,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                         variant: exit.failure,
                         payload: None,
                         into: output,
+                        fresh_result_ok: false,
                     },
                     Edges::Next(export),
                 )?;
@@ -3880,6 +3999,8 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 depth,
                 Some(ExpressionProof::CallCarrier(operand)),
             )
+        } else if let Some((_, OptionTakeSource::SharedCall(call))) = option_take {
+            self.stage_shared_option_call(call, scratch, split)
         } else if let Some((_, OptionTakeSource::ReadReferenceCarrier(name, from))) = option_take {
             self.emit(
                 name,
@@ -4521,6 +4642,9 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 variant: declaration,
                 payload: payload.map(|(_, slot)| slot),
                 into,
+                fresh_result_ok: self.scalar_result_role(&data.ty).is_some_and(|(role, _)| {
+                    *declaration == &role.ok.id && bool_result_error(&data.ty).is_some()
+                }),
             },
             Edges::Next(next),
         )?;
@@ -4611,6 +4735,14 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         depth: usize,
     ) -> ResultOf<Pc> {
         let (origin_node, constructor) = self.checked_scalar_error(node, facts, data)?;
+        let fresh_storage = match self.slots[into].cleanup {
+            StorageCleanup::FreshBoolResult(storage)
+                if bool_result_error(&data.result).is_some() =>
+            {
+                Some(storage.storage_source)
+            }
+            _ => None,
+        };
         let payload = self.slot(data.value, &data.payload)?;
         let construct = self.emit(
             origin_node,
@@ -4620,6 +4752,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 wrapper: data.wrapper,
                 payload,
                 into,
+                fresh_storage,
             },
             Edges::Next(next),
         )?;
@@ -4633,8 +4766,15 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         next: Pc,
         depth: usize,
     ) -> ResultOf<Pc> {
-        let ty = self.value(value)?.ty.clone();
+        let facts = self.value(value)?;
+        let ty = facts.ty.clone();
         let slot = self.slot(value, &ty)?;
+        // This slice retires a moved residence, not arbitrary discarded Result expressions.
+        if matches!(self.slots[slot].cleanup, StorageCleanup::FreshBoolResult(_))
+            && facts.path.is_none()
+        {
+            self.slots[slot].cleanup = StorageCleanup::Unlowered;
+        }
         let end = if self.slots[slot].needs_boundary_cleanup() {
             self.cleanup(statement, &[slot], next)?
         } else {
@@ -5011,6 +5151,9 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 );
             }
             NodeKind::Literal => into.map_or(Action::None, Action::Init),
+            NodeKind::Binary("*" | "+") if self.admits_checked_i32_arithmetic(node, facts) => {
+                return self.checked_i32_arithmetic(node, facts, into, next, depth);
+            }
             NodeKind::Index => return self.read_list_i32(node, facts, into, next, depth),
             NodeKind::ValueReference => Action::Read {
                 // Only exact named transfers and owned pattern staging supply this slot.
@@ -6230,6 +6373,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             let index = self.calls.len();
             self.calls.push(Call {
                 callee: call.callee,
+                direct_bool_parameter: false,
                 args: std::mem::take(&mut args),
                 into,
                 result: CallResult::Plain,
@@ -6462,6 +6606,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         let index = self.calls.len();
         self.calls.push(Call {
             callee: implementation,
+            direct_bool_parameter: false,
             args: vec![stage],
             into,
             result: CallResult::ScalarCopy,
@@ -6648,6 +6793,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         let index = self.calls.len();
         self.calls.push(Call {
             callee: &header.declaration.id,
+            direct_bool_parameter: false,
             args: vec![stage],
             into: Some(into),
             result: CallResult::TransfersCallable(header),
@@ -6752,12 +6898,17 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         }
         if checked_carrier.is_none()
             && let Some(join) = call.scoped_join.as_deref()
-            && join
+        {
+            if join.slots.iter().any(|slot| slot.result_origin.is_some()) {
+                return self.stage_fresh_scoped_result(node, join, into, next, depth);
+            }
+            if join
                 .slots
                 .iter()
                 .all(|slot| slot.reference_result.is_some())
-        {
-            return self.stage_scoped_reference_results(node, join, into, next, depth);
+            {
+                return self.stage_scoped_reference_results(node, join, into, next, depth);
+            }
         }
         if checked_carrier.is_none()
             && list_arrows::list_arrow_result_pair(&facts.ty, call.scoped_join.is_some())
@@ -6845,6 +6996,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         }
         self.budget.reserve(call.arguments.len() + 1)?;
         let mut args = Vec::with_capacity(call.arguments.len());
+        let mut direct_bool_parameter = false;
         let mut destination = None;
         let mut two_hop = None;
         let mut pipe_formal = None;
@@ -6853,7 +7005,33 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             if Some(arg) == call.pipe_input {
                 pipe_formal = Some(position);
             }
-            let ty = self.value(arg)?.ty.clone();
+            let value = self.value(arg)?;
+            let ty = value.ty.clone();
+            direct_bool_parameter = self
+                .forwarding_statement
+                .is_some_and(|(call, _)| call == node)
+                && call.arguments.len() == 1
+                && !piped
+                && scalar::scalar(&ty) == Some(Primitive::Bool)
+                && value.refinement.is_none()
+                && value.access == Access::Owned
+                && value.place == TypedPlace::ReadOnly
+                && value.path.as_ref().is_some_and(|p| {
+                    p.root.kind == DeclarationKind::Parameter && p.projections.is_empty()
+                });
+            if direct_bool_parameter {
+                // The ordinary slot walk ended at a terminal statement. A dead
+                // binding has no slot and does not make an earlier call guarded.
+                let (_, prefix) = self.forwarding_statement.unwrap();
+                let suffix = &self.module.syntax.nodes[self.body].children[prefix..];
+                self.budget.step(suffix.len())?;
+                direct_bool_parameter = suffix.iter().all(|&s| {
+                    matches!(
+                        self.module.syntax.nodes[s].kind,
+                        NodeKind::ExpressionStatement | NodeKind::Binding { .. } | NodeKind::Return
+                    )
+                });
+            }
             if self.reference_option(&ty) {
                 return Err(Stop::Pending(arg));
             }
@@ -6910,6 +7088,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         };
         self.calls.push(Call {
             callee: call.callee,
+            direct_bool_parameter,
             args,
             into,
             result: if borrows_record {

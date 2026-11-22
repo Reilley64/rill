@@ -4,6 +4,7 @@ use std::borrow::Cow;
 use std::collections::{BTreeSet, VecDeque};
 use std::sync::Arc;
 
+pub(super) mod forwarding;
 pub(super) mod scoped_join;
 
 // Retain distinct continuing states at a join. Every feasible incoming state
@@ -26,15 +27,36 @@ struct Held {
     mutable_cell: Option<MutableCell>,
     /// The original parameter of an already-running outer disposer.
     disposal_started_at: Option<NodeId>,
-    stored_at: Option<NodeId>,
+    /// Provenance accompanies the value, not the slot. Retained descriptors
+    /// and fresh Results are disjoint admitted storage shapes.
+    origin: ValueOrigin,
     /// Identity of the stored descriptor, independent of the access loans.
     exact_target: Option<ExactTarget>,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum ValueOrigin {
+    #[default]
+    Untracked,
+    RetainedStore(NodeId),
+    FreshResultOk,
+    FreshResultErr(NodeId),
+}
+
+impl ValueOrigin {
+    fn stored_at(self) -> Option<NodeId> {
+        match self {
+            Self::RetainedStore(node) => Some(node),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum CallableOwner {
     LocalCapture(NodeId),
     ListArrow(NodeId),
+    ScopedValue(NodeId),
     LocalExclusive(Option<CallableLayout>),
     Pair(CallableLayout),
     Formal(CallableLayout),
@@ -46,6 +68,7 @@ impl CallableOwner {
         match self {
             Self::LocalCapture(_)
             | Self::ListArrow(_)
+            | Self::ScopedValue(_)
             | Self::LocalExclusive(_)
             | Self::Pair(_) => None,
             Self::Formal(layout) | Self::Returned(layout) => Some(layout),
@@ -190,12 +213,15 @@ fn liveness(
             } => use_one(Some(descriptor), Some(into)),
             Action::ReadListI32 { view, into, .. } => use_one(Some(view), into),
             Action::EqualI32Literal { from, into, .. } => use_one(Some(from), Some(into)),
+            Action::CheckedI32Multiply { left, into, .. } => use_one(Some(left), Some(into)),
+            Action::CheckedI32Add { left, right, into } => ([Some(left), Some(right)], Some(into)),
             Action::Reborrow { parent, into, .. } => {
                 use_one(Some(slots[parent].carried_loan_root(parent)), Some(into))
             }
             Action::CheckCallableReturn(slot) => use_one(Some(slot), None),
             Action::Dispose { operand: slot, .. }
             | Action::Export(slot)
+            | Action::StageScopedValue(slot)
             | Action::EndEmptyOption(slot)
             | Action::DropResultFailure { operand: slot, .. } => use_one(Some(slot), Some(slot)),
             Action::Displace { target, incoming } | Action::Install { target, incoming } => {
@@ -208,6 +234,7 @@ fn liveness(
                 ..
             } => ([Some(capture), second], Some(into)),
             Action::FormListArrow { capture, into, .. } => use_one(Some(capture), Some(into)),
+            Action::FormScopedValueArrow { capture, into } => use_one(capture, Some(into)),
             Action::CallListArrows {
                 receivers, into, ..
             }
@@ -593,10 +620,51 @@ fn forbid_custom_partial(
     Ok(())
 }
 
-fn cleanup_of<'g>(module: &'g Module, local: Local<'g>, node: NodeId) -> ResultOf<Cleanup<'g>> {
-    let place = local.place(module);
+#[derive(Clone, Copy)]
+struct CleanupContext<'a, 'g> {
+    module: &'g Module,
+    disposer: Option<build::DisposerLookup<'a, 'g>>,
+}
+
+impl<'g> From<&'g Module> for CleanupContext<'_, 'g> {
+    // A cleanup path without the typed lookup cannot certify a fresh error drop.
+    fn from(module: &'g Module) -> Self {
+        Self {
+            module,
+            disposer: None,
+        }
+    }
+}
+
+fn cleanup_of<'g>(
+    context: CleanupContext<'_, 'g>,
+    local: Local<'g>,
+    held: &Held,
+    node: NodeId,
+    budget: &mut Budget,
+) -> ResultOf<Cleanup<'g>> {
+    let place = local.place(context.module);
     match local.cleanup {
         StorageCleanup::Unlowered => Err(Stop::Pending(node)),
+        StorageCleanup::FreshBoolResult(storage) => match held.origin {
+            ValueOrigin::FreshResultOk => Ok(Cleanup::EndStorage(place)),
+            ValueOrigin::FreshResultErr(origin) => {
+                // Provenance alone permits transfer, not destruction. Both
+                // ordinary and delivery exits must select on the actual wrapper.
+                context
+                    .disposer
+                    .ok_or(Stop::Pending(node))?
+                    .prove_fresh_error_drop(storage, node, budget)?;
+                Ok(Cleanup::DropFreshResultError {
+                    operand: place,
+                    origin: site_at(context.module, origin),
+                    variant: storage.err,
+                    wrapper: storage.wrapper,
+                    storage_source: storage.storage_source,
+                })
+            }
+            _ => Err(Stop::Pending(node)),
+        },
         StorageCleanup::Drop => Ok(Cleanup::Drop(place)),
         StorageCleanup::DropOptionPayload(some) => Ok(Cleanup::DropOptionPayload {
             operand: place,
@@ -623,17 +691,38 @@ fn cleanup_of<'g>(module: &'g Module, local: Local<'g>, node: NodeId) -> ResultO
                 element: disposal.element,
             })
         }
+        StorageCleanup::DropYieldedOptionText(element) => Ok(Cleanup::DropYieldedOptionText {
+            operand: place,
+            element,
+        }),
+        StorageCleanup::DisposeListOptionText { disposal, .. } => {
+            Ok(Cleanup::DisposeListOptionText {
+                operand: place,
+                implementation: disposal.list.implementation,
+                bridge: disposal.list.bridge,
+                element: disposal.element,
+            })
+        }
+        StorageCleanup::DisposeOwnedListIterOptionText(disposal) => {
+            Ok(Cleanup::DisposeOwnedListIterOptionText {
+                cursor: place,
+                implementation: disposal.list.implementation,
+                bridge: disposal.list.bridge,
+                element: disposal.element,
+            })
+        }
         StorageCleanup::End => Ok(Cleanup::EndStorage(place)),
     }
 }
 
 fn cleanup_operation<'g>(
-    module: &'g Module,
+    context: CleanupContext<'_, 'g>,
     local: Local<'g>,
     state: State,
     node: NodeId,
     budget: &mut Budget,
 ) -> ResultOf<Operation<'g>> {
+    let module = context.module;
     let State::Initialized(held) = state else {
         return Ok(Operation::None);
     };
@@ -669,19 +758,24 @@ fn cleanup_operation<'g>(
         }
         [None, None] => {}
     }
-    Ok(match cleanup_of(module, local, node)? {
+    Ok(match cleanup_of(context, local, &held, node, budget)? {
         Cleanup::Drop(place) => Operation::Drop(place),
         Cleanup::DropCapture { closure, field } => Operation::DropCapture { closure, field },
-        cleanup @ (Cleanup::DropOptionPayload { .. }
+        cleanup @ (Cleanup::DropFreshResultError { .. }
+        | Cleanup::DropOptionPayload { .. }
         | Cleanup::DisposeListI32 { .. }
         | Cleanup::DisposeOwnedListIterI32 { .. }
         | Cleanup::DisposeListText { .. }
-        | Cleanup::DisposeOwnedListIterText { .. }) => {
+        | Cleanup::DisposeOwnedListIterText { .. }
+        | Cleanup::DisposeListOptionText { .. }
+        | Cleanup::DisposeOwnedListIterOptionText { .. }
+        | Cleanup::DropYieldedOptionText { .. }) => {
             budget.reserve(1)?;
             Operation::Cleanup(vec![cleanup])
         }
         cleanup @ Cleanup::EndStorage(_)
-            if matches!(held.callable_owner, Some(CallableOwner::LocalExclusive(_))) =>
+            if matches!(held.callable_owner, Some(CallableOwner::LocalExclusive(_)))
+                || matches!(local.cleanup, StorageCleanup::FreshBoolResult(_)) =>
         {
             budget.reserve(1)?;
             Operation::Cleanup(vec![cleanup])
@@ -856,8 +950,8 @@ enum Boundary {
     Replacement,
 }
 
-fn cleanup_boundary<'g>(
-    module: &'g Module,
+fn cleanup_boundary<'a, 'g: 'a>(
+    context: impl Into<CleanupContext<'a, 'g>>,
     slots: &[Local<'g>],
     state: &mut [State],
     scope: &[Slot],
@@ -865,6 +959,8 @@ fn cleanup_boundary<'g>(
     (node, boundary): (NodeId, Boundary),
     budget: &mut Budget,
 ) -> ResultOf<Vec<Cleanup<'g>>> {
+    let context = context.into();
+    let module = context.module;
     budget.reserve(3 * scope.len())?;
     let mut indegrees = vec![0usize; scope.len()];
     let mut remaining = 0usize;
@@ -993,7 +1089,7 @@ fn cleanup_boundary<'g>(
                 let drops = held.capture_drops.into_iter().flatten();
                 let count = drops.clone().count();
                 if count == 0 {
-                    actions.push(cleanup_of(module, slots[member], node)?);
+                    actions.push(cleanup_of(context, slots[member], &held, node, budget)?);
                 } else {
                     budget.reserve(count - 1)?;
                     let closure = slots[member].place(module).root;
@@ -1069,7 +1165,7 @@ fn check_retained(
         let State::Initialized(value) = &state[contents.slot()] else {
             continue;
         };
-        let site = value.stored_at.unwrap_or(node);
+        let site = value.origin.stored_at().unwrap_or(node);
         for loan in value.loans.iter() {
             budget.step(1)?;
             if loan.kind.borrows_local_storage() {
@@ -1106,7 +1202,15 @@ fn flat_action(action: Action<'_>, slots: &[Local<'_>]) -> bool {
             operand,
             target: WrittenDisposal::Ordinary,
         } => matches!(slots[operand].cleanup, StorageCleanup::DisposeListI32(_)),
-        Action::ReadListI32 { .. }
+        Action::ConstructVariant {
+            fresh_result_ok: true,
+            ..
+        }
+        | Action::ConstructResultError {
+            fresh_storage: Some(_),
+            ..
+        }
+        | Action::ReadListI32 { .. }
         | Action::EqualI32Literal { .. }
         | Action::None
         | Action::BudgetBackedge
@@ -1201,6 +1305,7 @@ impl KnownStates {
 // not run a speculative walk or charge ordinary-only callers for admission.
 pub(super) struct CancellationTrace<'a, 'g> {
     module: &'g Module,
+    disposer: build::DisposerLookup<'a, 'g>,
     body: NodeId,
     slots: Vec<Local<'g>>,
     locals: Vec<Slot>,
@@ -1228,11 +1333,17 @@ pub(super) struct EnabledRetainingCall<'a, 'g> {
     entry: &'a [State],
     node: NodeId,
     stages: [Place<'g>; 3],
+    gate_parameter: Slot,
     destination: Slot,
     suspended: Vec<State>,
 }
 
 impl<'g> EnabledRetainingCall<'_, 'g> {
+    pub(super) fn forwarded_parameter(&self) -> Option<Place<'g>> {
+        (self.frame.params == [self.gate_parameter])
+            .then(|| self.frame.slots[self.gate_parameter].place(self.frame.module))
+    }
+
     pub(super) fn finish(
         self,
         trace: CancellationTrace<'_, 'g>,
@@ -1318,6 +1429,7 @@ impl<'g> CancellationTrace<'_, 'g> {
     fn frame(&self) -> CancellationFrame<'_, 'g> {
         CancellationFrame {
             module: self.module,
+            disposer: Some(self.disposer),
             slots: &self.slots,
             locals: &self.locals,
             params: &self.params,
@@ -1411,13 +1523,12 @@ impl<'g> CancellationTrace<'_, 'g> {
                 return Ok(None);
             }
         }
-        if facts.pipe_input.is_some()
-            || self
-                .branch_parameter(self.slots[gate].node, budget)?
-                .is_none()
-        {
+        if facts.pipe_input.is_some() {
             return Ok(None);
         }
+        let Some(gate_parameter) = self.branch_parameter(self.slots[gate].node, budget)? else {
+            return Ok(None);
+        };
         let state = self.known.input(block);
         let old = initialized(&state[target], node)?;
         let source = initialized(&state[input], node)?;
@@ -1466,6 +1577,7 @@ impl<'g> CancellationTrace<'_, 'g> {
             block,
             node,
             stages: [access, input, gate].map(|slot| self.slots[slot].place(self.module)),
+            gate_parameter,
             destination: target,
             suspended,
         }))
@@ -1676,6 +1788,7 @@ impl<'g> CancellationTrace<'_, 'g> {
 
 struct CancellationFrame<'a, 'g> {
     module: &'g Module,
+    disposer: Option<build::DisposerLookup<'a, 'g>>,
     slots: &'a [Local<'g>],
     locals: &'a [Slot],
     params: &'a [Slot],
@@ -1702,20 +1815,40 @@ impl<'g> CancellationFrame<'_, 'g> {
     }
 
     fn check(&self, state: &[State], node: NodeId, budget: &mut Budget) -> ResultOf<bool> {
+        self.check_initialized(state, node, false, budget)
+    }
+
+    fn check_initialized(
+        &self,
+        state: &[State],
+        node: NodeId,
+        scoped_join: bool,
+        budget: &mut Budget,
+    ) -> ResultOf<bool> {
         let contents = self
             .retained
             .values()
             .next()
             .map(|contents| contents.slot());
-        for (slot, held) in state.iter().enumerate() {
+        for (slot, state) in state.iter().enumerate() {
             budget.step(1)?;
-            if matches!(held, State::Initialized(_))
-                && Some(slot) != contents
-                && self.locals.binary_search(&slot).is_err()
-                && self.params.binary_search(&slot).is_err()
-            {
-                // Nested scopes and in-flight staging are not flat boundaries.
-                return Ok(false);
+            if let State::Initialized(held) = state {
+                if matches!(self.slots[slot].cleanup, StorageCleanup::FreshBoolResult(_)) {
+                    match held.origin {
+                        ValueOrigin::FreshResultOk => {}
+                        ValueOrigin::FreshResultErr(_) if !scoped_join => {}
+                        // A live parent error is outside the scoped parent
+                        // exit, separately from checked child-stage retirement.
+                        _ => return Ok(false),
+                    }
+                }
+                if Some(slot) != contents
+                    && self.locals.binary_search(&slot).is_err()
+                    && self.params.binary_search(&slot).is_err()
+                {
+                    // Nested scopes and in-flight staging are not flat boundaries.
+                    return Ok(false);
+                }
             }
         }
         // Check outward storage before ending even the first local owner.
@@ -1744,7 +1877,10 @@ impl<'g> CancellationFrame<'_, 'g> {
         let retained = outward.map(|(&parameter, contents)| RetainedAtDelivery {
             parameter: self.slots[parameter].place(self.module),
             last_store: match &state[contents.slot()] {
-                State::Initialized(held) => held.stored_at.map(|store| site_at(self.module, store)),
+                State::Initialized(held) => held
+                    .origin
+                    .stored_at()
+                    .map(|store| site_at(self.module, store)),
                 _ => None,
             },
         });
@@ -1767,8 +1903,12 @@ impl<'g> CancellationFrame<'_, 'g> {
                 remainder: None,
             },
         );
+        let context = CleanupContext {
+            module: self.module,
+            disposer: self.disposer,
+        };
         let mut cleanup = cleanup_boundary(
-            self.module,
+            context,
             self.slots,
             &mut abandoned,
             self.locals,
@@ -1781,7 +1921,7 @@ impl<'g> CancellationFrame<'_, 'g> {
             live.remove(parameter);
         }
         let parameters = cleanup_boundary(
-            self.module,
+            context,
             self.slots,
             &mut abandoned,
             self.params,
@@ -2018,6 +2158,7 @@ impl<'g> ReplacementCandidate<'g> {
         let known = &self.known;
         let frame = CancellationFrame {
             module: self.module,
+            disposer: None,
             slots: &self.slots,
             locals: &self.locals,
             params: &self.params,
@@ -2117,6 +2258,7 @@ pub(super) fn run<'a, 'g>(
         );
     let mut flat = true;
     let mut list_backing = false;
+    let mut fresh_result = false;
     let mut loop_delivery = false;
     let mut branching = false;
     let mut calls_reached = 0;
@@ -2150,6 +2292,11 @@ pub(super) fn run<'a, 'g>(
         budget,
         ..
     } = build;
+    let disposer = build::DisposerLookup { typed, dispose };
+    let cleanup_context = CleanupContext {
+        module,
+        disposer: Some(disposer),
+    };
     let live = liveness(&slots, &code, &calls, &cleanups, &retained, budget)?;
     let empty = Held::default();
     let mut known = KnownStates::default();
@@ -2166,19 +2313,25 @@ pub(super) fn run<'a, 'g>(
                     StorageCleanup::DisposeOwnedListIterI32(_)
                         | StorageCleanup::DisposeListText(_)
                         | StorageCleanup::DisposeOwnedListIterText(_)
+                        | StorageCleanup::DisposeListOptionText { .. }
+                        | StorageCleanup::DisposeOwnedListIterOptionText(_)
                 )
             {
                 candidate = false;
                 replacement_candidate = false;
             }
             list_backing |= matches!(slot.cleanup, StorageCleanup::DisposeListI32(_));
+            fresh_result |= matches!(slot.cleanup, StorageCleanup::FreshBoolResult(_));
             candidate = candidate
                 && slot.projection.is_none()
                 && slot.members == 0
                 && slot.custom_disposer.is_none()
                 && matches!(
                     slot.cleanup,
-                    StorageCleanup::End | StorageCleanup::Drop | StorageCleanup::DisposeListI32(_)
+                    StorageCleanup::End
+                        | StorageCleanup::Drop
+                        | StorageCleanup::DisposeListI32(_)
+                        | StorageCleanup::FreshBoolResult(_)
                 );
             State::Vacant
         })
@@ -2189,6 +2342,8 @@ pub(super) fn run<'a, 'g>(
     for &slot in &params {
         let region = slots[slot].storage(slot);
         budget.step(region.len())?;
+        // Parameters do not supply a checked fresh residence at frame entry.
+        candidate &= !matches!(slots[slot].cleanup, StorageCleanup::FreshBoolResult(_));
         state[region].fill(State::Initialized(empty.clone()));
         if let Some(option @ (ReferenceOption::Shared | ReferenceOption::Exclusive)) =
             slots[slot].reference_option
@@ -2345,6 +2500,16 @@ pub(super) fn run<'a, 'g>(
         // Tag reached sites during the ordinary visit without a second walk.
         if candidate {
             flat &= flat_action(action, &slots);
+            fresh_result |= matches!(
+                action,
+                Action::ConstructVariant {
+                    fresh_result_ok: true,
+                    ..
+                } | Action::ConstructResultError {
+                    fresh_storage: Some(_),
+                    ..
+                }
+            );
             loop_delivery |= matches!(action, Action::BudgetBackedge);
             branching |= matches!(edges, Edges::Branch { .. });
             if let Action::Call(index) = action {
@@ -2362,6 +2527,7 @@ pub(super) fn run<'a, 'g>(
             }
         }
         let mut join_resume = None;
+        let mut fresh_result_storage = None;
         let operation = (|| -> ResultOf<_> {
             if callable_frame.is_some() {
                 // A bound transfer has no proof for other calls or protected
@@ -2428,7 +2594,7 @@ pub(super) fn run<'a, 'g>(
                     source,
                     cursor,
                     backing,
-                    text_source_backing,
+                    source_backing,
                     provider,
                 } => {
                     require_initialized(&slots, &state, source, node, budget)?;
@@ -2444,7 +2610,18 @@ pub(super) fn run<'a, 'g>(
                     state[source] = State::Moved(node);
                     retire_loans(&slots, &mut state, &[source], budget)?;
                     state[cursor] = State::Initialized(empty.clone());
-                    if let Some(source_backing) = text_source_backing {
+                    if matches!(
+                        slots[cursor].cleanup,
+                        StorageCleanup::DisposeOwnedListIterOptionText(_)
+                    ) {
+                        Operation::OpenOwnedListOptionText {
+                            source: local(source),
+                            cursor: local(cursor),
+                            source_backing: source_backing.ok_or(Stop::Pending(node))?,
+                            cursor_backing: backing,
+                            provider,
+                        }
+                    } else if let Some(source_backing) = source_backing {
                         Operation::OpenOwnedListText {
                             source: local(source),
                             cursor: local(cursor),
@@ -2473,6 +2650,17 @@ pub(super) fn run<'a, 'g>(
                         return Err(Stop::Pending(node));
                     }
                     if matches!(
+                        slots[cursor].cleanup,
+                        StorageCleanup::DisposeOwnedListIterOptionText(_)
+                    ) {
+                        Operation::AdvanceOwnedListOptionText {
+                            cursor: local(cursor),
+                            into: local(into.ok_or(Stop::Pending(node))?),
+                            some,
+                            none,
+                            provider,
+                        }
+                    } else if matches!(
                         slots[cursor].cleanup,
                         StorageCleanup::DisposeOwnedListIterText(_)
                     ) {
@@ -2643,6 +2831,7 @@ pub(super) fn run<'a, 'g>(
                     variant,
                     payload,
                     into,
+                    fresh_result_ok,
                 } => {
                     state[into] = if let Some(payload) = payload {
                         initialized(&state[payload], node)?;
@@ -2658,6 +2847,9 @@ pub(super) fn run<'a, 'g>(
                     } else {
                         State::Initialized(empty.clone())
                     };
+                    if fresh_result_ok && let State::Initialized(held) = &mut state[into] {
+                        held.origin = ValueOrigin::FreshResultOk;
+                    }
                     Operation::ConstructVariant {
                         variant,
                         payload: payload.map(local),
@@ -2670,9 +2862,16 @@ pub(super) fn run<'a, 'g>(
                     wrapper,
                     payload,
                     into,
+                    fresh_storage,
                 } => {
                     initialized(&state[payload], node)?;
                     state[into] = std::mem::replace(&mut state[payload], State::Vacant);
+                    if let Some(storage) = fresh_storage
+                        && let State::Initialized(held) = &mut state[into]
+                    {
+                        held.origin = ValueOrigin::FreshResultErr(node);
+                        fresh_result_storage = Some(storage);
+                    }
                     Operation::ConstructResultError {
                         constructor,
                         variant,
@@ -2700,6 +2899,10 @@ pub(super) fn run<'a, 'g>(
                 } => {
                     initialized(&state[operand], node)?;
                     state[into] = std::mem::replace(&mut state[operand], State::Vacant);
+                    if let State::Initialized(held) = &mut state[into] {
+                        // Propagation can change the Result's success type.
+                        held.origin = ValueOrigin::Untracked;
+                    }
                     Operation::ForwardResultFailure {
                         operand: local(operand),
                         into: local(into),
@@ -2734,6 +2937,10 @@ pub(super) fn run<'a, 'g>(
                     initialized(&state[operand], node)?;
                     initialized(&state[payload], node)?;
                     state[into] = std::mem::replace(&mut state[operand], State::Vacant);
+                    if let State::Initialized(held) = &mut state[into] {
+                        // The new wrapper retains a cause, even when its operand did not.
+                        held.origin = ValueOrigin::Untracked;
+                    }
                     state[payload] = State::Vacant;
                     Operation::WrapResultFailure {
                         operand: local(operand),
@@ -2934,6 +3141,49 @@ pub(super) fn run<'a, 'g>(
                     }
                 }
                 Action::Call(index)
+                    if let CallResult::RetainsSharedOption(header) = calls[index].result =>
+                {
+                    let call = &calls[index];
+                    let ([argument], Some(into)) = (call.args.as_slice(), call.into) else {
+                        return Err(Stop::Pending(node));
+                    };
+                    let argument = *argument;
+                    let actual = initialized(&state[argument], node)?;
+                    forbid_active_escape(&state[argument], node)?;
+                    if cache.is_none() {
+                        // The selected frame must check without another such handoff.
+                        return Err(Stop::Pending(node));
+                    }
+                    let body = lower(
+                        typed,
+                        module,
+                        header,
+                        Frame::OrdinaryFunction,
+                        false,
+                        Some(facts.nodes()),
+                        Lowering {
+                            budget,
+                            cache: None,
+                        },
+                    )?;
+                    graph::visit_dependencies(&body.mir, budget, |_, edge, _| {
+                        Err(Stop::Pending(edge.site.node))
+                    })?;
+                    // Some may carry every actual input loan, not the stage's
+                    // storage or a narrower set inferred from the selected body.
+                    budget.reserve(1)?;
+                    state[into] = State::Initialized(Held {
+                        loans: actual.loans.clone(),
+                        ..Held::default()
+                    });
+                    state[argument] = State::Vacant;
+                    Operation::CallIntoTemporary {
+                        callee: call.callee,
+                        arguments: vec![local(argument)],
+                        into: local(into),
+                    }
+                }
+                Action::Call(index)
                     if let CallResult::TransfersCallable(header) = calls[index].result =>
                 {
                     let call = &calls[index];
@@ -3057,13 +3307,16 @@ pub(super) fn run<'a, 'g>(
                         // backing source of the very descriptor it gives access to.
                         let held = Held {
                             loans: loan_set(loans, budget)?,
-                            stored_at: matches!(
+                            origin: if matches!(
                                 target,
                                 RetainedPlace::ThroughParameter(_)
                                     | RetainedPlace::ThroughTwoHopParameter { .. }
                                     | RetainedPlace::ThroughParameterAlias { .. }
-                            )
-                            .then_some(node),
+                            ) {
+                                ValueOrigin::RetainedStore(node)
+                            } else {
+                                ValueOrigin::Untracked
+                            },
                             ..Held::default()
                         };
                         Some((target, contents, destination, held))
@@ -3179,6 +3432,34 @@ pub(super) fn run<'a, 'g>(
                         mode,
                     }
                 }
+                Action::FormScopedValueArrow { capture, into } => {
+                    if !matches!(state[into], State::Vacant) {
+                        return Err(Stop::Pending(node));
+                    }
+                    if let Some(from) = capture {
+                        require_initialized(&slots, &state, from, node, budget)?;
+                        conflict(
+                            &slots,
+                            &state,
+                            &live[pc],
+                            from,
+                            (node, Conflict::Access),
+                            Access::Observe,
+                            budget,
+                        )?;
+                        if initialized(&state[from], node)? != &Held::default() {
+                            return Err(Stop::Pending(node));
+                        }
+                    }
+                    state[into] = State::Initialized(Held {
+                        callable_owner: Some(CallableOwner::ScopedValue(slots[into].node)),
+                        ..Held::default()
+                    });
+                    Operation::FormScopedValueArrow {
+                        environment: local(into),
+                        capture: capture.map(local),
+                    }
+                }
                 Action::CheckScopedReferenceResults {
                     entries,
                     body_depths,
@@ -3212,104 +3493,139 @@ pub(super) fn run<'a, 'g>(
                     if active.is_some() {
                         return Err(Stop::Pending(node));
                     }
-                    let deferred;
-                    let frames = match pair {
-                        ScopedFrames::Prepared(index) => &list_arrow_pairs[index],
-                        ScopedFrames::DisjointExclusive {
-                            sources,
-                            tuple_depth,
-                        } => {
-                            deferred = build::reached_exclusive_pair(
-                                typed,
-                                module,
-                                facts.nodes(),
-                                node,
-                                (sources, tuple_depth),
-                                &slots,
-                                budget,
-                            )?;
-                            &deferred
-                        }
-                    };
-                    budget.reserve(2)?;
-                    for (receiver, child) in receivers.into_iter().zip(&frames.children) {
-                        if matches!(child.body, build::ArrowBody::Reference(_)) {
-                            budget.step(1)?;
-                            initialized(&state[receiver], node)?;
-                        }
-                        conflict(
-                            &slots,
-                            &state,
-                            &live[pc],
-                            receiver,
-                            (node, Conflict::Access),
-                            Access::Exclusive,
-                            budget,
-                        )?;
-                        let exclusive = matches!(
-                            child.body,
-                            build::ArrowBody::List {
-                                exclusive: true,
-                                ..
-                            }
-                        );
-                        // Check the transferred access, not an observation
-                        // by the parent. Staged::check binds this loan to
-                        // the child's actual capture site and backing proxy.
-                        conflict(
-                            &slots,
-                            &state,
-                            &live[pc],
-                            child.source,
-                            (node, Conflict::Access),
-                            if exclusive {
-                                Access::ThroughExclusive(receiver)
-                            } else {
-                                Access::Observe
-                            },
-                            budget,
-                        )?;
-                    }
-                    // Both captures have formed before probing either
-                    // reference child. The scalar frames are prebuilt.
-                    let mut frame = |i: usize| -> ResultOf<_> {
-                        let child = &frames.children[i];
-                        let environment = local(receivers[i]);
-                        let (incoming_list_backing, exclusive, body) = match &child.body {
-                            build::ArrowBody::List {
-                                incoming_backing,
-                                exclusive,
-                                mir,
-                            } => (Some(*incoming_backing), *exclusive, Arc::clone(mir)),
-                            build::ArrowBody::Reference(ty) => (
-                                None,
-                                false,
-                                build::lower_reference_child(
+                    let mut ordinary_frames = || -> ResultOf<_> {
+                        let deferred;
+                        let frames = match pair {
+                            ScopedFrames::FreshResult { .. } => return Err(Stop::Pending(node)),
+                            ScopedFrames::Prepared(index) => &list_arrow_pairs[index],
+                            ScopedFrames::DisjointExclusive {
+                                sources,
+                                tuple_depth,
+                            } => {
+                                deferred = build::reached_exclusive_pair(
                                     typed,
                                     module,
-                                    child,
-                                    environment.root.node,
-                                    ty,
+                                    facts.nodes(),
+                                    node,
+                                    (sources, tuple_depth),
+                                    &slots,
                                     budget,
-                                )?,
-                            ),
+                                )?;
+                                &deferred
+                            }
                         };
-                        Ok(ScopedJoinFrame {
-                            origin: environment.root,
-                            invocation: child.invocation,
-                            body_site: child.body_site,
-                            environment,
-                            capture: child.capture,
-                            backing: local(child.source),
-                            incoming_list_backing,
-                            exclusive,
-                            result: local(into + 1 + i),
-                            body,
-                        })
+                        budget.reserve(2)?;
+                        for (receiver, child) in receivers.into_iter().zip(&frames.children) {
+                            if matches!(child.body, build::ArrowBody::Reference(_)) {
+                                budget.step(1)?;
+                                initialized(&state[receiver], node)?;
+                            }
+                            conflict(
+                                &slots,
+                                &state,
+                                &live[pc],
+                                receiver,
+                                (node, Conflict::Access),
+                                Access::Exclusive,
+                                budget,
+                            )?;
+                            let exclusive = matches!(
+                                child.body,
+                                build::ArrowBody::List {
+                                    exclusive: true,
+                                    ..
+                                }
+                            );
+                            // Check the transferred access, not an observation
+                            // by the parent. Staged::check binds this loan to
+                            // the child's actual capture site and backing proxy.
+                            conflict(
+                                &slots,
+                                &state,
+                                &live[pc],
+                                child.source,
+                                (node, Conflict::Access),
+                                if exclusive {
+                                    Access::ThroughExclusive(receiver)
+                                } else {
+                                    Access::Observe
+                                },
+                                budget,
+                            )?;
+                        }
+                        // Both captures have formed before probing either
+                        // reference child. The scalar frames are prebuilt.
+                        let mut frame = |i: usize| -> ResultOf<_> {
+                            let child = &frames.children[i];
+                            let environment = local(receivers[i]);
+                            let (incoming_list_backing, exclusive, body) = match &child.body {
+                                build::ArrowBody::List {
+                                    incoming_backing,
+                                    exclusive,
+                                    mir,
+                                } => (Some(*incoming_backing), *exclusive, Arc::clone(mir)),
+                                build::ArrowBody::Reference(ty) => (
+                                    None,
+                                    false,
+                                    build::lower_reference_child(
+                                        typed,
+                                        module,
+                                        child,
+                                        environment.root.node,
+                                        ty,
+                                        budget,
+                                    )?,
+                                ),
+                            };
+                            Ok(ScopedJoinFrame {
+                                origin: environment.root,
+                                invocation: child.invocation,
+                                body_site: child.body_site,
+                                environment,
+                                capture: Some(child.capture),
+                                backing: Some(local(child.source)),
+                                incoming_list_backing,
+                                exclusive,
+                                result: local(into + 1 + i),
+                                body,
+                                value: false,
+                                result_origin: None,
+                            })
+                        };
+                        Ok([frame(0)?, frame(1)?])
                     };
-                    let frames = [frame(0)?, frame(1)?];
+                    let frames = if let ScopedFrames::FreshResult { tuple_depth } = pair {
+                        // The only inputs on this route are owned environments.
+                        // Check both actual acquisitions before lowering a child.
+                        for receiver in receivers {
+                            scoped_join::check_value_receiver(
+                                &slots, &state, receiver, node, budget,
+                            )?;
+                            conflict(
+                                &slots,
+                                &state,
+                                &live[pc],
+                                receiver,
+                                (node, Conflict::Access),
+                                Access::Exclusive,
+                                budget,
+                            )?;
+                        }
+                        build::lower_fresh_scoped_children(
+                            typed,
+                            module,
+                            facts.nodes(),
+                            node,
+                            tuple_depth,
+                            std::array::from_fn(|i| (local(receivers[i]), local(into + 1 + i))),
+                            budget,
+                        )?
+                    } else {
+                        ordinary_frames()?
+                    };
                     let parent = CancellationFrame {
                         module,
+                        disposer: Some(disposer),
                         slots: &slots,
                         locals: body_scope.map_or(&[], |scope| &cleanups[scope]),
                         params: &params,
@@ -3759,7 +4075,7 @@ pub(super) fn run<'a, 'g>(
                             return Err(Stop::Pending(node));
                         }
                         Operation::Cleanup(cleanup_boundary(
-                            module,
+                            cleanup_context,
                             &slots,
                             &mut state,
                             &[target],
@@ -3779,7 +4095,7 @@ pub(super) fn run<'a, 'g>(
                         )?;
                         let displaced = std::mem::replace(&mut state[target], State::Vacant);
                         retire_loans(&slots, &mut state, &[target], budget)?;
-                        cleanup_operation(module, slots[target], displaced, node, budget)?
+                        cleanup_operation(cleanup_context, slots[target], displaced, node, budget)?
                     }
                 }
                 Action::Install { target, incoming } => {
@@ -3885,6 +4201,47 @@ pub(super) fn run<'a, 'g>(
                         into: local(into),
                     }
                 }
+                Action::CheckedI32Multiply { left, into, .. }
+                | Action::CheckedI32Add { left, into, .. } => {
+                    let right = match action {
+                        Action::CheckedI32Add { right, .. } => Some(right),
+                        _ => None,
+                    };
+                    for operand in std::iter::once(left).chain(right) {
+                        require_initialized(&slots, &state, operand, node, budget)?;
+                        conflict(
+                            &slots,
+                            &state,
+                            &live[pc],
+                            operand,
+                            (node, Conflict::Access),
+                            Access::Observe,
+                            budget,
+                        )?;
+                    }
+                    budget.step(1)?;
+                    if !matches!(state[into], State::Vacant) {
+                        return Err(Stop::Pending(node));
+                    }
+                    // Propagate only the normal edge. The checked operation
+                    // itself terminates execution on overflow, not this frame.
+                    state[into] = State::Initialized(empty.clone());
+                    match action {
+                        Action::CheckedI32Multiply { literal, .. } => {
+                            Operation::CheckedI32Multiply {
+                                left: local(left),
+                                literal,
+                                into: local(into),
+                            }
+                        }
+                        Action::CheckedI32Add { right, .. } => Operation::CheckedI32Add {
+                            left: local(left),
+                            right: local(right),
+                            into: local(into),
+                        },
+                        _ => unreachable!(),
+                    }
+                }
                 Action::CopyThrough { descriptor, into } => {
                     let target = exact_target(&state, descriptor, node, budget)?;
                     conflict(
@@ -3938,7 +4295,11 @@ pub(super) fn run<'a, 'g>(
                         budget,
                     )?;
                     // Overwrite exact contents, not the access descriptor.
-                    value.stored_at = matches!(target, ExactTarget::Caller { .. }).then_some(node);
+                    value.origin = if matches!(target, ExactTarget::Caller { .. }) {
+                        ValueOrigin::RetainedStore(node)
+                    } else {
+                        ValueOrigin::Untracked
+                    };
                     state[target.contents_slot()] = State::Initialized(value);
                     state[incoming] = State::Vacant;
                     Operation::InstallThrough {
@@ -3959,7 +4320,7 @@ pub(super) fn run<'a, 'g>(
                         Access::Exclusive,
                         budget,
                     )?;
-                    value.stored_at = Some(node);
+                    value.origin = ValueOrigin::RetainedStore(node);
                     state[route.contents] = State::Initialized(value);
                     state[incoming] = State::Vacant;
                     Operation::InstallThroughTwoHop {
@@ -3977,7 +4338,9 @@ pub(super) fn run<'a, 'g>(
                     )?;
                     Operation::None
                 }
-                Action::CheckCallableReturn(slot) | Action::Export(slot) => {
+                Action::CheckCallableReturn(slot)
+                | Action::Export(slot)
+                | Action::StageScopedValue(slot) => {
                     require_initialized(&slots, &state, slot, node, budget)?;
                     let owner = initialized(&state[slot], node)?.callable_owner;
                     forbid_active_escape(&state[slot], node)?;
@@ -4021,14 +4384,41 @@ pub(super) fn run<'a, 'g>(
                         // Nothing proves a further erased output boundary.
                         return Err(Stop::Pending(node));
                     }
+                    let operation = if matches!(action, Action::StageScopedValue(_)) {
+                        budget.step(1)?;
+                        let held = initialized(&state[slot], node)?;
+                        if slots[slot].members != 0
+                            || slots[slot].custom_disposer.is_some()
+                            || !held.loans.is_empty()
+                            || owner.is_some()
+                            || !matches!(
+                                slots[slot].cleanup,
+                                StorageCleanup::End | StorageCleanup::FreshBoolResult(_)
+                            )
+                        {
+                            return Err(Stop::Pending(node));
+                        }
+                        Operation::StageScopedValue {
+                            from: local(slot),
+                            retirement: cleanup_of(
+                                cleanup_context,
+                                slots[slot],
+                                held,
+                                node,
+                                budget,
+                            )?,
+                        }
+                    } else {
+                        Operation::Export(local(slot))
+                    };
                     let region = slots[slot].storage(slot);
                     budget.step(region.len())?;
                     state[region].fill(State::Vacant);
-                    Operation::Export(local(slot))
+                    operation
                 }
                 Action::Cleanup(index) | Action::EndScope(index) => {
                     Operation::Cleanup(cleanup_boundary(
-                        module,
+                        cleanup_context,
                         &slots,
                         &mut state,
                         &cleanups[index],
@@ -4056,7 +4446,7 @@ pub(super) fn run<'a, 'g>(
                         )?;
                         let ended = std::mem::replace(&mut state[slot], State::Vacant);
                         retire_loans(&slots, &mut state, &[slot], budget)?;
-                        cleanup_operation(module, slots[slot], ended, node, budget)?
+                        cleanup_operation(cleanup_context, slots[slot], ended, node, budget)?
                     } else {
                         state[slot] = State::Vacant;
                         Operation::None
@@ -4074,6 +4464,7 @@ pub(super) fn run<'a, 'g>(
                     site,
                     operation: Operation::None,
                     terminator: Terminator::Return,
+                    fresh_result_storage: None,
                 });
                 continue;
             }
@@ -4087,6 +4478,7 @@ pub(super) fn run<'a, 'g>(
             probe.observe(
                 &CancellationFrame {
                     module,
+                    disposer: Some(disposer),
                     slots: &slots,
                     locals: body_scope.map_or(&[], |scope| &cleanups[scope]),
                     params: &params,
@@ -4142,6 +4534,7 @@ pub(super) fn run<'a, 'g>(
             site,
             operation,
             terminator,
+            fresh_result_storage,
         });
     }
     if let Some(node) = blocked {
@@ -4152,10 +4545,16 @@ pub(super) fn run<'a, 'g>(
     }
     // Add the List-backed delivery judgment only for frames with a reached
     // loop check. Entry-only List readers keep their ordinary-only contract.
-    let (trace, replacement) = if candidate && (!list_backing || (flat && loop_delivery)) {
+    // A fresh Result export needs ordinary construction evidence. Do not add
+    // an entry-only delivery proof just because this frame can now retire it.
+    let (trace, replacement) = if candidate
+        && (!list_backing || (flat && loop_delivery))
+        && (!fresh_result || loop_delivery || calls_reached != 0)
+    {
         (
             Some(CancellationTrace {
                 module,
+                disposer,
                 body,
                 slots,
                 locals: body_scope.map_or_else(Vec::new, |index| cleanups.swap_remove(index)),

@@ -140,7 +140,7 @@ impl<'g> Successors<'g> {
             } => {
                 self.cancel.get_or_insert(parent_exit);
                 Ok(JoinNext::Cancel {
-                    retired: retired.map(|stage| stage.map(|value| value.from)),
+                    retired: retired.map(|stage| stage.map(|value| value.retirement)),
                 })
             }
         }
@@ -215,9 +215,14 @@ pub(in crate::analysis::ownership::flow) fn check<'g>(
                 ChildState::Running(_) => {
                     child_edge(ChildEvent::Export, JoinEvent::StageResult(i))?
                 }
-                ChildState::Cleaning { .. } => {
-                    child_edge(ChildEvent::EndView, JoinEvent::EndChildView(i))?
-                }
+                ChildState::Cleaning { .. } => child_edge(
+                    ChildEvent::EndView,
+                    if waiting.proof.children[i].value {
+                        JoinEvent::CleanChildEnvironment(i)
+                    } else {
+                        JoinEvent::EndChildView(i)
+                    },
+                )?,
                 ChildState::AtExit(_) => child_edge(ChildEvent::Finish, JoinEvent::FinishChild(i))?,
                 ChildState::Complete => {}
             }

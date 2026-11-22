@@ -20,8 +20,9 @@ mod join;
 mod scalar;
 
 pub use graph::{
-    Delivery, Dependency, DependencyContract, GraphCompletion, GraphObligation, GraphReport,
-    GraphRetainingCall, RetainingCallSite, RootReport, analyze_ownership,
+    Delivery, Dependency, DependencyContract, GraphCompletion, GraphForwardedRetainingCall,
+    GraphObligation, GraphReport, GraphRetainingCall, RetainingCallSite, RootReport,
+    analyze_ownership,
 };
 pub use join::{
     JoinChildState, JoinDelivery, JoinEntry, JoinEvent, JoinNext, JoinWait, ScopedJoinFrame,
@@ -71,6 +72,7 @@ impl Finding<'_> {
 pub struct Report<'g> {
     completion: Completion,
     findings: Vec<Finding<'g>>,
+    rejected_forwarding_calls: Option<[Site<'g>; 2]>,
     blocked_at: Option<Site<'g>>,
     mir: Option<Mir<'g>>,
     statistics: Statistics,
@@ -82,6 +84,11 @@ impl<'g> Report<'g> {
     }
     pub fn findings(&self) -> &[Finding<'g>] {
         &self.findings
+    }
+    /// For a rejected forwarding context, the outer call and the retaining
+    /// call, in that order. The finding identifies the actual leaf checkpoint.
+    pub fn rejected_forwarding_calls(&self) -> Option<[Site<'g>; 2]> {
+        self.rejected_forwarding_calls
     }
     pub fn blocked_at(&self) -> Option<Site<'g>> {
         self.blocked_at
@@ -118,7 +125,7 @@ impl<'g> Mir<'g> {
     }
 
     /// Intrinsic cancellation proof for a supported flat frame, including
-    /// its suspended state at an admitted retaining call into a second frame.
+    /// suspended state at an admitted retaining call or exact Bool forwarding call.
     /// `None` means unknown, not that cancellation is impossible. `Some` does
     /// not certify enclosing callers, deferred regions, or graph-wide roots.
     pub fn cancellation(&self) -> Option<&Cancellation<'g>> {
@@ -277,7 +284,7 @@ pub struct Cancellation<'g> {
 impl<'g> Cancellation<'g> {
     /// The delivery proof associated with a reached ordinary MIR block.
     /// Within a known proof, absence means this block contributes no delivery edge.
-    /// A retaining call links checkpoints inside the callee; it is not itself a checkpoint.
+    /// Call links describe checkpoints inside the callee, not polls at the call instruction.
     pub fn successor(&self, block: usize) -> Option<&CancellationSuccessor<'g>> {
         self.successors.get(&block)
     }
@@ -297,6 +304,25 @@ pub enum CancellationSuccessor<'g> {
     },
     /// Delivery in a nonempty, directly called retaining frame, not at the call instruction.
     RetainingCall(Box<RetainingCallCancellation<'g>>),
+    /// Transfer a stable Bool into a callee with an admitted retaining call.
+    ForwardedRetainingCall(Box<ForwardedRetainingCallCancellation<'g>>),
+}
+
+#[derive(Debug)]
+pub struct ForwardedRetainingCallCancellation<'g> {
+    pub callee: &'g DeclarationId,
+    /// The callee's entry and its retaining call to the leaf are separate from this link.
+    pub body: Mir<'g>,
+    pub leaf_checkpoint: Site<'g>,
+    pub suspended: SuspendedForwardingFrame<'g>,
+}
+
+#[derive(Debug)]
+pub struct SuspendedForwardingFrame<'g> {
+    pub argument: CancellationArgument<'g>,
+    /// Run only after all delivered cleanup in the callee completes. This does not run
+    /// the ordinary suffix or end the stage already transferred to the callee.
+    pub caller_cleanup: Vec<Cleanup<'g>>,
 }
 
 #[derive(Debug)]
@@ -355,6 +381,8 @@ pub struct Block<'g> {
     pub site: Site<'g>,
     pub operation: Operation<'g>,
     pub terminator: Terminator,
+    // Closed only for a checked fresh constructor at the exact admitted type.
+    fresh_result_storage: Option<&'g std::path::Path>,
 }
 
 /// A named or temporary storage root, optionally projected to member storage.
@@ -454,6 +482,23 @@ pub enum Operation<'g> {
         none: &'g DeclarationId,
         provider: CollectionProvider<'g>,
     },
+    /// Transfer the whole installed List<Option<string>> into the suffix owner.
+    OpenOwnedListOptionText {
+        source: Place<'g>,
+        cursor: Place<'g>,
+        source_backing: CollectionRepresentation<'g>,
+        cursor_backing: CollectionRepresentation<'g>,
+        provider: CollectionProvider<'g>,
+    },
+    /// Branch on outer Option<Option<string>>. Only outer Some initializes
+    /// `into`, moving the inner Option unchanged, including an inner None.
+    AdvanceOwnedListOptionText {
+        cursor: Place<'g>,
+        into: Place<'g>,
+        some: &'g DeclarationId,
+        none: &'g DeclarationId,
+        provider: CollectionProvider<'g>,
+    },
     Borrow {
         source: Place<'g>,
         holder: Place<'g>,
@@ -488,6 +533,21 @@ pub enum Operation<'g> {
         literal: i32,
         into: Place<'g>,
     },
+    /// Multiply the initialized i32 by the written literal, checked in every
+    /// build. Only success initializes `into` and reaches the normal
+    /// successor; overflow panics without unwinding or delivering a stop.
+    CheckedI32Multiply {
+        left: Place<'g>,
+        literal: i32,
+        into: Place<'g>,
+    },
+    /// Read the initialized i32 operands left-to-right and add them. As for
+    /// `CheckedI32Multiply`, overflow has no cleanup or normal successor.
+    CheckedI32Add {
+        left: Place<'g>,
+        right: Place<'g>,
+        into: Place<'g>,
+    },
     /// Copy a scalar through a checked descriptor into its destination.
     CopyReferent {
         from: Place<'g>,
@@ -505,6 +565,18 @@ pub enum Operation<'g> {
         closure: Site<'g>,
         capture: Site<'g>,
         mode: InvocationMode,
+    },
+    /// Form a scoped environment, copying its sole Bool capture if present.
+    FormScopedValueArrow {
+        environment: Place<'g>,
+        capture: Option<Place<'g>>,
+    },
+    /// Move the actual checked child output into its unpublished join stage.
+    /// The export place identifies the stage within this child. Retirement
+    /// describes cleanup only if cancellation later abandons that stage.
+    StageScopedValue {
+        from: Place<'g>,
+        retirement: Cleanup<'g>,
     },
     /// Form a pair environment from the two already-staged captures, in order.
     FormClosurePair {
@@ -564,7 +636,7 @@ pub enum Operation<'g> {
         argument: Place<'g>,
         into: Place<'g>,
     },
-    /// Evaluate a direct producer into the statement's owned backing storage.
+    /// Evaluate a direct producer into statement-local storage.
     CallIntoTemporary {
         callee: &'g DeclarationId,
         arguments: Vec<Place<'g>>,
@@ -814,6 +886,14 @@ pub enum CaptureCopyEffect<'g> {
 pub enum Cleanup<'g> {
     EndStorage(Place<'g>),
     Drop(Place<'g>),
+    /// Drop the installed cause-free `OwnedErr<i32>`, including its original location.
+    DropFreshResultError {
+        operand: Place<'g>,
+        origin: Site<'g>,
+        variant: &'g DeclarationId,
+        wrapper: &'g DeclarationId,
+        storage_source: &'g std::path::Path,
+    },
     /// Consume an owned `Option<string>`, dropping its string only in `some`.
     DropOptionPayload {
         operand: Place<'g>,
@@ -868,6 +948,27 @@ pub enum Cleanup<'g> {
         bridge: &'g DeclarationId,
         element: TextElementDisposal<'g>,
     },
+    /// Retire a still-initialized yielded carrier according to its actual tag.
+    DropYieldedOptionText {
+        operand: Place<'g>,
+        element: OptionTextDisposal<'g>,
+    },
+    /// Release the unopened List in reverse order, checking each actual tag.
+    DisposeListOptionText {
+        operand: Place<'g>,
+        implementation: &'g DeclarationId,
+        bridge: &'g DeclarationId,
+        element: OptionTextDisposal<'g>,
+    },
+    /// Retire the remaining backing in reverse position order. For each
+    /// initialized element, inspect its own tag and dispose only a Some payload.
+    /// An exhausted cursor has no elements, even if the last yield was None.
+    DisposeOwnedListIterOptionText {
+        cursor: Place<'g>,
+        implementation: &'g DeclarationId,
+        bridge: &'g DeclarationId,
+        element: OptionTextDisposal<'g>,
+    },
     /// Transfer the initialized remainder to the active disposer's epilogue.
     DeferDisposerFields {
         from: Place<'g>,
@@ -880,6 +981,15 @@ pub enum Cleanup<'g> {
 pub struct TextElementDisposal<'g> {
     pub implementation: &'g DeclarationId,
     pub bridge: &'g DeclarationId,
+}
+
+/// Structural disposal after ruling out an outer or variant disposer for
+/// this exact carrier. On `none` there is no payload operation.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct OptionTextDisposal<'g> {
+    pub some: &'g DeclarationId,
+    pub none: &'g DeclarationId,
+    pub payload: TextElementDisposal<'g>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1016,13 +1126,23 @@ fn check_root<'g>(
     plan: RootPlan<'_, 'g>,
     mut budget: Budget,
 ) -> Report<'g> {
-    let mut result = checked_graph(typed, module, plan, &mut budget);
+    let mut rejected_forwarding_calls = None;
+    let mut result = checked_graph(
+        typed,
+        module,
+        plan,
+        &mut rejected_forwarding_calls,
+        &mut budget,
+    );
     if let Err((at, Stop::Rejected { .. })) = result
         && budget.reserve(1).is_err()
     {
         result = Err((at, Stop::Limit));
+        rejected_forwarding_calls = None;
     }
-    report(result, budget.statistics)
+    let mut report = report(result, budget.statistics);
+    report.rejected_forwarding_calls = rejected_forwarding_calls;
+    report
 }
 
 fn report<'g>(result: Result<Mir<'g>, (&'g Module, Stop)>, statistics: Statistics) -> Report<'g> {
@@ -1052,6 +1172,7 @@ fn report<'g>(result: Result<Mir<'g>, (&'g Module, Stop)>, statistics: Statistic
     Report {
         completion,
         findings,
+        rejected_forwarding_calls: None,
         blocked_at,
         mir,
         statistics,
@@ -1084,6 +1205,7 @@ fn checked_graph<'g>(
     typed: &TypedReport<'g>,
     module: &'g Module,
     plan: RootPlan<'_, 'g>,
+    rejected_forwarding_calls: &mut Option<[Site<'g>; 2]>,
     budget: &mut Budget,
 ) -> Result<Mir<'g>, (&'g Module, Stop)> {
     let mut scalar_module = None;
@@ -1176,6 +1298,10 @@ fn checked_graph<'g>(
             .map_err(|stop| (module, stop))?,
         None => None,
     };
+    let forwarding = trace
+        .as_ref()
+        .and_then(|trace| trace.forwarding_call(&root));
+    let mut middle: Option<flow::forwarding::ForwardingCallee<'_, 'g>> = None;
     // All direct dependencies of the root are queued before transitive ones.
     let mut direct = pending.len();
     let mut scalar_targets = None;
@@ -1186,7 +1312,15 @@ fn checked_graph<'g>(
     while let Some((target, id, is_disposer)) = pending.pop_front() {
         budget.step(1).map_err(|()| (target, Stop::Limit))?;
         let missing = (module, Stop::Pending(root_site));
-        let enabled = !is_disposer && retaining.as_ref().is_some_and(|call| call.callee == id);
+        let retaining_target =
+            !is_disposer && retaining.as_ref().is_some_and(|call| call.callee == id);
+        let forwarding_target =
+            !is_disposer && forwarding.is_some_and(|(_, callee)| std::ptr::eq(callee, id));
+        let retaining_leaf = !is_disposer
+            && middle
+                .as_ref()
+                .is_some_and(|middle| std::ptr::eq(middle.leaf, id));
+        let enabled = retaining_target || forwarding_target || retaining_leaf;
         let lowered = if !is_disposer && id.kind == DeclarationKind::Implementation {
             // Only selected scalar edges target ordinary implementations here.
             // All widths share the same core module and capture index.
@@ -1261,9 +1395,21 @@ fn checked_graph<'g>(
             }
         }
         reached(&mir, &mut pending, &mut seen, budget).map_err(|stop| (target, stop))?;
-        if let Some(call) = retaining.take_if(|_| enabled) {
+        if let Some(call) = retaining.take_if(|_| retaining_target) {
             if let Some(callee_trace) = callee_trace {
                 root.cancellation = call.finish(callee_trace, mir, budget)?;
+            }
+        } else if forwarding_target {
+            middle = callee_trace
+                .and_then(|trace| flow::forwarding::ForwardingCallee::new(id, mir, trace));
+        } else if let Some(middle) = middle.take_if(|_| retaining_leaf) {
+            if let Some(leaf) = callee_trace {
+                root.cancellation = middle.finish(
+                    (trace.as_ref().unwrap(), &root, forwarding.unwrap().0),
+                    (leaf, mir),
+                    rejected_forwarding_calls,
+                    budget,
+                )?;
             }
         } else if is_disposer {
             budget.reserve(1).map_err(|()| (target, Stop::Limit))?;
@@ -1878,17 +2024,38 @@ enum StorageCleanup<'g> {
     Drop,
     DropOptionPayload(&'g DeclarationId),
     Unlowered,
+    FreshBoolResult(FreshResultStorage<'g>),
     ReleaseGuard(GuardRelease<'g>),
     DisposeListI32(ListDisposal<'g>),
     DisposeOwnedListIterI32(ListDisposal<'g>),
     DisposeListText(TextListDisposal<'g>),
     DisposeOwnedListIterText(TextListDisposal<'g>),
+    DisposeListOptionText {
+        disposal: OptionTextListDisposal<'g>,
+        iteration: NodeId,
+    },
+    DisposeOwnedListIterOptionText(OptionTextListDisposal<'g>),
+    DropYieldedOptionText(OptionTextDisposal<'g>),
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct FreshResultStorage<'g> {
+    err: &'g DeclarationId,
+    wrapper: &'g DeclarationId,
+    payload: &'g crate::loader::Intrinsic,
+    storage_source: &'g std::path::Path,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct TextListDisposal<'g> {
     list: ListDisposal<'g>,
     element: TextElementDisposal<'g>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct OptionTextListDisposal<'g> {
+    list: ListDisposal<'g>,
+    element: OptionTextDisposal<'g>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1922,6 +2089,8 @@ impl<'g> Local<'g> {
                     | StorageCleanup::DisposeOwnedListIterI32(_)
                     | StorageCleanup::DisposeListText(_)
                     | StorageCleanup::DisposeOwnedListIterText(_)
+                    | StorageCleanup::DisposeListOptionText { .. }
+                    | StorageCleanup::DisposeOwnedListIterOptionText(_)
             )
     }
 
@@ -1961,6 +2130,9 @@ enum PairCall {
 #[derive(Clone, Copy)]
 enum ScopedFrames {
     Prepared(usize),
+    FreshResult {
+        tuple_depth: usize,
+    },
     /// Captures are checked in caller flow before either body proof is built.
     DisjointExclusive {
         sources: [Slot; 2],
@@ -1991,7 +2163,7 @@ enum Action<'g> {
         source: Slot,
         cursor: Slot,
         backing: CollectionRepresentation<'g>,
-        text_source_backing: Option<CollectionRepresentation<'g>>,
+        source_backing: Option<CollectionRepresentation<'g>>,
         provider: CollectionProvider<'g>,
     },
     AdvanceOwnedList {
@@ -2053,6 +2225,16 @@ enum Action<'g> {
         literal: i32,
         into: Slot,
     },
+    CheckedI32Multiply {
+        left: Slot,
+        literal: i32,
+        into: Slot,
+    },
+    CheckedI32Add {
+        left: Slot,
+        right: Slot,
+        into: Slot,
+    },
     Call(usize),
     CopyClosure {
         from: Slot,
@@ -2084,6 +2266,7 @@ enum Action<'g> {
         variant: &'g DeclarationId,
         payload: Option<Slot>,
         into: Slot,
+        fresh_result_ok: bool,
     },
     ConstructResultError {
         constructor: &'g DeclarationId,
@@ -2091,6 +2274,7 @@ enum Action<'g> {
         wrapper: &'g DeclarationId,
         payload: Slot,
         into: Slot,
+        fresh_storage: Option<&'g std::path::Path>,
     },
     TakeResultSuccess {
         operand: Slot,
@@ -2122,6 +2306,11 @@ enum Action<'g> {
         into: Slot,
         mode: InvocationMode,
     },
+    FormScopedValueArrow {
+        capture: Option<Slot>,
+        into: Slot,
+    },
+    StageScopedValue(Slot),
     CallListArrows {
         pair: usize,
         receivers: [Slot; 2],
@@ -2266,6 +2455,8 @@ struct Build<'a, 'g, 'b> {
     incoming_list_arrow: Option<(Slot, Slot, bool)>,
     cleanups: Vec<Vec<Slot>>,
     body_scope: Option<usize>,
+    /// The sole call in the straight top-level prefix, and its reached length.
+    forwarding_statement: Option<(NodeId, usize)>,
     /// A top-level empty/continue loop whose only decision reads a Bool formal.
     list_delivery_loop: Option<(NodeId, NodeId)>,
     scalar_copy_read: Option<NodeId>,
@@ -2301,6 +2492,8 @@ struct OriginalTwoHopBool {
 
 struct Call<'a, 'g> {
     callee: &'g DeclarationId,
+    /// Necessary, not sufficient, for a suspended Boolean forwarding frame.
+    direct_bool_parameter: bool,
     args: Vec<Slot>,
     into: Option<Slot>,
     result: CallResult<'a, 'g>,
@@ -2313,6 +2506,7 @@ enum CallResult<'a, 'g> {
     ScalarCopy,
     RetainsInputs,
     RetainsRecordInput,
+    RetainsSharedOption(&'a DeclarationFacts<'g>),
     TransfersCallable(&'a DeclarationFacts<'g>),
 }
 

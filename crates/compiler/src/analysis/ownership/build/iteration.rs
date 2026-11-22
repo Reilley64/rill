@@ -1,9 +1,63 @@
-//! Consuming `for` over the installed List<i32> and List<string> backings.
+//! Consuming `for` over the admitted installed List backings.
 use super::*;
 use crate::analysis::generics::GoalId;
 use crate::analysis::typed::{CollectionProtection, ListTraversal};
 
 impl<'a, 'g> Build<'a, 'g, '_> {
+    pub(super) fn option_list_parameter(
+        &mut self,
+        parameter: &MemberType<'g>,
+        iteration: NodeId,
+    ) -> ResultOf<Slot> {
+        let node = parameter.declaration.node;
+        let pending = || Stop::Pending(node);
+        let TypeTerm::Nominal {
+            declaration,
+            arguments,
+        } = parameter.ty.as_ref()
+        else {
+            return Err(pending());
+        };
+        let [element] = arguments.as_slice() else {
+            return Err(pending());
+        };
+        let list = self.typed.list_role().ok_or_else(pending)?;
+        let (role, OptionPayload::Text(_)) = self.admitted_option(element).ok_or_else(pending)?
+        else {
+            return Err(pending());
+        };
+        if !std::ptr::eq(*declaration, &list.declaration.id)
+            || !matches!(element.as_ref(), TypeTerm::Nominal { .. })
+        {
+            return Err(pending());
+        }
+        // The installed Option role proves Some(T) and payloadless None.
+        // Rule out custom disposal of the carrier and both variants before
+        // composing the structural tag test with the protected string leaf.
+        self.prove_no_variant_disposer(node, element, [role.some, role.none])?;
+        let element = OptionTextDisposal {
+            some: &role.some.id,
+            none: &role.none.id,
+            payload: self.text_element_disposal(node)?,
+        };
+        let disposal = OptionTextListDisposal {
+            list: self.list_disposal(node)?,
+            element,
+        };
+        let slot = self.allocate_slot(
+            node,
+            true,
+            StorageCleanup::DisposeListOptionText {
+                disposal,
+                iteration,
+            },
+            None,
+        )?;
+        self.budget.reserve(1)?;
+        self.locals.insert(&parameter.declaration.id, slot);
+        Ok(slot)
+    }
+
     pub(super) fn owned_list_iteration(
         &mut self,
         node: NodeId,
@@ -17,15 +71,23 @@ impl<'a, 'g> Build<'a, 'g, '_> {
             return Err(pending());
         };
         let text = owns_text(&iteration.yielded);
-        use crate::analysis::scalars::IterationBodyKind::{NamedBoolPostfix, Ordinary};
+        let option_text = matches!(iteration.yielded.as_ref(), TypeTerm::Nominal { .. })
+            && matches!(
+                self.admitted_option(&iteration.yielded),
+                Some((_, OptionPayload::Text(_)))
+            );
+        use crate::analysis::scalars::IterationBodyKind::{
+            NamedBoolPostfix, Ordinary, YieldedTextPostfix,
+        };
         let supported = match iteration.body {
             Some(Ordinary) => true,
             Some(NamedBoolPostfix) => text && exits.returning.is_some(),
+            Some(YieldedTextPostfix) => option_text && exits.returning.is_some(),
             None => false,
         };
         if !supported
             || iteration.traversal != Some(ListTraversal::Owned)
-            || (!text && scalar::scalar(&iteration.yielded) != Some(Primitive::I32))
+            || (!text && !option_text && scalar::scalar(&iteration.yielded) != Some(Primitive::I32))
         {
             return Err(pending());
         }
@@ -43,6 +105,7 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         // The scalar discard shortcut cannot retire an owning yield.
         if matches!(binding.pattern.as_ref(), Pattern::Wildcard)
             && (text
+                || option_text
                 || !self.fact(&body).is_some_and(|fact| {
                     !fact.flow.pending && !fact.flow.normal && fact.flow.continues.is_empty()
                 }))
@@ -50,7 +113,7 @@ impl<'a, 'g> Build<'a, 'g, '_> {
             return Err(pending());
         }
         let actual = self.value(source).map_err(|_| pending())?;
-        let (name, source_slot, staged, actual) = if actual.path.is_none() {
+        let (name, source_slot, staged) = if actual.path.is_none() {
             if !text {
                 return Err(pending());
             }
@@ -71,13 +134,18 @@ impl<'a, 'g> Build<'a, 'g, '_> {
                 StorageCleanup::DisposeListText(disposal),
                 None,
             )?;
-            (staged.literal, slot, Some(staged), actual)
+            (staged.literal, slot, Some(staged))
         } else {
             let (name, _) = self.ungroup_expression_at(source, depth + 1)?;
             let (named, path) = self.named_owned_place(name)?.ok_or_else(pending)?;
             let actual = self.normal_value(source)?;
             let admitted_source = if text {
                 self.is_list_text(&named.ty)
+            } else if option_text {
+                path.root.kind == DeclarationKind::Parameter
+                    && matches!(named.ty.as_ref(), TypeTerm::Nominal { declaration, arguments }
+                        if self.typed.list_role().is_some_and(|role| std::ptr::eq(*declaration, &role.declaration.id))
+                            && matches!(arguments.as_slice(), [element] if *element == iteration.yielded))
             } else {
                 self.is_list_i32(&named.ty)
             };
@@ -89,11 +157,16 @@ impl<'a, 'g> Build<'a, 'g, '_> {
             {
                 return Err(pending());
             }
-            (name, self.resolve_place(name, path)?, None, actual)
+            (name, self.resolve_place(name, path)?, None)
         };
-        let text_disposal = match (text, self.slots[source_slot].cleanup) {
-            (false, StorageCleanup::DisposeListI32(_)) => None,
-            (true, StorageCleanup::DisposeListText(disposal)) => Some(disposal),
+        let source_cleanup = self.slots[source_slot].cleanup;
+        let list_disposal = match source_cleanup {
+            StorageCleanup::DisposeListI32(_) if !text && !option_text => None,
+            StorageCleanup::DisposeListText(disposal) if text => Some(disposal.list),
+            StorageCleanup::DisposeListOptionText {
+                disposal,
+                iteration: site,
+            } if option_text && site == node => Some(disposal.list),
             _ => return Err(pending()),
         };
         let TypeTerm::Nominal {
@@ -165,32 +238,49 @@ impl<'a, 'g> Build<'a, 'g, '_> {
             implementation: &release.implementation.id,
             bridge: &release.bridge.id,
         };
-        let (text_source_backing, cursor_cleanup) = if let Some(disposal) = text_disposal {
+        let (source_backing, cursor_cleanup) = if let Some(disposal) = list_disposal {
             let source_release = self
                 .iteration_scope(node, list, CollectionOperation::DisposeList)?
                 .provider
                 .ok_or_else(pending)?;
             if !source_release.artifact.same_link(open.artifact)
-                || disposal.list.implementation != &source_release.implementation.id
-                || disposal.list.bridge != &source_release.bridge.id
+                || disposal.implementation != &source_release.implementation.id
+                || disposal.bridge != &source_release.bridge.id
             {
                 return Err(pending());
             }
             let list_backing =
                 self.iteration_backing(node, list, CollectionStorage::Elements, open.artifact)?;
-            (
-                Some(list_backing),
-                StorageCleanup::DisposeOwnedListIterText(TextListDisposal {
-                    list: release,
-                    element: disposal.element,
-                }),
-            )
+            let cleanup = match source_cleanup {
+                StorageCleanup::DisposeListOptionText { disposal, .. } => {
+                    StorageCleanup::DisposeOwnedListIterOptionText(OptionTextListDisposal {
+                        list: release,
+                        ..disposal
+                    })
+                }
+                StorageCleanup::DisposeListText(disposal) => {
+                    StorageCleanup::DisposeOwnedListIterText(TextListDisposal {
+                        list: release,
+                        ..disposal
+                    })
+                }
+                _ => return Err(pending()),
+            };
+            (Some(list_backing), cleanup)
         } else {
             self.check_i32_element_cleanup(node)?;
             (None, StorageCleanup::DisposeOwnedListIterI32(release))
         };
         let into =
             self.iteration_binder(pattern, binding, source, &iteration.yielded, depth + 1)?;
+        if let StorageCleanup::DisposeOwnedListIterOptionText(disposal) = cursor_cleanup {
+            let element = disposal.element;
+            let item = into.ok_or_else(pending)?;
+            if self.slots[item].cleanup != StorageCleanup::DropOptionPayload(element.some) {
+                return Err(pending());
+            }
+            self.slots[item].cleanup = StorageCleanup::DropYieldedOptionText(element);
+        }
         let cursor = self.allocate_slot(node, true, cursor_cleanup, None)?;
         let retire = self.cleanup_scope(node, &[cursor], next)?;
         let return_retire = exits
@@ -232,7 +322,7 @@ impl<'a, 'g> Build<'a, 'g, '_> {
                 source: source_slot,
                 cursor,
                 backing,
-                text_source_backing,
+                source_backing,
                 provider: open,
             },
             Edges::Next(head),
@@ -240,7 +330,7 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         if let Some(staged) = staged {
             self.stage_list_text_source(
                 staged,
-                Some((source_slot, text_source_backing.ok_or_else(pending)?, entry)),
+                Some((source_slot, source_backing.ok_or_else(pending)?, entry)),
             )
         } else {
             Ok(entry)

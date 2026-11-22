@@ -80,6 +80,8 @@ const fn bind_error_operations<
     assert_sealed::<OwnedErr<()>>();
 }
 const fn assert_sealed<T: Send + Sync + 'static>() {}
+fn assert_send<T: Send>() {}
+const _: fn() = assert_send::<Result<bool, OwnedErr<i32>>>;
 type Render<E> = fn(&OwnedErr<E>, fn(&E) -> String) -> String;
 type Retain<E, C> = fn(E, SourceLocation, OwnedErr<C>, fn(&C) -> String, fn(C)) -> OwnedErr<E>;
 type Wrap<T, E, C, F> =

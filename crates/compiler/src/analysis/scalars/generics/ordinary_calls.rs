@@ -103,6 +103,13 @@ impl Default for ConditionalOutput<'_> {
     }
 }
 
+#[derive(PartialEq, Eq)]
+enum ScopedRetention {
+    Ordinary,
+    Retain,
+    Refresh,
+}
+
 struct Comparison<'r, 'g> {
     viable: Vec<SourceCandidate<'r, 'g>>,
     outcome: Option<HypotheticalOutcome<'g>>,
@@ -135,16 +142,236 @@ impl<'r, 'g> Checker<'r, 'g> {
         }
     }
 
+    // Cheap prefilter only. Callers charge for and compare the full IDs
+    // before interpreting operand premises or stamping a determination.
+    fn possible_scoped_winner(
+        &self,
+        call: &PreparedCall<'g>,
+        outcome: Option<HypotheticalOutcome<'g>>,
+    ) -> Option<(&'g DeclarationId, &'g DeclarationId)> {
+        let role = self.ordinary_scope.as_ref()?.routine()?;
+        let HypotheticalOutcome::Winner(winner) = outcome? else {
+            return None;
+        };
+        let installed = &role.implementation.id;
+        if !std::ptr::eq(call.fact.callee, &role.family.id)
+            || winner.module.origin != installed.module.origin
+            || winner.start != installed.start
+            || call.fact.pipe_input.is_some()
+        {
+            return None;
+        }
+        Some((winner, installed))
+    }
+
+    fn scoped_result_candidate(
+        &self,
+        call: &PreparedCall<'g>,
+        outcome: Option<HypotheticalOutcome<'g>>,
+        proof: Option<&GoalFacts<'g>>,
+    ) -> Option<(&'g DeclarationId, &'g DeclarationId)> {
+        let (winner, installed) = self.possible_scoped_winner(call, outcome)?;
+        let goal = proof?;
+        if !matches!(goal.judgment, GoalJudgment::Determine { .. })
+            || !goal
+                .selection
+                .as_ref()
+                .is_some_and(|s| std::ptr::eq(s.implementation, winner))
+        {
+            return None;
+        }
+        let TypeTerm::Tuple(outputs) = goal.output.as_ref()?.result.as_ref() else {
+            return None;
+        };
+        let [left, right] = outputs.as_slice() else {
+            return None;
+        };
+        self.scoped_result_outputs(left, right)
+            .then_some((winner, installed))
+    }
+
+    fn scoped_result_outputs(&self, left: &Type<'g>, right: &Type<'g>) -> bool {
+        let Some(result) = self.result.filter(|role| role.representation.is_some()) else {
+            return false;
+        };
+        let canonical_result = |ty: &Type<'g>| {
+            matches!(ty.as_ref(), TypeTerm::Nominal { declaration, arguments }
+                if std::ptr::eq(*declaration, &result.declaration.id)
+                    && matches!(arguments.as_slice(), [ok, err]
+                        if primitive_name(ok) == Some("bool") && primitive_name(err) == Some("i32")))
+        };
+        primitive_name(right) == Some("bool") && canonical_result(left)
+            || primitive_name(left) == Some("bool") && canonical_result(right)
+    }
+
+    fn scoped_result_operand_premise(
+        &mut self,
+        inference: &Inference<'g>,
+        call: &PreparedCall<'g>,
+        inputs: &[Option<Type<'g>>],
+        outcome: Option<HypotheticalOutcome<'g>>,
+    ) -> Work<Option<InputPremise>> {
+        let Some((winner, installed)) = self.possible_scoped_winner(call, outcome) else {
+            return Ok(None);
+        };
+        let [Some(input)] = inputs else {
+            return Ok(None);
+        };
+        let TypeTerm::Tuple(jobs) = input.as_ref() else {
+            return Ok(None);
+        };
+        let [a, b] = jobs.as_slice() else {
+            return Ok(None);
+        };
+        let (TypeTerm::Callable { result: left, .. }, TypeTerm::Callable { result: right, .. }) =
+            (a.as_ref(), b.as_ref())
+        else {
+            return Ok(None);
+        };
+        if !self.scoped_result_outputs(left, right) {
+            return Ok(None);
+        }
+        self.elab.step(1 + installed.module.path.len())?;
+        if winner != installed {
+            return Ok(None);
+        }
+        Ok(self.scoped_pair_context(inference, call)?.1)
+    }
+
+    fn retain_scoped_result_call(
+        &mut self,
+        inference: &Inference<'g>,
+        node: NodeId,
+        slot: &Slot<'g>,
+    ) -> Work<ScopedRetention> {
+        // The stamp lives in the expression slot already read by the caller.
+        // No other ordinary call needs to look up an earlier determination.
+        let levels = 1 + self.ordinary_calls.len().max(1).ilog2() as usize;
+        let lookup = levels
+            .checked_mul(1 + inference.module.key.path.len())
+            .ok_or(())?;
+        self.elab.step(lookup.checked_add(2).ok_or(())?)?;
+        let prior = &self.ordinary_calls[&(&inference.module.key, node)];
+        let call = &inference.calls[&node];
+        let id = prior.goal.as_ref().unwrap();
+        let goal = self.evidence.get(id).unwrap();
+        let output = goal.output.as_ref().unwrap();
+        // Ordinary fallback may still reuse the prior goal to compare an
+        // expected output. It is not sufficient when the proof context changes.
+        if prior.premise.is_some()
+            || slot.ordinary_context.is_some()
+            || self.arrow_premise.is_some()
+            || !prior.defaults.is_empty()
+            || !call.fact.defaults.is_empty()
+            || prior.instantiation.is_some()
+            || slot.blocked
+            || !matches!(
+                goal.state,
+                GoalState::Proved | GoalState::Unresolved(GoalBlocker::CallableEnvironment)
+            )
+        {
+            return Ok(ScopedRetention::Refresh);
+        }
+        let ([argument], [formal], [Some(input)]) = (
+            call.fact.arguments.as_slice(),
+            call.parameters.as_slice(),
+            prior.inputs.as_slice(),
+        ) else {
+            return Ok(ScopedRetention::Refresh);
+        };
+        let GoalJudgment::Determine { inputs, .. } = &goal.judgment else {
+            unreachable!();
+        };
+        let [determined_input] = inputs.as_slice() else {
+            return Ok(ScopedRetention::Refresh);
+        };
+        let written = written_arguments(call);
+        self.elab.step(1 + goal.assumptions.len() + written.len())?;
+        let actual = &inference.slots[argument];
+        if actual.blocked
+            || actual.ordinary_context.is_some()
+            || !self.evidence.uses_current_assumptions(goal)
+            || !Arc::ptr_eq(determined_input, input)
+            || !actual.ty.as_ref().is_some_and(|ty| Arc::ptr_eq(ty, input))
+            || written.len() != prior.explicit.len()
+            || !written.iter().zip(&prior.explicit).all(|(now, was)| {
+                now.position == was.position
+                    && std::ptr::eq(now.binder, was.binder)
+                    && Arc::ptr_eq(&now.argument, &was.argument)
+            })
+        {
+            return Ok(ScopedRetention::Refresh);
+        }
+        // The same input and written filters preserve the ordinary rank.
+        // Immutable argument syntax fixes the occurrences, but their arrow
+        // evidence must still be compared in order.
+        let old_origins = goal.argument_pair.clone();
+        let erased = old_origins.is_none();
+        let result = output.result.clone();
+        let state = goal.state;
+        let agrees = matches!(prior.output_agreement, OutputAgreement::Agrees);
+        let checked = prior.checked;
+        let (settled, premise) = self.scoped_pair_context(inference, call)?;
+        if !settled || premise.is_some() {
+            return Ok(ScopedRetention::Refresh);
+        }
+        let current = self
+            .direct_argument_pair(inference, call, formal)?
+            .unwrap_or_default();
+        self.elab.step(2)?;
+        let same_origins = match old_origins {
+            Some(old) => old.iter().zip(&current).all(|(old, now)| match (old, now) {
+                (Some(old), Some(now)) => Arc::ptr_eq(old, now),
+                (None, None) => true,
+                _ => false,
+            }),
+            None => current.iter().all(Option::is_none),
+        };
+        if !same_origins {
+            return Ok(ScopedRetention::Refresh);
+        }
+        if (erased && state != GoalState::Unresolved(GoalBlocker::CallableEnvironment))
+            || !agrees
+            || match &slot.ty {
+                Some(ty) => !checked || !Arc::ptr_eq(ty, &result),
+                None => checked,
+            }
+        {
+            return Ok(ScopedRetention::Ordinary);
+        }
+        // Expected output is not a ranking input. On disagreement let the
+        // ordinary path compare it against the existing determination.
+        let agrees = slot
+            .expected
+            .as_ref()
+            .map_or(Ok(true), |expected| self.same(expected, &result))?;
+        Ok(if agrees {
+            ScopedRetention::Retain
+        } else {
+            ScopedRetention::Ordinary
+        })
+    }
+
     pub(in crate::analysis::scalars) fn ordinary_call_step(
         &mut self,
         inference: &mut Inference<'g>,
         node: NodeId,
         default_step: bool,
     ) -> Work<bool> {
+        let slot = &inference.slots[&node];
         if matches!(
-            inference.slots[&node].installed_operation,
+            slot.installed_operation,
             Some(data::DataExpression::NativeOwnership(_) | data::DataExpression::CallableCopy(_))
         ) {
+            return Ok(false);
+        }
+        let slot_had_scoped_determination = slot.scoped_result_determination;
+        let retention = if !default_step && slot_had_scoped_determination {
+            self.retain_scoped_result_call(inference, node, slot)?
+        } else {
+            ScopedRetention::Ordinary
+        };
+        if retention == ScopedRetention::Retain {
             return Ok(false);
         }
         let mut call = inference.calls.remove(&node).unwrap();
@@ -379,8 +606,19 @@ impl<'r, 'g> Checker<'r, 'g> {
                         }
                     }
                 }
-                let output =
-                    self.conditional_output(inference, node, &call, &inputs, &viable, outcome)?;
+                if let Some(p) =
+                    self.scoped_result_operand_premise(inference, &call, &inputs, outcome)?
+                {
+                    self.arrow_premise = Some(self.arrow_premise.map_or(p, |old| old.combine(p)));
+                }
+                let output = self.conditional_output(
+                    inference,
+                    node,
+                    &call,
+                    &inputs,
+                    (&viable, outcome),
+                    retention,
+                )?;
                 let premise = if eligible_local_disposer {
                     self.arrow_premise
                 } else {
@@ -409,6 +647,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             .as_ref()
             .or(output.goal.as_ref())
             .map(|id| self.evidence.get(id).unwrap());
+        let scoped_candidate = self.scoped_result_candidate(&call, outcome, proof);
         let mut premise = use_premise;
         let mut checked = false;
         if let Some(proof) = proof {
@@ -451,6 +690,20 @@ impl<'r, 'g> Checker<'r, 'g> {
                     _ => (),
                 }
             }
+        }
+        let retainable = if let Some((winner, installed)) = scoped_candidate {
+            self.elab.step(1 + installed.module.path.len())?;
+            winner == installed
+        } else {
+            false
+        };
+        if retainable || slot_had_scoped_determination {
+            self.elab.step(1)?;
+            inference
+                .slots
+                .get_mut(&node)
+                .unwrap()
+                .scoped_result_determination = retainable;
         }
         self.ordinary_calls.insert(
             (&module.key, node),
@@ -978,8 +1231,8 @@ impl<'r, 'g> Checker<'r, 'g> {
         node: NodeId,
         call: &PreparedCall<'g>,
         inputs: &[Option<Type<'g>>],
-        viable: &[SourceCandidate<'r, 'g>],
-        outcome: Option<HypotheticalOutcome<'g>>,
+        (viable, outcome): (&[SourceCandidate<'r, 'g>], Option<HypotheticalOutcome<'g>>),
+        retention: ScopedRetention,
     ) -> Work<ConditionalOutput<'g>> {
         self.elab.step(inputs.len())?;
         if inputs.iter().any(Option::is_none) {
@@ -1001,12 +1254,16 @@ impl<'r, 'g> Checker<'r, 'g> {
             let substitution = self.slot_substitutions(&selected.body.header.binders, &slots)?;
             solved = Some((selected, slots, substitution));
         }
-        let goal = if let Some(id) = self
-            .ordinary_calls
-            .get(&(&module.key, node))
-            .and_then(|call| call.goal.as_ref())
-        {
-            id.clone()
+        let previous = self.ordinary_calls.get(&(&module.key, node));
+        let (prior_goal, prior_instantiation) = if retention == ScopedRetention::Refresh {
+            (None, None)
+        } else {
+            previous.map_or((None, None), |prior| {
+                (prior.goal.clone(), prior.instantiation.clone())
+            })
+        };
+        let goal = if let Some(id) = prior_goal {
+            id
         } else {
             let selection = if let Some((c, _, substitution)) = &solved {
                 self.elab.reserve(substitution.len())?;
@@ -1040,16 +1297,12 @@ impl<'r, 'g> Checker<'r, 'g> {
                 selection,
             )?
         };
-        let prior = self
-            .ordinary_calls
-            .get(&(&module.key, node))
-            .and_then(|call| call.instantiation.clone());
         self.complete_source_output(
             goal,
             solved.map(|(c, slots, _)| (c.body, c.alternative, slots)),
             written_arguments(call),
             inference.slots[&node].expected.as_ref(),
-            prior.as_ref(),
+            prior_instantiation.as_ref(),
         )
     }
 

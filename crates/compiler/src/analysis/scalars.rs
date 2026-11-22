@@ -120,6 +120,8 @@ pub struct ExpressionFacts<'g> {
     pub refinement: Option<Arc<data::Refinement<'g>>>,
     pub read_only_projection: bool,
     pub access: data::Access,
+    /// Innermost candidate under a Group, recorded during the metered flow pass.
+    pub(in crate::analysis) grouped_i32_arithmetic_operand: Option<NodeId>,
 }
 pub use core::{
     ErrorConstruction, Propagation, PropagationError, PropagationTarget, RetainedError, Wrapping,
@@ -409,6 +411,7 @@ struct Slot<'g> {
     propagation: Option<Propagation<'g>>,
     pending_core: bool,
     installed_operation: Option<data::DataExpression<'g>>,
+    scoped_result_determination: bool,
     pipe_target: Option<(PropagationTarget<'g>, Option<Type<'g>>)>,
     pipe_expected: Option<Type<'g>>,
     admission: Option<data::Admission<'g>>,
@@ -417,6 +420,7 @@ struct Slot<'g> {
     read_only_projection: bool,
     access: data::Access,
     flow: Flow,
+    grouped_i32_arithmetic_operand: Option<NodeId>,
     invocation: Option<Arc<InvocationFacts<'g>>>,
     function_value: Option<Arc<FunctionValueFacts<'g>>>,
     arrow: Option<Arc<ArrowFacts<'g>>>,
@@ -500,7 +504,7 @@ struct Checker<'r, 'g> {
     reached_startup: bool,
     reached_expectations: bool,
     // Accumulate the written body shape while an iteration is being checked.
-    iteration_body: iteration::IterationBody,
+    iteration_body: iteration::IterationBody<'g>,
     data: bool,
     integrated: bool,
     option: Option<super::typed::OptionRole<'g>>,
@@ -2634,7 +2638,23 @@ impl<'r, 'g> Checker<'r, 'g> {
                 None
             };
             let flow = self.expression_flow(&inference, node, &children)?;
+            let grouped_i32_arithmetic_operand = match (kind, children.as_slice()) {
+                (NodeKind::Group, [child]) => {
+                    let slot = &inference.slots[child];
+                    match module.syntax.nodes[*child].kind {
+                        NodeKind::Group => slot.grouped_i32_arithmetic_operand,
+                        NodeKind::ValueReference | NodeKind::Literal | NodeKind::Binary("*")
+                            if slot.ty.as_ref().and_then(primitive_name) == Some("i32") =>
+                        {
+                            Some(*child)
+                        }
+                        _ => None,
+                    }
+                }
+                _ => None,
+            };
             let slot = inference.slots.get_mut(&node).unwrap();
+            slot.grouped_i32_arithmetic_operand = grouped_i32_arithmetic_operand;
             let (normal, boolean) = if matches!(
                 slot.installed_operation,
                 Some(data::DataExpression::Wrapping(_))
@@ -2753,6 +2773,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                         refinement: slot.refinement.clone(),
                         read_only_projection: slot.read_only_projection,
                         access: slot.access,
+                        grouped_i32_arithmetic_operand: slot.grouped_i32_arithmetic_operand,
                     }),
                 };
                 if premise.is_some_and(|p| p.has_conversion()) {

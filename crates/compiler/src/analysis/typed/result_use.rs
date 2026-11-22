@@ -32,7 +32,7 @@ use loops::LoopExits;
 #[cfg(test)]
 mod tests;
 pub use storage::ResultComponent;
-use storage::{Address, Content, Located, Occurrence, Residence, Root};
+use storage::{Address, Content, Located, Occurrence, OptionListSource, Residence, Root};
 use values::PlaceStorage;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -84,6 +84,7 @@ pub struct ResultUseReport<'g> {
     // its originating call. The key indexes this report's typed node array.
     pair_calls: BTreeMap<usize, pairs::CheckedTransfer<'g>>,
     routine_bound: bool,
+    fresh_option_iterators: Vec<(&'g DeclarationId, &'g DeclarationId, NodeId)>,
 }
 impl<'g> ResultUseReport<'g> {
     pub(super) fn attach_pair_calls(
@@ -105,6 +106,17 @@ impl<'g> ResultUseReport<'g> {
         Ok(())
     }
 
+    pub(super) fn attach_option_iterators(
+        &mut self,
+        inventory: &mut OrdinaryAnalysis<'g>,
+        budget: &mut Budget,
+    ) -> Work<()> {
+        for (function, formal, site) in std::mem::take(&mut self.fresh_option_iterators) {
+            inventory.mark_option_iterator(function, formal, site, budget)?;
+        }
+        Ok(())
+    }
+
     pub(super) fn routine_bound(&self) -> bool {
         self.routine_bound
     }
@@ -118,7 +130,15 @@ impl<'g> ResultUseReport<'g> {
 }
 
 type Nodes<'a, 'g> = BTreeMap<(&'g ModuleKey, NodeId), (usize, &'a NodeFacts<'g>)>;
+
 type Alternatives<'g> = Vec<Residence<'g>>;
+
+#[derive(Clone, Copy)]
+enum ValueUse {
+    Used,
+    Statement,
+    Binding { pattern: NodeId, depth: usize },
+}
 
 #[derive(Clone, Copy)]
 pub(super) struct Inputs<'a, 'g> {
@@ -309,6 +329,7 @@ struct Check<'a, 'g> {
     report: &'a mut ResultUseReport<'g>,
     loops: Vec<LoopExits<'g>>,
     match_views: Vec<(Address<'g>, Root<'g>)>,
+    wildcard_sources: Vec<Address<'g>>,
     checked_arrows: BTreeSet<NodeId>,
     dead_depth: usize,
     dead_start: Option<usize>,
@@ -320,6 +341,9 @@ struct Check<'a, 'g> {
     proving_callable: bool,
     has_pending: bool,
     current_parameters: &'a [MemberType<'g>],
+    current_option_guard: Option<NodeId>,
+    // Direct top-level statement depth and the reached fresh source, if any.
+    option_iterator: Option<(usize, Option<(&'g DeclarationId, NodeId)>)>,
     nested_write_body: Option<NodeId>,
 }
 
@@ -353,6 +377,7 @@ impl<'a, 'g> Check<'a, 'g> {
             report,
             loops: Vec::new(),
             match_views: Vec::new(),
+            wildcard_sources: Vec::new(),
             checked_arrows: BTreeSet::new(),
             dead_depth: 0,
             dead_start: None,
@@ -364,6 +389,8 @@ impl<'a, 'g> Check<'a, 'g> {
             proving_callable: false,
             has_pending: false,
             current_parameters: &[],
+            current_option_guard: None,
+            option_iterator: None,
             nested_write_body: None,
         })
     }
@@ -658,7 +685,15 @@ impl<'a, 'g> Check<'a, 'g> {
             | NodeKind::Import => self.singleton(state),
             NodeKind::Binding { .. } => {
                 let source = *children.last().unwrap();
-                let alternatives = self.expression(source, state, depth + 1)?;
+                let alternatives = self.expression_with_use(
+                    source,
+                    state,
+                    depth + 1,
+                    ValueUse::Binding {
+                        pattern: children[0],
+                        depth: depth + 1,
+                    },
+                )?;
                 let facts = self.facts(node)?;
                 let mut running = Vec::new();
                 for mut state in alternatives {
@@ -702,6 +737,9 @@ impl<'a, 'g> Check<'a, 'g> {
                 });
                 let mut alternatives = self.expression(right, state, depth + 1)?;
                 for state in &mut alternatives {
+                    if let Some(path) = path {
+                        state.access_option_list(path.root, None, self.budget)?;
+                    }
                     let incoming = state.take(Root::Temporary(right), &[], self.budget)?;
                     let storage = self.place_storage(state, path)?;
                     if let PlaceStorage::Exact(target @ (root, path)) = &storage
@@ -744,7 +782,9 @@ impl<'a, 'g> Check<'a, 'g> {
                 }
                 Ok(alternatives)
             }
-            NodeKind::ExpressionStatement => self.expression(children[0], state, depth + 1),
+            NodeKind::ExpressionStatement => {
+                self.expression_with_use(children[0], state, depth + 1, ValueUse::Statement)
+            }
             NodeKind::Return => {
                 let mut alternatives = if let Some(&value) = children.first() {
                     let mut alternatives = self.expression(value, state, depth + 1)?;
@@ -766,8 +806,13 @@ impl<'a, 'g> Check<'a, 'g> {
                 Ok(Vec::new())
             }
             NodeKind::IfStatement => self.conditional(node, state, false, depth + 1),
-            NodeKind::Guard => self.guard(node, state, depth + 1),
             NodeKind::While => self.while_loop(node, state, depth + 1),
+            NodeKind::Guard => {
+                let previous = self.current_option_guard.replace(node);
+                let result = self.guard(node, state, depth + 1);
+                self.current_option_guard = previous;
+                result
+            }
             NodeKind::For => self.for_loop(node, state, depth + 1),
             NodeKind::Break | NodeKind::Continue => self.loop_jump(node, state),
             _ => {
@@ -808,8 +853,18 @@ impl<'a, 'g> Check<'a, 'g> {
     fn expression(
         &mut self,
         node: NodeId,
+        state: Residence<'g>,
+        depth: usize,
+    ) -> Work<Alternatives<'g>> {
+        self.expression_with_use(node, state, depth, ValueUse::Used)
+    }
+
+    fn expression_with_use(
+        &mut self,
+        node: NodeId,
         mut state: Residence<'g>,
         depth: usize,
+        usage: ValueUse,
     ) -> Work<Alternatives<'g>> {
         self.depth(depth)?;
         let Some(facts) = self.facts(node)? else {
@@ -820,10 +875,13 @@ impl<'a, 'g> Check<'a, 'g> {
             self.pending(node, ResultUseBlocker::TypedInput)?;
             return self.unsettled(node, depth + 1);
         };
+        if let Some(path) = &value.path {
+            state.access_option_list(path.root, None, self.budget)?;
+        }
         let syntax = &self.module.syntax.nodes[node];
         let root = Root::Temporary(node);
         if let Some(address) = self.address(&state, value.path.as_ref())? {
-            self.read_place(node, value, &mut state, address)?;
+            self.read_place(node, value, &mut state, address, usage)?;
             return self.singleton(state);
         }
         if facts
@@ -990,16 +1048,35 @@ impl<'a, 'g> Check<'a, 'g> {
                     return self.interpolate(node, holes, state, depth + 1);
                 }
                 DataExpression::Match(matched) => {
-                    return self.match_expression(node, matched, state, depth + 1);
+                    let unused_bool = matches!(value.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "bool")
+                        && self.discarded_value(usage)?;
+                    return self.match_expression(node, matched, state, depth + 1, unused_bool);
                 }
                 _ => {}
             }
         }
         match syntax.kind {
-            NodeKind::Arrow => self.arrow(node, facts, state, depth + 1),
+            NodeKind::Arrow => {
+                if state.has_option_lists()
+                    && let Some(arrow) = facts.callable.as_ref().and_then(|f| f.arrow.as_ref())
+                {
+                    for capture in &arrow.captures {
+                        self.budget.step(1)?;
+                        state.access_option_list(capture.path.root, None, self.budget)?;
+                    }
+                }
+                self.arrow(node, facts, state, depth + 1)
+            }
             NodeKind::Group => {
                 let alternatives = self.singleton(state)?;
-                self.component(alternatives, syntax.children[0], root, &[], depth + 1)
+                self.component_with_use(
+                    alternatives,
+                    syntax.children[0],
+                    root,
+                    &[],
+                    depth + 1,
+                    usage,
+                )
             }
             NodeKind::IfExpression => self.conditional(node, state, true, depth + 1),
             NodeKind::Template
@@ -1011,7 +1088,7 @@ impl<'a, 'g> Check<'a, 'g> {
                 self.singleton(state)
             }
             NodeKind::Prefix("*") => {
-                self.dereference(node, syntax.children[0], value, state, depth + 1)
+                self.dereference(node, syntax.children[0], value, state, depth + 1, usage)
             }
             NodeKind::Literal | NodeKind::ValueReference => {
                 use crate::analysis::scalars::BooleanSet;
@@ -1031,6 +1108,19 @@ impl<'a, 'g> Check<'a, 'g> {
                 let operand_facts = self.expression_facts(operand)?;
                 let path = operand_facts.and_then(|e| e.path.as_ref());
                 let place = self.place_storage(&state, path)?;
+                if state.has_option_lists()
+                    && let Some(path) = path
+                {
+                    let inspection = if syntax.kind == NodeKind::Prefix("&")
+                        && matches!(&place, PlaceStorage::Exact((Root::Local(id), component))
+                            if std::ptr::eq(*id, path.root) && component.is_empty())
+                    {
+                        self.option_list_inspection(node)
+                    } else {
+                        None
+                    };
+                    state.access_option_list(path.root, inspection, self.budget)?;
+                }
                 if let PlaceStorage::Exact(address) = place {
                     state.store(root, &[], Content::Alias(address), self.budget)?;
                     return self.singleton(state);
@@ -1178,10 +1268,22 @@ impl<'a, 'g> Check<'a, 'g> {
         path: &[ResultComponent<'g>],
         depth: usize,
     ) -> Work<Alternatives<'g>> {
+        self.component_with_use(alternatives, child, root, path, depth, ValueUse::Used)
+    }
+
+    fn component_with_use(
+        &mut self,
+        alternatives: Alternatives<'g>,
+        child: NodeId,
+        root: Root<'g>,
+        path: &[ResultComponent<'g>],
+        depth: usize,
+        usage: ValueUse,
+    ) -> Work<Alternatives<'g>> {
         self.budget.step(1)?;
         let mut next = Vec::new();
         for state in alternatives {
-            let mut evaluated = self.expression(child, state, depth)?;
+            let mut evaluated = self.expression_with_use(child, state, depth, usage)?;
             for state in &mut evaluated {
                 self.move_value(state, Root::Temporary(child), &[], root, path)?;
             }

@@ -6,6 +6,7 @@ use crate::loader::{GraphId, ModuleKey, Origin};
 use std::collections::BTreeSet;
 
 mod closed_release;
+mod forwarding;
 
 /// Whole-capture disposition. This increment has no complete state.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -64,7 +65,32 @@ pub enum DependencyContract<'g> {
     ListTextElementDisposal {
         bridge: &'g DeclarationId,
     },
+    /// The checked List<Option<string>> backing operation at this use site.
+    ListOptionTextCollection {
+        operation: CollectionOperation,
+        bridge: &'g DeclarationId,
+    },
+    /// A structural Option callback; only an actual Some invokes `bridge`.
+    OptionTextElementDisposal {
+        some: &'g DeclarationId,
+        none: &'g DeclarationId,
+        bridge: &'g DeclarationId,
+    },
+    /// A constructor outside the closed storage contract.
     ResultConstructor,
+    /// Exact cause-free `Result<bool, i32>` construction in pinned storage.
+    FreshResultConstructor {
+        variant: &'g DeclarationId,
+        wrapper: &'g DeclarationId,
+        storage_source: &'g std::path::Path,
+    },
+    /// Drop the actual sealed wrapper, not a call to an ordinary disposer.
+    FreshResultErrorDisposal {
+        /// The constructor node in the dependency site's module.
+        origin: NodeId,
+        variant: &'g DeclarationId,
+        storage_source: &'g std::path::Path,
+    },
     RetainedErrorDisplay,
 }
 
@@ -108,6 +134,19 @@ pub struct GraphRetainingCall<'g> {
     pub suspended: SuspendedRetainingFrame<'g>,
 }
 
+/// A straight ordinary call forwarding one stable Bool into a checked retaining
+/// call. The middle frame's `selected_call` identifies its entry, the leaf frame,
+/// and its own suspended cleanup. Run leaf cleanup, then middle cleanup, then
+/// `suspended.caller_cleanup`; neither call instruction is a checkpoint.
+#[derive(Debug)]
+pub struct GraphForwardedRetainingCall<'g> {
+    pub call: RetainingCallSite<'g>,
+    pub caller_entry_site: Site<'g>,
+    pub on_caller_entry_delivery: CancellationExit<'g>,
+    pub leaf_checkpoint: Site<'g>,
+    pub suspended: SuspendedForwardingFrame<'g>,
+}
+
 #[derive(Debug)]
 pub struct RootReport<'g> {
     site: Site<'g>,
@@ -117,6 +156,7 @@ pub struct RootReport<'g> {
     ordinary_mir: Option<Mir<'g>>,
     enabled_frame: Delivery<'g, Cancellation<'g>>,
     selected_call: Delivery<'g, Box<GraphRetainingCall<'g>>>,
+    forwarded_call: Delivery<'g, Box<GraphForwardedRetainingCall<'g>>>,
     replacement: Delivery<'g, Box<ReplacementCancellation<'g>>>,
     dependencies: Vec<Dependency<'g>>,
 }
@@ -133,6 +173,7 @@ impl<'g> RootReport<'g> {
     pub fn completion(&self) -> Completion {
         if matches!(self.enabled_frame, Delivery::Rejected { .. })
             || matches!(self.selected_call, Delivery::Rejected { .. })
+            || matches!(self.forwarded_call, Delivery::Rejected { .. })
         {
             return Completion::SourceRejected;
         }
@@ -152,6 +193,12 @@ impl<'g> RootReport<'g> {
     /// and leaf-callee premises checked. Ordinary parents do not inherit it.
     pub fn selected_call(&self) -> &Delivery<'g, Box<GraphRetainingCall<'g>>> {
         &self.selected_call
+    }
+    /// A bounded ordinary forwarding context, not general call propagation.
+    /// For a rejection, follow `via_call` to the middle root's `selected_call`,
+    /// then to the canonical leaf finding and its actual delivery site.
+    pub fn forwarded_call(&self) -> &Delivery<'g, Box<GraphForwardedRetainingCall<'g>>> {
+        &self.forwarded_call
     }
     /// The checked disposal-through-install interval, separate from an
     /// enabled-frame judgment. Resolve its body in `GraphReport::active_disposers`.
@@ -174,8 +221,9 @@ impl<'g> RootReport<'g> {
     pub fn ordinary_mir(&self) -> Option<&Mir<'g>> {
         self.ordinary_mir.as_ref()
     }
-    /// Reached edges from successful local lowering. A rejection or exhaustion
-    /// may prevent edge discovery; an empty list isn't a coverage claim.
+    /// Reached ordinary edges from successful local lowering, not a census of
+    /// delivery exits. A rejection or exhaustion may prevent edge discovery;
+    /// an empty list isn't a coverage claim.
     pub fn dependencies(&self) -> &[Dependency<'g>] {
         &self.dependencies
     }
@@ -303,6 +351,9 @@ struct WorkItem<'a, 'g> {
     enabled_proof: Option<Cancellation<'g>>,
     retaining_parameters: Option<[Place<'g>; 3]>,
     selected_proof: Option<Box<GraphRetainingCall<'g>>>,
+    selected_gate: Option<Place<'g>>,
+    has_retaining_call: bool,
+    forwarded_proof: Option<Box<GraphForwardedRetainingCall<'g>>>,
 }
 
 type FindingIndex = BTreeMap<(usize, NodeId, NodeId, Conflict), usize>;
@@ -387,6 +438,7 @@ fn push_body<'a, 'g>(
         ordinary_mir: None,
         enabled_frame: Delivery::Unresolved,
         selected_call: Delivery::Unresolved,
+        forwarded_call: Delivery::Unresolved,
         replacement: Delivery::Unresolved,
         dependencies: Vec::new(),
     });
@@ -408,6 +460,9 @@ fn push_body<'a, 'g>(
         enabled_proof: None,
         retaining_parameters: None,
         selected_proof: None,
+        selected_gate: None,
+        has_retaining_call: false,
+        forwarded_proof: None,
     });
     Ok(index)
 }
@@ -573,6 +628,10 @@ fn analyze<'g>(
                             | DependencyContract::ListI32Iteration { .. }
                             | DependencyContract::ListTextCollection { .. }
                             | DependencyContract::ListTextElementDisposal { .. }
+                            | DependencyContract::ListOptionTextCollection { .. }
+                            | DependencyContract::OptionTextElementDisposal { .. }
+                            | DependencyContract::FreshResultConstructor { .. }
+                            | DependencyContract::FreshResultErrorDisposal { .. }
                     ) || closed_release::proved(
                         typed,
                         module,
@@ -714,6 +773,9 @@ fn analyze<'g>(
         if let Some(proof) = item.selected_proof {
             root.selected_call = Delivery::Proved(proof);
         }
+        if let Some(proof) = item.forwarded_proof {
+            root.forwarded_call = Delivery::Proved(proof);
+        }
         if let Some(proof) = item.replacement_proof {
             root.replacement = Delivery::Proved(proof);
         }
@@ -818,7 +880,9 @@ fn check_enabled_frames<'g>(
             }
             Ok(None) | Err(Stop::Pending(_) | Stop::Rejected { .. }) => {}
         }
-        if ordinary_checked && trace.retaining_call_block().is_some() {
+        if ordinary_checked && let Some(block) = trace.retaining_call_block() {
+            work[index].has_retaining_call = matches!(work[index].ordinary.as_ref().unwrap().blocks[block].operation,
+                Operation::CallRetainingWithBool { second_input: None, ref arguments, .. } if arguments.len() == 3);
             work[index].trace = Some(trace);
         }
     }
@@ -830,6 +894,7 @@ fn check_selected_calls<'g>(
     report: &mut GraphReport<'g>,
     budget: &mut Budget,
 ) -> Result<(), ()> {
+    let mut forwarding_candidates = Vec::new();
     for index in 0..report.source_roots {
         budget.step(1)?;
         let Some(trace) = work[index].trace.take() else {
@@ -841,10 +906,22 @@ fn check_selected_calls<'g>(
         let Some(&callee_root) = item.call_targets.get(&block) else {
             continue;
         };
+        let mir = item.ordinary.as_ref().unwrap();
         let Some(parameters) = work[callee_root].retaining_parameters else {
+            if callee_root != index
+                && work[callee_root].has_retaining_call
+                && work[callee_root].ordinary_completion == Completion::Checked
+                && let Some((_, callee)) = trace.forwarding_call(mir)
+                && work[callee_root]
+                    .declaration
+                    .is_some_and(|declaration| std::ptr::eq(&declaration.id, callee))
+            {
+                budget.reserve(1)?;
+                forwarding_candidates.push((index, block, callee_root));
+                work[index].trace = Some(trace);
+            }
             continue;
         };
-        let mir = item.ordinary.as_ref().unwrap();
         let call = match trace.prepare_retaining_call(mir, budget) {
             Ok(Some(call)) => call,
             Err(Stop::Limit) => return Err(()),
@@ -855,10 +932,11 @@ fn check_selected_calls<'g>(
             site: mir.blocks[block].site,
             callee_root,
         };
-        // Only this exact context can reuse the enabled result. In particular,
-        // neither an ordinary caller nor a second nested call inherits it.
+        // Only the admitted retaining transfer can reuse the enabled result.
+        let gate = call.forwarded_parameter();
         if let Delivery::Rejected { finding_id, .. } = report.bodies[callee_root].enabled_frame {
             budget.reserve(1)?;
+            work[index].selected_gate = gate;
             report.bodies[index].selected_call = Delivery::Rejected {
                 finding_id,
                 via_call: Some(site),
@@ -867,6 +945,7 @@ fn check_selected_calls<'g>(
         }
         match call.finish_caller(parameters, budget) {
             Ok(Some((entry, suspended))) => {
+                work[index].selected_gate = gate;
                 work[index].selected_proof = Some(Box::new(GraphRetainingCall {
                     call: site,
                     caller_entry_site: entry.entry_site,
@@ -878,7 +957,7 @@ fn check_selected_calls<'g>(
             Ok(None) | Err(Stop::Pending(_) | Stop::Rejected { .. }) => {}
         }
     }
-    Ok(())
+    forwarding::check(work, report, forwarding_candidates, budget)
 }
 
 fn lower_indexed<'a, 'g>(
@@ -1030,6 +1109,22 @@ pub(super) fn visit_dependencies<'g>(
                 },
                 budget,
             )?,
+            Operation::OpenOwnedListOptionText { provider, .. }
+            | Operation::AdvanceOwnedListOptionText { provider, .. } => emit(
+                &provider.implementation.id,
+                ListOptionTextCollection {
+                    operation: if matches!(
+                        block.operation,
+                        Operation::OpenOwnedListOptionText { .. }
+                    ) {
+                        CollectionOperation::Iterate(Owned)
+                    } else {
+                        CollectionOperation::Next(Owned)
+                    },
+                    bridge: &provider.bridge.id,
+                },
+                budget,
+            )?,
             Operation::CallCallableTransfer { callee, layout, .. } => {
                 emit(callee, CallableTransfer(layout), budget)?
             }
@@ -1067,6 +1162,62 @@ pub(super) fn visit_dependencies<'g>(
                         emit(implementation, ListI32Disposal { bridge }, budget)?;
                     }
                 }
+                for frame in &join.frames {
+                    if frame.result_origin.is_none() {
+                        continue;
+                    }
+                    // A child and its unpublished output are not ordinary
+                    // graph roots. Include the sealed edges of the actual
+                    // child body and the cleanup owed only on cancellation.
+                    for child in &frame.body.blocks {
+                        budget.step(1)?;
+                        let (declaration, contract) = match child.operation {
+                            Operation::ConstructResultError {
+                                constructor,
+                                variant,
+                                wrapper,
+                                ..
+                            } => (
+                                constructor,
+                                FreshResultConstructor {
+                                    variant,
+                                    wrapper,
+                                    storage_source: child
+                                        .fresh_result_storage
+                                        .ok_or(Stop::Pending(child.site.node))?,
+                                },
+                            ),
+                            Operation::StageScopedValue {
+                                retirement:
+                                    Cleanup::DropFreshResultError {
+                                        origin,
+                                        variant,
+                                        wrapper,
+                                        storage_source,
+                                        ..
+                                    },
+                                ..
+                            } => (
+                                wrapper,
+                                FreshResultErrorDisposal {
+                                    origin: origin.node,
+                                    variant,
+                                    storage_source,
+                                },
+                            ),
+                            _ => continue,
+                        };
+                        visit(
+                            index,
+                            Dependency {
+                                site: child.site,
+                                declaration,
+                                contract,
+                            },
+                            budget,
+                        )?;
+                    }
+                }
             }
             Operation::CopyClosure { ref captures, .. } => {
                 budget.step(captures.len())?;
@@ -1088,9 +1239,22 @@ pub(super) fn visit_dependencies<'g>(
                 budget,
             )?,
             Operation::Dispose { callee, .. } => emit(callee, BuiltinDispose, budget)?,
-            Operation::ConstructResultError { constructor, .. } => {
-                emit(constructor, ResultConstructor, budget)?
-            }
+            Operation::ConstructResultError {
+                constructor,
+                variant,
+                wrapper,
+                ..
+            } => emit(
+                constructor,
+                block
+                    .fresh_result_storage
+                    .map_or(ResultConstructor, |storage_source| FreshResultConstructor {
+                        variant,
+                        wrapper,
+                        storage_source,
+                    }),
+                budget,
+            )?,
             Operation::WrapResultFailure { cause_display, .. } => {
                 emit(cause_display, RetainedErrorDisplay, budget)?
             }
@@ -1098,6 +1262,21 @@ pub(super) fn visit_dependencies<'g>(
                 budget.step(actions.len())?;
                 for action in actions {
                     match *action {
+                        Cleanup::DropFreshResultError {
+                            origin,
+                            variant,
+                            wrapper,
+                            storage_source,
+                            ..
+                        } => emit(
+                            wrapper,
+                            FreshResultErrorDisposal {
+                                origin: origin.node,
+                                variant,
+                                storage_source,
+                            },
+                            budget,
+                        )?,
                         Cleanup::InvokeDisposer { implementation, .. } => {
                             emit(implementation, ActiveDisposer, budget)?
                         }
@@ -1156,6 +1335,52 @@ pub(super) fn visit_dependencies<'g>(
                                 budget,
                             )?;
                         }
+                        Cleanup::DisposeListOptionText {
+                            implementation,
+                            bridge,
+                            element,
+                            ..
+                        }
+                        | Cleanup::DisposeOwnedListIterOptionText {
+                            implementation,
+                            bridge,
+                            element,
+                            ..
+                        } => {
+                            emit(
+                                implementation,
+                                ListOptionTextCollection {
+                                    operation: if matches!(
+                                        action,
+                                        Cleanup::DisposeListOptionText { .. }
+                                    ) {
+                                        CollectionOperation::DisposeList
+                                    } else {
+                                        CollectionOperation::DisposeIterator(Owned)
+                                    },
+                                    bridge,
+                                },
+                                budget,
+                            )?;
+                            emit(
+                                element.payload.implementation,
+                                OptionTextElementDisposal {
+                                    some: element.some,
+                                    none: element.none,
+                                    bridge: element.payload.bridge,
+                                },
+                                budget,
+                            )?;
+                        }
+                        Cleanup::DropYieldedOptionText { element, .. } => emit(
+                            element.payload.implementation,
+                            OptionTextElementDisposal {
+                                some: element.some,
+                                none: element.none,
+                                bridge: element.payload.bridge,
+                            },
+                            budget,
+                        )?,
                         _ => {}
                     }
                 }

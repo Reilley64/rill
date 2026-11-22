@@ -216,6 +216,36 @@ impl<'g> OrdinaryAnalysis<'g> {
         Ok(())
     }
 
+    pub(super) fn mark_option_iterator(
+        &mut self,
+        function: &'g DeclarationId,
+        formal: &'g DeclarationId,
+        site: NodeId,
+        budget: &mut Budget,
+    ) -> Work<()> {
+        let width = function.module.path.len().checked_add(4).ok_or(())?;
+        budget.step(
+            width
+                .checked_mul(self.types.declarations.len() + 1)
+                .ok_or(())?,
+        )?;
+        let header = self
+            .types
+            .declarations
+            .get_mut(function)
+            .expect("checked function");
+        let DeclarationShape::Function { parameters, .. } = &mut header.shape else {
+            unreachable!("checked formal")
+        };
+        budget.step(parameters.len())?;
+        let parameter = parameters
+            .iter_mut()
+            .find(|p| std::ptr::eq(&p.declaration.id, formal))
+            .expect("source formal");
+        parameter.option_iteration_source = Some(site);
+        Ok(())
+    }
+
     pub fn type_facts(&self) -> &PartialFacts<'g> {
         &self.types
     }

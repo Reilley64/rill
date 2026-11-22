@@ -16,7 +16,48 @@ struct Arguments<'a, 'g> {
     outer: Option<&'a Arguments<'a, 'g>>,
 }
 
+pub(super) fn text_option(ty: &Type<'_>, option: &DeclarationId) -> bool {
+    matches!(ty.as_ref(), TypeTerm::Nominal { declaration, arguments }
+        if std::ptr::eq(*declaration, option)
+            && matches!(arguments.as_slice(), [payload]
+                if matches!(payload.as_ref(), TypeTerm::Primitive(p) if p.name() == "string")))
+}
+
 impl<'a, 'g> Check<'a, 'g> {
+    pub(super) fn text_option_list(&self, ty: &Type<'g>) -> bool {
+        let (Some(option), Some(list)) = (self.core.option, self.core.collections.list) else {
+            return false;
+        };
+        matches!(ty.as_ref(), TypeTerm::Nominal { declaration, arguments }
+            if std::ptr::eq(*declaration, &list.declaration.id)
+                && matches!(arguments.as_slice(), [element] if text_option(element, option.declaration)))
+            && self.core.collections.representations().next().is_some()
+    }
+
+    pub(super) fn seed_parameter(
+        &mut self,
+        mut states: Alternatives<'g>,
+        parameter: &MemberType<'g>,
+        checked: bool,
+    ) -> Work<Alternatives<'g>> {
+        let id = &parameter.declaration.id;
+        if checked && self.text_option_list(&parameter.ty) {
+            // The admitted List representation stores only Option<string>.
+            // No containment probe or item-tag split is needed at entry.
+            self.depth(1)?;
+            for state in &mut states {
+                state.add_option_list(id, self.budget)?;
+            }
+            return Ok(states);
+        }
+        self.seed(
+            states,
+            Root::Local(id),
+            parameter.declaration.node,
+            &parameter.ty,
+        )
+    }
+
     pub(super) fn seed(
         &mut self,
         states: Alternatives<'g>,

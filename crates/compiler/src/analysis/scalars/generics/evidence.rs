@@ -113,7 +113,7 @@ pub struct GoalFacts<'g> {
     pub arrow_origin: Option<Arc<ArrowFacts<'g>>>,
     // Direct source occurrences on a determination, or on a property goal
     // for its written whole input. Equal substituted output types do not inherit them.
-    argument_pair: Option<ArgumentPair<'g>>,
+    pub(super) argument_pair: Option<ArgumentPair<'g>>,
     /// A verdict only under the retained role and protection premise.
     pub hypothetical: Option<GoalVerdict>,
     pub selection: Option<GoalSelection<'g>>,
@@ -142,6 +142,10 @@ pub(in crate::analysis) struct Evidence<'g> {
 impl<'g> Evidence<'g> {
     pub(in crate::analysis) fn goals(&self) -> &[GoalFacts<'g>] {
         &self.goals
+    }
+
+    pub(super) fn uses_current_assumptions(&self, goal: &GoalFacts<'g>) -> bool {
+        goal.assumptions == self.assumptions
     }
 
     pub(in crate::analysis) fn get(&self, id: &GoalId) -> Result<&GoalFacts<'g>, QueryError> {
@@ -839,6 +843,65 @@ impl<'r, 'g> Checker<'r, 'g> {
             self.add_goal_premise(goal, premise);
         }
         self.evidence.goals[goal.index].arrow_origin = origin;
+    }
+
+    // A delayed group can carry a premise before its parent sees it. Read
+    // every group slot and the leaf, both when issuing a goal and on reuse.
+    fn scoped_operand_leaf(
+        &mut self,
+        inference: &Inference<'g>,
+        mut node: NodeId,
+        mut depth: usize,
+        premise: &mut Option<InputPremise>,
+        settled: &mut bool,
+    ) -> Work<(NodeId, usize)> {
+        loop {
+            self.equation_depth(depth)?;
+            self.elab
+                .step(1 + inference.slots.len().max(1).ilog2() as usize)?;
+            let slot = &inference.slots[&node];
+            if let Some(p) = slot.ordinary_context {
+                *premise = Some(premise.map_or(p, |old| old.combine(p)));
+            }
+            *settled &= !slot.blocked && slot.ty.is_some();
+            let syntax = &inference.module.syntax.nodes[node];
+            if syntax.kind != NodeKind::Group {
+                return Ok((node, depth));
+            }
+            node = syntax.children[0];
+            depth += 1;
+        }
+    }
+
+    pub(super) fn scoped_pair_context(
+        &mut self,
+        inference: &Inference<'g>,
+        call: &PreparedCall<'g>,
+    ) -> Work<(bool, Option<InputPremise>)> {
+        let [argument] = call.fact.arguments.as_slice() else {
+            return Ok((false, None));
+        };
+        let mut settled = true;
+        let mut premise = None;
+        let (tuple, depth) =
+            self.scoped_operand_leaf(inference, *argument, 1, &mut premise, &mut settled)?;
+        let syntax = &inference.module.syntax.nodes[tuple];
+        match (syntax.kind, syntax.children.as_slice()) {
+            (NodeKind::ValueReference, _) => (),
+            (NodeKind::Bracket, [a, b]) => {
+                for &element in [a, b] {
+                    self.scoped_operand_leaf(
+                        inference,
+                        element,
+                        depth + 1,
+                        &mut premise,
+                        &mut settled,
+                    )?;
+                }
+            }
+            _ => settled = false,
+        }
+        Ok((settled, premise))
     }
 
     pub(super) fn direct_argument_pair(
@@ -2178,7 +2241,44 @@ impl<'r, 'g> Checker<'r, 'g> {
             )?;
             return Ok(GoalState::Proved);
         }
-        if let Some(repr) = self.result.and_then(|r| r.representation) {
+        if let Some(role) = self.result
+            && let Some(repr) = role.representation
+        {
+            if Predicate::of(intrinsic) == Predicate::Sendable
+                && **declaration == role.declaration.id
+                && variant.is_none_or(|id| *id == role.ok.id || *id == role.err.id)
+                && let [ok, error] = arguments.as_slice()
+                && primitive_name(ok) == Some("bool")
+                && primitive_name(error) == Some("i32")
+            {
+                // The installed role checks both payload layouts, and its
+                // pinned error storage seals the origin and retained cause.
+                // Only the exact Ok variant lacks storage for an Err wrapper.
+                let module = self.evidence_module(&declaration.module)?;
+                if variant != Some(&role.err.id) {
+                    self.property_dependency(
+                        goal,
+                        intrinsic,
+                        ok.clone(),
+                        Self::site(module, role.ok.node),
+                    )?;
+                }
+                if variant == Some(&role.ok.id) {
+                    return Ok(GoalState::Proved);
+                }
+                self.elab.reserve(2)?;
+                let wrapper = Arc::new(TypeTerm::Nominal {
+                    declaration: &repr.wrapper.id,
+                    arguments: vec![error.clone()],
+                });
+                self.property_dependency(
+                    goal,
+                    intrinsic,
+                    wrapper,
+                    Self::site(module, role.err.node),
+                )?;
+                return Ok(GoalState::Proved);
+            }
             if **declaration == repr.cause.id
                 || **declaration == repr.source_location.id
                 || **declaration == repr.message.id

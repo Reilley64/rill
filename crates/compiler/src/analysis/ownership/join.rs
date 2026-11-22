@@ -22,6 +22,7 @@ pub enum JoinEvent {
     EnterChild { slot: usize, yielded: bool },
     StageResult(usize),
     EndChildView(usize),
+    CleanChildEnvironment(usize),
     FinishChild(usize),
     RequestStop,
     YieldWhileWaiting,
@@ -38,10 +39,10 @@ pub enum JoinNext<'g> {
         /// Caller input keys carried into the corresponding tuple members.
         retained_results: [Option<Place<'g>>; 2],
     },
-    /// End these initialized, unpublished stages (no disposer), then run the
+    /// Retire only these initialized, unpublished stages, then run the
     /// proof's parent exit. There is no ordinary successor on this edge.
     Cancel {
-        retired: [Option<Place<'g>>; 2],
+        retired: [Option<Cleanup<'g>>; 2],
     },
     /// Retire the initialized parent-owned prefix, then run the parent exit.
     CancelBeforeCommit,
@@ -63,7 +64,7 @@ pub struct JoinWait<'g> {
     pub initialized_results: [bool; 2],
     /// Backing keys the parent preserves throughout the wait, independently
     /// of the live environments and initialized results.
-    pub retained_backings: [Place<'g>; 2],
+    pub retained_backings: [Option<Place<'g>>; 2],
     /// Each live environment carries its input dependency until its storage ends.
     pub environment_backings: [Option<Place<'g>>; 2],
     /// Backings still restricted by a transferred exclusive loan.
@@ -80,16 +81,19 @@ pub struct ScopedJoinFrame<'g> {
     pub invocation: Site<'g>,
     pub body_site: Site<'g>,
     pub environment: Place<'g>,
-    pub capture: Place<'g>,
+    pub capture: Option<Place<'g>>,
     /// The caller's List owner, or the incoming descriptor's caller-dependency
     /// key. A descriptor key does not denote its local storage or exact referent.
-    pub backing: Place<'g>,
+    /// An owned scalar capture has no backing dependency.
+    pub backing: Option<Place<'g>>,
     /// The non-owning List proxy. Reference children instead use their capture.
     pub incoming_list_backing: Option<Place<'g>>,
     /// Access carried by the moved environment, not a new loan in the child.
     pub exclusive: bool,
     pub result: Place<'g>,
     pub body: Arc<Mir<'g>>,
+    pub(super) value: bool,
+    pub(super) result_origin: Option<Site<'g>>,
 }
 
 /// Closed ownership transitions at one selected source call. The parent

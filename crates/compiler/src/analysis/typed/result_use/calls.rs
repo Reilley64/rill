@@ -87,6 +87,9 @@ impl<'a, 'g> Check<'a, 'g> {
             for mut state in states {
                 self.budget.reserve(1)?;
                 if self.transfer_pair(node, value, call, &mut state, boundary, depth + 1)? {
+                    if scoped && let Some(slot) = self.fresh_result_slot(&value.ty) {
+                        self.split_captured_flag(node, 1 - slot, &mut state, &mut forwarded)?;
+                    }
                     forwarded.push(state);
                 } else {
                     self.pending(node, ResultUseBlocker::CallBoundary)?;
@@ -100,7 +103,13 @@ impl<'a, 'g> Check<'a, 'g> {
                     pending.push(state);
                 }
             }
-            forwarded.extend(self.call_output(node, value, pending)?);
+            if scoped && self.fresh_result_slot(&value.ty).is_some() {
+                // A failed child proof has no known Result occurrence. Keep the
+                // caller residences; seeding from the type would blame the join.
+                forwarded.extend(pending);
+            } else {
+                forwarded.extend(self.call_output(node, value, pending)?);
+            }
             return Ok(forwarded);
         }
         if scoped {
@@ -128,6 +137,9 @@ impl<'a, 'g> Check<'a, 'g> {
             } else {
                 self.singleton(Residence::default())
             };
+        }
+        if scoped && self.fresh_result_slot(&value.ty).is_some() {
+            return Ok(states);
         }
         self.call_output(node, value, states)
     }
@@ -211,6 +223,7 @@ impl<'a, 'g> Check<'a, 'g> {
                         let affected = state.take(address.0, &address.1, self.budget)?;
                         self.budget.step(affected.len())?;
                         let stale = |entry: &Located<'g>| match &entry.content {
+                            Content::BooleanCopy(_) => true,
                             Content::Test(tag, _) if boolean_storage => {
                                 matches!(tag.as_ref(), Constructor::Boolean(_))
                             }

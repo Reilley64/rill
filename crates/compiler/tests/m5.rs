@@ -22,10 +22,16 @@ mod captures;
 mod disposers;
 #[path = "m5/field_routes.rs"]
 mod field_routes;
+#[path = "m5/fresh_result_storage.rs"]
+mod fresh_result_storage;
 #[path = "m5/graph.rs"]
 mod graph;
 #[path = "m5/iteration.rs"]
 mod iteration;
+#[path = "m5/iteration_result_use.rs"]
+mod iteration_result_use;
+#[path = "m5/o15_arithmetic.rs"]
+mod o15_arithmetic;
 #[path = "m5/patterns.rs"]
 mod patterns;
 #[path = "m5/propagation.rs"]

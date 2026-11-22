@@ -12,6 +12,7 @@ pub(super) fn ungroup(module: &Module, mut node: NodeId, budget: &mut Budget) ->
     }
 }
 use crate::analysis::scalars::data::Construction;
+use storage::BooleanValue;
 
 pub(super) enum PlaceStorage<'g> {
     Exact(Address<'g>),
@@ -35,6 +36,7 @@ impl<'a, 'g> Check<'a, 'g> {
         value: &ExpressionFacts<'g>,
         state: &mut Residence<'g>,
         (from, component): Address<'g>,
+        usage: ValueUse,
     ) -> Work<()> {
         let root = Root::Temporary(node);
         if matches!(value.ty.as_ref(), TypeTerm::Reference { .. }) {
@@ -53,11 +55,19 @@ impl<'a, 'g> Check<'a, 'g> {
                 }
             }
         } else if let TypeTerm::Primitive(p) = value.ty.as_ref() {
-            if p.name() == "bool"
-                && let Some(truth) =
-                    state.test(from, &component, &Constructor::Boolean(true), self.budget)?
-            {
-                self.record_boolean(state, root, &[], truth)?;
+            if p.name() == "bool" {
+                if let Some(value) = state.boolean_value(from, &component, self.budget)? {
+                    self.install_boolean(state, root, value)?;
+                } else if !self.wildcard_sources.is_empty() && !self.discarded_value(usage)? {
+                    for (source, path) in self.wildcard_sources.iter().rev() {
+                        self.budget.step(1 + component.len())?;
+                        if from == *source && component == *path {
+                            let copy = state.new_boolean_copy(from, &component, self.budget)?;
+                            self.install_boolean(state, root, BooleanValue::Copy(copy))?;
+                            break;
+                        }
+                    }
+                }
             }
         } else if value.access == Access::Owned {
             self.move_value(state, from, &component, root, &[])?;
@@ -67,6 +77,18 @@ impl<'a, 'g> Check<'a, 'g> {
         Ok(())
     }
 
+    pub(super) fn discarded_value(&mut self, usage: ValueUse) -> Work<bool> {
+        match usage {
+            ValueUse::Used => Ok(false),
+            ValueUse::Statement => Ok(true),
+            ValueUse::Binding { pattern, depth } => match self.module.syntax.nodes[pattern].kind {
+                NodeKind::Wildcard => Ok(true),
+                NodeKind::GroupPattern => self.wildcard_at(pattern, depth),
+                _ => Ok(false),
+            },
+        }
+    }
+
     pub(super) fn dereference(
         &mut self,
         node: NodeId,
@@ -74,6 +96,7 @@ impl<'a, 'g> Check<'a, 'g> {
         value: &ExpressionFacts<'g>,
         state: Residence<'g>,
         depth: usize,
+        usage: ValueUse,
     ) -> Work<Alternatives<'g>> {
         let mut states = self.expression(operand, state, depth)?;
         let descriptor = Root::Temporary(operand);
@@ -81,7 +104,7 @@ impl<'a, 'g> Check<'a, 'g> {
         for state in &mut states {
             let aliases = state.aliases_under(descriptor, &[], self.budget)?;
             if let Some(address) = state.alias(descriptor, &[], self.budget)? {
-                self.read_place(node, value, state, address)?;
+                self.read_place(node, value, state, address, usage)?;
             } else if !scalar && !aliases.is_empty() {
                 // A borrowed parameter with no tracked local referent does
                 // not own a local occurrence. Possible local aliases do matter.
@@ -162,7 +185,7 @@ impl<'a, 'g> Check<'a, 'g> {
         Ok(PlaceStorage::Exact((root, component)))
     }
 
-    fn redirect_view(
+    pub(super) fn redirect_view(
         &mut self,
         root: &mut Root<'g>,
         component: &mut Vec<ResultComponent<'g>>,
@@ -256,11 +279,17 @@ impl<'a, 'g> Check<'a, 'g> {
         // Invalidating a location can discard a hint without losing a
         // tracked residence or handing a later store an incoming origin.
         self.budget.step(affected.len())?;
-        if affected.iter().any(|entry| {
-            !matches!(
-                entry.content,
-                Content::CallerBoolOrigin(_) | Content::ConsumedPair
-            )
+        if affected.iter().any(|entry| match &entry.content {
+            Content::BooleanCopy(_) | Content::CallerBoolOrigin(_) | Content::ConsumedPair => false,
+            Content::Test(tag, _) if matches!(tag.as_ref(), Constructor::Boolean(_)) => {
+                // A Boolean fact at a named field describes that scalar only.
+                // Keep the existing storage boundary for nested tuple elements.
+                !matches!(
+                    entry.component.last().or_else(|| path.last()),
+                    Some(ResultComponent::Field(_))
+                )
+            }
+            _ => true,
         }) {
             self.pending(site, ResultUseBlocker::Storage)?;
         }
