@@ -431,6 +431,369 @@ function unsafeBody(slot: &mut &bool, input: &bool, enter: bool): void {
     }
 }
 
+fn one_short(limits: AnalysisLimits) -> [AnalysisLimits; 3] {
+    [
+        AnalysisLimits {
+            max_work: limits.max_work - 1,
+            ..limits
+        },
+        AnalysisLimits {
+            max_entries: limits.max_entries - 1,
+            ..limits
+        },
+        AnalysisLimits {
+            max_depth: limits.max_depth - 1,
+            ..limits
+        },
+    ]
+}
+
+fn assert_target_one_short(
+    receipt: &TypedReceipt<'_, '_>,
+    module: &loader::Module,
+    owner: BodyOwner<'_>,
+    cap: AnalysisLimits,
+) {
+    for short in one_short(cap) {
+        let exhausted = lower_root(receipt, module, owner, short).unwrap();
+        assert_eq!(
+            exhausted.completion(),
+            Completion::ResourceLimit,
+            "{short:?}"
+        );
+        assert!(exhausted.mir().is_none() && exhausted.findings().is_empty());
+    }
+}
+
+fn assert_graph_one_short(receipt: &TypedReceipt<'_, '_>, cap: AnalysisLimits) {
+    for short in one_short(cap) {
+        let exhausted = analyze_ownership(receipt, short);
+        assert_eq!(
+            exhausted.completion(),
+            GraphCompletion::ResourceLimit,
+            "{short:?}"
+        );
+    }
+}
+
+fn infeasible_chain() -> String {
+    let (_, tail) = OTHER.split_once("function infeasibleLeaf").unwrap();
+    let (chain, _) = tail.split_once("function constantCaller").unwrap();
+    format!("function infeasibleLeaf{chain}")
+}
+
+#[test]
+fn infeasible_forwarded_checkpoint_keeps_the_original_frame_budgets() {
+    let source = infeasible_chain();
+    for (source, target_cap, graph_cap) in [
+        (source.clone(), (7597, 1009, 6), (190882, 5008, 6)),
+        (
+            source.replace(
+                "if (enter) {} else { while (enter)",
+                "if ((enter)) {} else { while (((enter)))",
+            ),
+            (7621, 1018, 8),
+            (191077, 5011, 8),
+        ),
+        (
+            format!("{source}function unrelated(): void {{ let x = true; }}\n"),
+            (7621, 1021, 6),
+            (191362, 5064, 6),
+        ),
+        (
+            source.replace(
+                "infeasibleMiddle(enter); }",
+                "infeasibleMiddle(enter); return; let _ = false; }",
+            ),
+            (7611, 1015, 6),
+            (191008, 5010, 6),
+        ),
+    ] {
+        probe(
+            "graph::delivery::infeasible_forwarded_checkpoint_keeps_the_original_frame_budgets",
+            &source,
+            |_, module, receipt| {
+                // Independent caps from before forwarded delivery was introduced.
+                let caps = |(max_work, max_entries, max_depth)| AnalysisLimits {
+                    max_work,
+                    max_entries,
+                    max_depth,
+                };
+                let outer = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some("infeasibleOuter"))
+                    .unwrap();
+                let target = lower_root(
+                    receipt,
+                    module,
+                    BodyOwner::Declaration(&outer.id),
+                    caps(target_cap),
+                )
+                .unwrap();
+                assert_eq!(target.completion(), Completion::Checked, "{target_cap:?}");
+                let stats = target.statistics();
+                assert_eq!((stats.work, stats.entries, stats.max_depth), target_cap);
+                assert!(target.mir().unwrap().cancellation().is_none());
+                assert!(
+                    target.findings().is_empty() && target.rejected_forwarding_calls().is_none()
+                );
+                assert_target_one_short(
+                    receipt,
+                    module,
+                    BodyOwner::Declaration(&outer.id),
+                    caps(target_cap),
+                );
+
+                let graph = analyze_ownership(receipt, caps(graph_cap));
+                assert_eq!(
+                    graph.completion(),
+                    GraphCompletion::Incomplete,
+                    "{graph_cap:?}"
+                );
+                let stats = graph.statistics();
+                assert_eq!((stats.work, stats.entries, stats.max_depth), graph_cap);
+                let outer = root(&graph, b"function infeasibleOuter");
+                assert_eq!(outer.ordinary_completion(), Completion::Checked);
+                assert!(outer.ordinary_mir().is_some());
+                assert!(matches!(outer.forwarded_call(), Delivery::Unresolved));
+                assert!(graph.findings().is_empty());
+                assert_graph_one_short(receipt, caps(graph_cap));
+            },
+        );
+    }
+
+    // The release-isolation fixture of 81359e31 at its published target cap.
+    let matched = format!(
+        "{SAFE}{OTHER}
+function computedOuter(enter: bool): void {{ bad(!enter); }}
+function backedgeOuter(enter: bool): void {{ while (enter) {{ continue; }} bad(enter); }}
+"
+    );
+    probe(
+        "graph::delivery::infeasible_forwarded_checkpoint_keeps_the_original_frame_budgets",
+        &matched,
+        |_, module, receipt| {
+            let cap = AnalysisLimits {
+                max_work: 10495,
+                max_entries: 2458,
+                max_depth: 6,
+            };
+            let outer = module
+                .declarations
+                .iter()
+                .find(|d| d.name.as_deref() == Some("infeasibleOuter"))
+                .unwrap();
+            let owner = BodyOwner::Declaration(&outer.id);
+            let target = lower_root(receipt, module, owner, cap).unwrap();
+            assert_eq!(target.completion(), Completion::Checked);
+            let stats = target.statistics();
+            assert_eq!(
+                (stats.work, stats.entries, stats.max_depth),
+                (10495, 2458, 6)
+            );
+            assert!(target.mir().unwrap().cancellation().is_none());
+            assert!(target.findings().is_empty() && target.rejected_forwarding_calls().is_none());
+            assert_target_one_short(receipt, module, owner, cap);
+
+            let graph_cap = AnalysisLimits {
+                max_work: 247061,
+                max_entries: 14522,
+                max_depth: 11,
+            };
+            let graph = analyze_ownership(receipt, graph_cap);
+            assert_eq!(graph.completion(), GraphCompletion::SourceRejected);
+            let stats = graph.statistics();
+            assert_eq!(
+                (stats.work, stats.entries, stats.max_depth),
+                (247061, 14522, 11)
+            );
+            assert_graph_one_short(receipt, graph_cap);
+            let outer = root(&graph, b"function infeasibleOuter");
+            assert_eq!(outer.ordinary_completion(), Completion::Checked);
+            assert!(outer.ordinary_mir().is_some());
+            assert!(matches!(outer.forwarded_call(), Delivery::Unresolved));
+        },
+    );
+}
+
+#[test]
+fn feasible_nested_checkpoint_still_rejects_the_forwarding_call() {
+    let source = infeasible_chain().replace(
+        "if (enter) {} else { while (enter) { continue; } }",
+        "if ((enter)) { while (((enter))) { continue; } }",
+    );
+    let source = source.replace("infeasible", "reached");
+    probe(
+        "graph::delivery::feasible_nested_checkpoint_still_rejects_the_forwarding_call",
+        &source,
+        |_, module, receipt| {
+            let graph_cap = AnalysisLimits {
+                max_work: 190831,
+                max_entries: 4937,
+                max_depth: 8,
+            };
+            let graph = analyze_ownership(receipt, graph_cap);
+            assert_eq!(graph.completion(), GraphCompletion::SourceRejected);
+            let stats = graph.statistics();
+            assert_eq!(
+                (stats.work, stats.entries, stats.max_depth),
+                (190831, 4937, 8)
+            );
+            assert_graph_one_short(receipt, graph_cap);
+            let outer = root(&graph, b"function reachedOuter");
+            let Delivery::Rejected {
+                finding_id,
+                via_call: Some(call),
+            } = outer.forwarded_call()
+            else {
+                panic!("missing original outer call in graph delivery rejection");
+            };
+            assert_eq!(call.site.span.bytes(), b"reachedMiddle(enter)");
+            assert!(outer.ordinary_mir().is_some() && outer.mir().is_none());
+            assert_eq!(outer.ordinary_completion(), Completion::Checked);
+            let target_cap = AnalysisLimits {
+                max_work: 7751,
+                max_entries: 1068,
+                max_depth: 8,
+            };
+            let target = lower_root(receipt, module, outer.owner(), target_cap).unwrap();
+            assert_eq!(target.completion(), Completion::SourceRejected);
+            let stats = target.statistics();
+            assert_eq!(
+                (stats.work, stats.entries, stats.max_depth),
+                (7751, 1068, 8)
+            );
+            assert_target_one_short(receipt, module, outer.owner(), target_cap);
+            assert!(target.mir().is_none());
+            let [outer, retaining] = target.rejected_forwarding_calls().unwrap();
+            assert_eq!(
+                (outer.module, outer.node),
+                (call.site.module, call.site.node)
+            );
+            assert_eq!(
+                retaining.span.bytes(),
+                b"reachedLeaf(&mut slot, &input, enter)"
+            );
+            let enabled = &graph.findings()[*finding_id];
+            let [local] = target.findings() else {
+                panic!("missing independent leaf finding");
+            };
+            for finding in [enabled, local] {
+                assert_eq!(finding.code(), "R0202");
+                assert_eq!(finding.site.span.bytes(), b"*slot = &flag;");
+                assert_eq!(finding.related.span.bytes(), b"&flag");
+                let delivery = finding.cancellation_delivery.unwrap();
+                assert_eq!(
+                    (delivery.module, delivery.node),
+                    (&module.key, enabled.cancellation_delivery.unwrap().node)
+                );
+                assert_eq!(delivery.span.bytes(), b"while (((enter))) { continue; }");
+            }
+        },
+    );
+}
+
+#[test]
+fn unsupported_dead_suffixes_keep_the_original_frame_budgets() {
+    probe(
+        "graph::delivery::unsupported_dead_suffixes_keep_the_original_frame_budgets",
+        r#"
+import std::routine::join;
+function unsafeBody(slot: &mut &bool, input: &bool, enter: bool): void {
+    let flag = true;
+    *slot = &flag;
+    while (enter) { continue; }
+    *slot = input;
+}
+function middle(enter: bool): void {
+    let prior = false;
+    let input = true;
+    let mut slot = &prior;
+    unsafeBody(&mut slot, &input, enter);
+}
+function outer(enter: bool, spare: bool): void { middle(enter); return; let _ = false; }
+function onlyScalar(enter: bool): void { let _ = enter; }
+function ordinaryOuter(enter: bool): void { onlyScalar(enter); return; let _ = false; }
+"#,
+        |_, module, receipt| {
+            for (name, max_work, max_entries, max_depth) in
+                [("outer", 7707, 1002, 6), ("ordinaryOuter", 4266, 268, 5)]
+            {
+                let decl = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                let target = lower_root(
+                    receipt,
+                    module,
+                    BodyOwner::Declaration(&decl.id),
+                    AnalysisLimits {
+                        max_work,
+                        max_entries,
+                        max_depth,
+                    },
+                )
+                .unwrap();
+                assert_eq!(target.completion(), Completion::Checked, "{name}");
+                let stats = target.statistics();
+                assert_eq!(
+                    (stats.work, stats.entries, stats.max_depth),
+                    (max_work, max_entries, max_depth)
+                );
+                assert!(target.mir().unwrap().cancellation().is_none());
+                assert!(
+                    target.findings().is_empty() && target.rejected_forwarding_calls().is_none()
+                );
+                assert_target_one_short(
+                    receipt,
+                    module,
+                    BodyOwner::Declaration(&decl.id),
+                    AnalysisLimits {
+                        max_work,
+                        max_entries,
+                        max_depth,
+                    },
+                );
+            }
+            let graph = analyze_ownership(
+                receipt,
+                AnalysisLimits {
+                    max_work: 197442,
+                    max_entries: 5101,
+                    max_depth: 6,
+                },
+            );
+            assert_eq!(graph.completion(), GraphCompletion::SourceRejected);
+            let stats = graph.statistics();
+            assert_eq!(
+                (stats.work, stats.entries, stats.max_depth),
+                (197442, 5101, 6)
+            );
+            assert_graph_one_short(
+                receipt,
+                AnalysisLimits {
+                    max_work: 197442,
+                    max_entries: 5101,
+                    max_depth: 6,
+                },
+            );
+            assert_eq!(
+                graph.findings().len(),
+                1,
+                "only the direct retaining call rejects"
+            );
+            for prefix in [b"function outer(".as_slice(), b"function ordinaryOuter("] {
+                let root = root(&graph, prefix);
+                assert_eq!(root.ordinary_completion(), Completion::Checked);
+                assert!(root.ordinary_mir().is_some());
+                assert!(matches!(root.forwarded_call(), Delivery::Unresolved));
+            }
+        },
+    );
+}
+
 #[test]
 fn forwarded_call_uses_the_selected_module_not_the_function_spelling() {
     let unsafe_middle = format!("{}\n", OTHER.split("function nestedCaller").next().unwrap())
