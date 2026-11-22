@@ -6,7 +6,7 @@ Facts-only research, not design approval, API selection, provider-mode amendment
 
 - Provider: OpenSSL **3.5.9**, commit **`45e844fa2a14ec92d146bd8f5778ac130b6625fb`**. All provider links below pin that commit, including the manuals shipped with it, rather than a moving online manual.
 - ri-irw authority: published [public contract][public] and [closed private boundary][private] at **`15632ac1f88a7d1ca69cea66d083f6d61b897fb3`**. These were read with `git show`; their absence as local TLS files does not make the earlier research notes authoritative substitutes. Public sections 7–11 and private sections 3–6 govern the distinctions below.
-- Context: [ri-w0c][issue45], [working ri-n5i → ri-w0c handoff][handoff], [earlier retry research](0039-duplex-progress-and-tls-retry.md), and [HTTP/1 compatibility research](0039-http1-compatibility-and-trailers.md). Working direction supplied for this research: single owner; whole TCP and TLS over eligible lower `D`; owned buffers; at most one pending read and one pending write; ordered flush; no split/raw escape; prepare TLS progress before handshake; bounded normal advance without external wait while retaining native jobs; caller controls outside `D` plus explicit terminal stop, not independent lane cancellation. **These directions do not freeze public signatures or establish an implementable scheduler.**
+- Context: ri-w0c, working ri-n5i → ri-w0c handoff (comment 6905378572), [earlier retry research](0039-duplex-progress-and-tls-retry.md), and [HTTP/1 compatibility research](0039-http1-compatibility-and-trailers.md). Working direction supplied for this research: single owner; whole TCP and TLS over eligible lower `D`; owned buffers; at most one pending read and one pending write; ordered flush; no split/raw escape; prepare TLS progress before handshake; bounded normal advance without external wait while retaining native jobs; caller controls outside `D` plus explicit terminal stop, not independent lane cancellation. **These directions do not freeze public signatures or establish an implementable scheduler.**
 - Actual ri-dej runtime and ri-ei7 TLS delivery gates remain **OPEN**. Private boundary §5 explicitly allows native work to block and does not assert a hard CPU/return bound. A bounded/cooperative managed advance must not turn that into an assertion that a single OpenSSL call, crypto job or release is hard-bounded.
 
 ## 1. Transition/source matrix: permission is not symmetric
@@ -115,8 +115,6 @@ Whether “owned input buffer” is a managed command payload, a native retry al
 
 [public]: https://github.com/Reilley64/rill/blob/15632ac1f88a7d1ca69cea66d083f6d61b897fb3/docs/tls-contracts.md
 [private]: https://github.com/Reilley64/rill/blob/15632ac1f88a7d1ca69cea66d083f6d61b897fb3/docs/tls-native-boundary.md
-[issue45]: ri-w0c
-[handoff]: ri-w0c (comment 6905378572)
 [error]: https://github.com/openssl/openssl/blob/45e844fa2a14ec92d146bd8f5778ac130b6625fb/doc/man3/SSL_get_error.pod
 [read]: https://github.com/openssl/openssl/blob/45e844fa2a14ec92d146bd8f5778ac130b6625fb/doc/man3/SSL_read.pod
 [write]: https://github.com/openssl/openssl/blob/45e844fa2a14ec92d146bd8f5778ac130b6625fb/doc/man3/SSL_write.pod
