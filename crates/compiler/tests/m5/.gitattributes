@@ -1,0 +1,2 @@
+# Byte-exact captures of the sources the published caps were measured on. Their indentation and trailing blanks stay.
+legacy-caps/** -whitespace

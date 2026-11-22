@@ -1625,6 +1625,45 @@ This section answers the three review findings on the fresh `Result` residence l
 
 No fixed cap moved. No Rill program ran.
 
+## Replaying the published fixed caps (ri-px1.1, 2026-11-22)
+
+[`legacy_caps`](m5/legacy_caps.rs) replays [`legacy-caps.tsv`](m5/legacy-caps.tsv) through the installed compiler in both load modes. Each of its 272 cap triples (136 per mode) runs at its exact work, entries and depth cap, which must give the row's outcome and statistics, and again one short on each axis, which must give `ResourceLimit` and publish no receipt or MIR. An axis published as 0 has no one-short cap. Rows also pin the Standard module count and each root's `completion/ordinary completion` in the whole-graph report. The 33 fixtures are in [`legacy-caps/`](m5/legacy-caps/). `mise run test:m5:caps` runs the test and `mise run test:m5` runs the full binary.
+
+The 92 triples of `old-fixed-caps.txt` (24 captures in two modes, 17-source baseline 372,246 / 54,059 / 12 included) and every row of `base-fixed.tsv` and `base-fwcap.tsv` reproduce. Thirteen deliberate one-number or outcome edits to the file each failed, and only the row edited, in one run.
+
+Ten rows of `base-matrix.tsv` do not reproduce, in both modes. They were measured at `68f3788`, before the forwarding proof, and the whole-graph rows now equal the `candidate-matrix.tsv` rows. The file keeps them as comments and does not replay them. Nothing here edits a cap or an expectation.
+
+| Fixture and query | Published | Now |
+| --- | --- | --- |
+| `retaining-rc` whole graph | `SourceRejected` 246,818 / 14,458 / 11 | `SourceRejected` 247,063 / 14,523 / 11 |
+| `retaining-rc` `nestedGoodWithOwner` | `Checked` 12,151 / 3,338 / 6 | `Checked` 12,838 / 3,591 / 6 |
+| `retaining-rc` `nestedCaller` | `Checked` 10,348 / 2,397 / 6, graph root `Checked/Checked` | `SourceRejected` 10,472 / 2,446 / 6, graph root `SourceRejected/Checked` |
+| `retaining-rc` `infeasibleOuter` | `Checked` 10,495 / 2,458 / 6 | `Checked` 10,887 / 2,609 / 6 |
+| `safe-rc` whole graph | `Incomplete` 199,807 / 6,904 / 11 | `Incomplete` 199,964 / 6,945 / 11 |
+| `safe-rc` `nestedGoodWithOwner` | `Checked` 9,679 / 2,102 / 6 | `Checked` 10,366 / 2,355 / 6 |
+| `foreign-rc` whole graph | `SourceRejected` 193,281 / 5,176 / 6 | `SourceRejected` 193,367 / 5,199 / 6 |
+| `foreign-rc` `rejected` | `Checked` 7,463 / 895 / 6, graph root `Checked/Checked` | `SourceRejected` 7,587 / 944 / 6, graph root `SourceRejected/Checked` |
+
+Whether these moves are the intended cost of the forwarding proof is the owner's decision under D2. This is LLVM-free host ownership analysis. No Rill program ran.
+
+## Boolean match review counterexamples, 2026-11-23
+
+Ticket ri-785.2 (A4). [`installed_boolean_matches`](m4_8_match_boolean_snapshots.rs) now also runs the reviewers' repros verbatim, including their `import std::routine::join;`, through both installed load modes. Each case uses the same work, entries and depth in both modes. The test pins those exact numbers; one short in any dimension gives `ResourceLimit` with no receipt.
+
+| Case | Review | Outcome | Work / entries / depth |
+| --- | --- | --- | --- |
+| `let copy = match (flag) { _ => flag };` | `35776287`, `f67c0458` | `Checked`, receipt | 426,696 / 48,863 / 12 |
+| Nested wildcards; `let copy = flag;` observed by `true if flag` and `false if !flag` | `35776287` | `Checked`, receipt | 427,764 / 49,046 / 16 |
+| Nested guarded wildcard assigning `copy = flag` in both arms | `f67c0458` | `Checked`, receipt | 428,401 / 49,120 / 12 |
+| `pre`: `let before = flag;` then `match (flag) { _ => before }` | `e519e598` | `SourceRejected`, `R0103` at `Err<bool,i32>(61i32)` | 426,921 / 48,910 / 12 |
+| `computed`: `match (*(if (gate) &flag else &flag))` | `e519e598` | `SourceRejected`, `R0103` at `Err<bool,i32>(61i32)` | 428,253 / 49,198 / 12 |
+
+At `db944e6`, all three wildcard repros are `SourceRejected` with `R0103` in both modes, as both reviews reported. The two `e519e598` rows are false diagnostics, pinned at their current outcome as known limitations; general Boolean identity discovery is not attempted.
+
+The historical caps of review `a3839064` were already pinned by `bd10617`: `call14` 331,637/49,402/12, `split14` 331,989/49,850/12 and `known14` 333,400/50,513/12 check, and twelve equivalent arm-local copy classes check within 54,002 entries. At `5ab195a`, `call14` is `ResourceLimit` at its cap (it needs 331,945 work and 49,472 entries).
+
+No compiler source changed and no cap moved. This is M4 Result use, not an ownership proof, and it does not clear the review state of the Boolean lane recorded above. No Rill program ran.
+
 ## An owned guard wrapper beside a borrowed view (ri-px1.6, 2026-11-23)
 
 This is ticket D1. Since `f2e3459`, a body that owned a guard-bearing parameter stopped at any reference parameter whose referent bore a guard. At the parent `37a0a99e`, [`mixed_wrapper_exports_the_view_then_cleans_the_owned_wrapper`](m5/disposers/mixed_wrapper.rs) first returned `Incomplete` at `view: &Plain` for `mixedWrapper(owned: Plain, view: &Plain): &Plain`. The screen now admits a **shared** view of a flat guard wrapper. A borrowed guard (`&LockGuard<i32>`) and an exclusive wrapper view (`&mut Plain`) stay outside. Up to each of those rejections, the screen charges what it charged before.

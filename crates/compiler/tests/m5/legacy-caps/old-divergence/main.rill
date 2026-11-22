@@ -1,0 +1,60 @@
+import std::{List, Result, Err};
+import std::channel::{Receiver, Sender};
+import std::convert::{into, tryInto};
+import std::error::formatError;
+import std::iter::iterate;
+import std::mutex::LockGuard;
+import std::number::ParseError;
+import std::option::{Option, map as mapOption};
+import std::result::{isOk, map as mapResult};
+import std::shared::Shared;
+import checks::ready;
+
+function chooseOne<T>(value: &T): bool;
+implement<T> chooseOne(value: &T): bool { return true; }
+function usesOrdinary(value: i32): bool { return chooseOne(&value); }
+
+function convertAndShow(value: u8): Result<string> {
+    let values: List<i32> = [into<i32>(value)];
+    return Result.Ok(`${values[0u64]}`);
+}
+
+function visit(values: List<i32>): void {
+    for (let _ of values) { continue; }
+}
+
+function listLifecycle(values: List<i32>): void {
+    let copied = copy(&values);
+    let iterator = iterate(values);
+    dispose(iterator);
+    dispose(copied);
+}
+
+function retain(source: &Shared<i32>): Shared<i32> { return copy(source); }
+function releaseNative(counted: Shared<i32>, lock: LockGuard<i32>, tx: Sender<i32>, rx: Receiver<i32>): void {
+    dispose(counted);
+    dispose(lock);
+    dispose(tx);
+    dispose(rx);
+}
+
+function inspectMapped(value: Option<Result<bool>.Ok>): Option<bool> {
+    return mapOption(value, (item: Result<bool>.Ok) => isOk(&item));
+}
+
+function mapSuccess(value: Result<bool, i32>): Result<bool, i32> {
+    return mapResult(value, (item: bool) => !item);
+}
+
+function parse(input: &string): Result<i32, ParseError> { return tryInto<i32>(input); }
+function wrap(input: Result<bool, i32>): Result<bool, string> { return Result.Ok(input ? "outer"); }
+function render(input: &Err<i32>): string { return formatError<i32>(input); }
+
+let startup = convertAndShow(5u8);
+let _ = isOk(&startup);
+let _ = startup;
+expect ready();
+expect usesOrdinary(1i32);
+expect isOk(&Result.Ok(true));
+
+function missedDiscard(): never { *(&Result.Ok(true)); while (true) {} }

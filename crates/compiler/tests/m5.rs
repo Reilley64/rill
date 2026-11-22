@@ -30,6 +30,8 @@ mod graph;
 mod iteration;
 #[path = "m5/iteration_result_use.rs"]
 mod iteration_result_use;
+#[path = "m5/legacy_caps.rs"]
+mod legacy_caps;
 #[path = "m5/o15_arithmetic.rs"]
 mod o15_arithmetic;
 #[path = "m5/patterns.rs"]

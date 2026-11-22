@@ -1,0 +1,26 @@
+
+            import std::{List, Result, Err};
+            import std::channel::{Receiver, Sender};
+            import std::convert::{into, tryInto};
+            import std::error::formatError;
+            import std::iter::iterate;
+            import std::mutex::LockGuard;
+            import std::number::ParseError;
+            import std::option::{Option, map as mapOption};
+            import std::result::{isOk, map as mapResult};
+            import std::shared::Shared;
+    
+
+function outer(enter: bool): void { middle(false); }
+function middle(enter: bool): void {
+    let prior = false;
+    let input = true;
+    let mut slot = &prior;
+    unsafeBody(&mut slot, &input, enter);
+}
+function unsafeBody(slot: &mut &bool, input: &bool, enter: bool): void {
+    let flag = true;
+    *slot = &flag;
+    while (enter) { continue; }
+    *slot = input;
+}

@@ -1,0 +1,48 @@
+
+            import std::{List, Result, Err};
+            import std::channel::{Receiver, Sender};
+            import std::convert::{into, tryInto};
+            import std::error::formatError;
+            import std::iter::iterate;
+            import std::mutex::LockGuard;
+            import std::number::ParseError;
+            import std::option::{Option, map as mapOption};
+            import std::result::{isOk, map as mapResult};
+            import std::shared::Shared;
+    
+
+import std::core::dispose as release;
+
+function budgetLeaf(): void { }
+
+type Bag = { head: string; transferred: string; manual: string; tail: string; }
+implement release(value: Bag): void {
+    let saved = value.transferred;
+    otherLeaf();
+    let manual = value.manual;
+}
+
+function replaceInitialized(old: Bag, incoming: Bag): Bag {
+    let mut current = old;
+    current = incoming;
+    budgetLeaf();
+    return current;
+}
+
+function replaceVacant(old: Bag, incoming: Bag): Bag {
+    let mut current = old;
+    let prior = current;
+    current = incoming;
+    budgetLeaf();
+    return current;
+}
+
+        function otherLeaf(): void { }
+        function nonempty(): void { let unrelated = "local"; }
+        function replaceNoEntry(old: Bag, incoming: Bag): Bag {
+            let mut current = old;
+            current = incoming;
+            nonempty();
+            return current;
+        }
+    

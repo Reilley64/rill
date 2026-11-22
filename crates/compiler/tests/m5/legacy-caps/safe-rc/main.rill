@@ -1,0 +1,50 @@
+
+            import std::{List, Result, Err};
+            import std::channel::{Receiver, Sender};
+            import std::convert::{into, tryInto};
+            import std::error::formatError;
+            import std::iter::iterate;
+            import std::mutex::LockGuard;
+            import std::number::ParseError;
+            import std::option::{Option, map as mapOption};
+            import std::result::{isOk, map as mapResult};
+            import std::shared::Shared;
+    
+
+function nestedGoodWithOwner(enter: bool): void {
+    let outerText = "outer";
+    goodWithOwner(enter);
+    let outerSuffix = "only on normal return";
+}
+function safeBody(slot: &mut &bool, input: &bool, enter: bool): void {
+    let flag = true;
+    *slot = &flag;
+    *slot = input;
+    while ((((((((enter)))))))) { continue; }
+}
+function good(enter: bool): void {
+    let prior = false;
+    let input = true;
+    let mut slot = &prior;
+    safeBody(&mut slot, &input, enter);
+}
+function safeWithOwner(slot: &mut &bool, input: &bool, enter: bool): void {
+    let calleeText = "callee";
+    let flag = true;
+    *slot = &flag;
+    if (enter) { *slot = input; }
+    while (enter) { continue; }
+    *slot = input;
+    let calleeSuffix = "only on normal return";
+}
+function goodWithOwner(enter: bool): bool {
+    let callerText = "caller";
+    let initial = false;
+    let mut slot = &initial;
+    let prior = false;
+    let input = true;
+    slot = &prior;
+    safeWithOwner(&mut slot, &input, enter);
+    let callerSuffix = "only on normal return";
+    return enter;
+}
