@@ -6,17 +6,17 @@ The owner authorized this plan and a committed documentation baseline on 2026-11
 
 Use the committed baseline containing this plan, not a moving branch, as implementation input. Record its full commit SHA in the implementation ticket before coding. The baseline preserves Draft RFC statuses and their scoped human policy approvals.
 
-[#28](https://github.com/Reilley64/rill/issues/28) retains the RFC collection, coverage/readiness and existing formal/production follow-through. Its writing deliverable does not become compiler implementation. Create and claim a separate implementation ticket when coding is authorized.
+ri-48g retains the RFC collection, coverage/readiness and existing formal/production follow-through. Its writing deliverable does not become compiler implementation. Create and claim a separate implementation ticket when coding is authorized.
 
 ## Inputs
 
 | Input | Applicable scope |
 | --- | --- |
 | [Development guide](development.md), [ADR 0026](adr/0026-toolchain-repository-and-mise.md) | Private crate ownership, pinned mise/Cargo/uv tools, LLVM-free analysis and unavailable product gates. |
-| [Lexical/source approval](https://github.com/Reilley64/rill/issues/28#issuecomment-6929923825) | Exact source/lexer policies across RFCs 0002, 0003, 0006 and 0010. |
+| Lexical/source approval (ri-48g, comment 6929923825) | Exact source/lexer policies across RFCs 0002, 0003, 0006 and 0010. |
 | [Source snapshots](rfcs/0002-modules-and-program-loading.md#source-snapshots-and-lexical-input) and [tokens/trivia](rfcs/0003-expressions-bindings-and-control-flow.md#lexical-tokens-and-trivia) | Immutable original bytes, source spans, identifiers, comments and longest token matching. |
 | [Literal scanning](rfcs/0006-numbers-strings-and-primitive-operations.md#literal-scanning-and-token-boundaries) and [coordinate procedure](rfcs/0010-diagnostics-and-reporting.md#original-byte-coordinate-procedure) | Numeric/raw/template modes, controls, decoded provenance and byte/scalar/editor projection. |
-| [Syntax approval](https://github.com/Reilley64/rill/issues/28#issuecomment-6931939690), [annex](grammar/v0-syntax-v1.md), [EBNF](grammar/v0-syntax-v1.ebnf) | M2 parser policy. M1 preserves lexer tokens rather than applying parser commitment rules. |
+| Syntax approval (ri-48g, comment 6931939690), [annex](grammar/v0-syntax-v1.md), [EBNF](grammar/v0-syntax-v1.ebnf) | M2 parser policy. M1 preserves lexer tokens rather than applying parser commitment rules. |
 | [Test ownership](../tests/README.md) and [RFC evidence rules](rfcs/README.md#examples-and-evidence) | Component-local tests, later cross-stage suites and truthful acceptance records. |
 
 The syntax policy review used EBNF SHA-256 `158c9b74bb2f36dbf992e454ebc10d57bfac9bb3859b04a394d61d29e0bd94e7`. Its companion SHA-256 was `0d7eeef8bf1abddebf6c04501eaf2572ea0f94f528ac69b933109afb9a3fdbf6`. Later status comments do not change those production rules or extend approval.
@@ -32,7 +32,7 @@ Full RFC/annex acceptance remains separate. Return conflicting required behavior
 | M3. Resolution and declaration collection | `crates/compiler/` | First complete candidate/cycle, namespace, scope and metadata procedures under RFC 0002. Validate canonical loaded-graph behavior independently of editor indexing. |
 | M4. Typed analysis | `crates/compiler/` | First complete inference, pattern/coverage, overload/evidence and selected-output procedures under the owning RFCs. Produce checked facts rather than inventing successful types for incomplete analysis. |
 | M5. Ownership and cleanup lowering | `crates/compiler/` | First complete dependency transfer, branch/loop, exit, capture and initialized-cleanup judgments. Validate MIR obligations and adversarial accepted/rejected cases. |
-| M6. Execution and tools | Backend/runtime plus IDE/LSP/CLI owners | Implement only after each semantic/ABI prerequisite is complete. Native/Wasm/provider support and full #42 client acceptance retain separate gates. |
+| M6. Execution and tools | Backend/runtime plus IDE/LSP/CLI owners | Implement only after each semantic/ABI prerequisite is complete. Native/Wasm/provider support and full ri-bv2 client acceptance retain separate gates. |
 
 M2 through M6 are sequencing markers, not detailed implementation tickets or claims of ready specifications. Their missing rules do not block M1. Full standard-library or LSP delivery is not a lexer prerequisite.
 
@@ -106,11 +106,11 @@ Keep product build, language/stdlib/runtime/client suites and release verificati
 
 ## M3 design checkpoint
 
-This records Stage 1 of [M3 ticket #54](https://github.com/Reilley64/rill/issues/54). The owner subsequently [approved checkpoint a41e7cc](https://github.com/Reilley64/rill/issues/54#issuecomment-6939478619), authorizing Stage 2 within O1 through O7 and the three public seams. The earlier M1 planning statements remain historical. M1 and M2 have since merged through [#51](https://github.com/Reilley64/rill/pull/51) and [#53](https://github.com/Reilley64/rill/pull/53).
+This records Stage 1 of M3 ticket ri-1fk. The owner subsequently approved checkpoint a41e7cc (ri-1fk, comment 6939478619), authorizing Stage 2 within O1 through O7 and the three public seams. The earlier M1 planning statements remain historical. M1 and M2 have since merged through [#51](https://github.com/Reilley64/rill/pull/51) and [#53](https://github.com/Reilley64/rill/pull/53).
 
 The implementation branch is `implementation/m3-loader-resolver`. Its exact starting commit is `04fd25ff9e8b4e02621802a111263947dbeb53b0`, fetched from origin/main after #53 merged. That commit contains M1 `7379a28` and M2 `6ea5fdd`. The original plan baseline is `e1559249c325c3898f506b271e91d76b884be290`. The ticket links the plan at the exact implementation start.
 
-[RFC 0002's proposed procedure](rfcs/0002-modules-and-program-loading.md#proposed-m3-resolution-procedure) owns candidate discovery, route reduction, namespace installation, identities, cycles and graph capture. The checkpoint approval covers these scoped additions to a Draft RFC. Its existing identity/order, lexical/source and syntax approvals remain unchanged. This approval authorizes only the identified M3 contract, not the complete RFC set or #28's readiness obligations.
+[RFC 0002's proposed procedure](rfcs/0002-modules-and-program-loading.md#proposed-m3-resolution-procedure) owns candidate discovery, route reduction, namespace installation, identities, cycles and graph capture. The checkpoint approval covers these scoped additions to a Draft RFC. Its existing identity/order, lexical/source and syntax approvals remain unchanged. This approval authorizes only the identified M3 contract, not the complete RFC set or ri-48g's readiness obligations.
 
 ### Owner choices before coding
 
@@ -155,11 +155,11 @@ These slices remain one M3 ticket and one M3-only draft PR unless the owner requ
 3. Add complete competing-prefix discovery and fixed-point re-export/cycle resolution. Test route deduplication, anchored cycles and unanchored aliases.
 4. Add observation replay, change detection and canonical result ordering. Complete the acceptance mapping and review all M1/M2 regressions.
 
-Each slice includes its own red-green filesystem cases. Preserve existing M1/M2 source and tests. Any necessary earlier-stage fix needs a separate regression test and explanation in #54 and the PR.
+Each slice includes its own red-green filesystem cases. Preserve existing M1/M2 source and tests. Any necessary earlier-stage fix needs a separate regression test and explanation in ri-1fk and the PR.
 
 ### M3 acceptance checklist, not observed evidence
 
-The names below are planned test behaviors, not existing tests or passing results. Replace them with exact implemented test names and observed outcomes in #54 and the completion record. RFC case numbers here refer to module cases M1 through M15, not compiler milestones.
+The names below are planned test behaviors, not existing tests or passing results. Replace them with exact implemented test names and observed outcomes in ri-1fk and the completion record. RFC case numbers here refer to module cases M1 through M15, not compiler milestones.
 
 | RFC case or requirement | Planned direct test through the proposed interfaces | Explicit later-stage assertion |
 | --- | --- | --- |
@@ -198,7 +198,7 @@ At this checkpoint, M3 implementation and every proposed acceptance test are Not
 
 ### Stage 2 acceptance
 
-The [M3 acceptance record](../crates/compiler/tests/m3-acceptance.md) maps actual Rust tests to RFC 0002 M1 through M15, identity/order policies and the approved scope. Its later-stage column remains unpassed. It also records real filesystem limitations, the additive M2 parser-work statistic and unrun support gates. #54 and the M3-only draft PR retain command results and implementation revisions. A resolved graph is not a successfully checked program.
+The [M3 acceptance record](../crates/compiler/tests/m3-acceptance.md) maps actual Rust tests to RFC 0002 M1 through M15, identity/order policies and the approved scope. Its later-stage column remains unpassed. It also records real filesystem limitations, the additive M2 parser-work statistic and unrun support gates. ri-1fk and the M3-only draft PR retain command results and implementation revisions. A resolved graph is not a successfully checked program.
 
 ## Completion record
 

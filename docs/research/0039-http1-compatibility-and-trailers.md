@@ -1,4 +1,4 @@
-# #39 research: HTTP/1 compatibility, authority, trailers and early finals
+# ri-n5i research: HTTP/1 compatibility, authority, trailers and early finals
 
 Research snapshot: **2026-11-16**. Primary-source and metadata inspection only. **No HTTP conformance, security, Rill, runtime, native or TLS tests were run; no implementation or liveness proof is supplied.** This is factual input, not a policy/API selection or approval. Its remaining-choice list records the research stage; the later human-confirmed [HTTP contract](../http-contracts.md) is authoritative.
 
@@ -6,7 +6,7 @@ Research snapshot: **2026-11-16**. Primary-source and metadata inspection only. 
 
 Working choices supplied for this research: initial general-streaming HTTP/1.1, direct-origin client/server; no client pipelining or parallel per-connection handlers; no H2/H3, successful CONNECT, 101/upgrades or proxy support initially. A transport-independent public `std::http::h1` codec, owning heads and ordered byte headers, strict CRLF, no obs-fold/invalid-field repair, rejection of all TE+CL and repeated/comma CL, chunked-only **actual** transfer coding, and an explicit outgoing framing plan are working inputs, not decisions made by this note.
 
-Read the current [#39](https://github.com/Reilley64/rill/issues/39) and [#45](https://github.com/Reilley64/rill/issues/45) bodies. **#45 is an open upstream design prerequisite for resumable single-owner progress/wait.** Neither that ticket nor the existing [duplex/TLS research](0039-duplex-progress-and-tls-retry.md) demonstrates an actual TLS/runtime implementation. This note supplements [the earlier HTTP research](0039-http-standards-and-streaming.md), rather than changing its files or the issues.
+Read the current ri-n5i and ri-w0c bodies. **ri-w0c is an open upstream design prerequisite for resumable single-owner progress/wait.** Neither that ticket nor the existing [duplex/TLS research](0039-duplex-progress-and-tls-retry.md) demonstrates an actual TLS/runtime implementation. This note supplements [the earlier HTTP research](0039-http-standards-and-streaming.md), rather than changing its files or the issues.
 
 Primary sources retrieved:
 
@@ -107,7 +107,7 @@ Authority checks on the **target** are still meaningful: [9110 §7.4](https://ww
 - URI `port = *DIGIT` allows an omitted/empty port syntactically; HTTP scheme defaults/normalization are separate. Generic URI syntax does not impose the numeric range of a TCP endpoint. CONNECT's mandatory nonempty valid port rule is special, not a rule for all Host fields.
 - HTTP(S) requires a nonempty host. Generic URI allowances do not make `http:///x` a valid ordinary HTTP origin. Default-authority reconstruction cannot repair mandatory-invalid 1.1 Host (§3.2).
 
-The narrower #34 dial-name and #38 TLS reference-name contracts must not be silently promoted into the HTTP grammar. A byte-preserving codec can recognize a syntactically valid authority that an eventual resolver/verification policy cannot use. Whether to reject unsupported address/name forms, expose them without dialing, or define a separate conversion layer is a human choice. DNS, IDNA, percent-decoding, URI normalization, authority comparison and TLS verification are not one operation.
+The narrower ri-vno dial-name and ri-irw TLS reference-name contracts must not be silently promoted into the HTTP grammar. A byte-preserving codec can recognize a syntactically valid authority that an eventual resolver/verification policy cannot use. Whether to reject unsupported address/name forms, expose them without dialing, or define a separate conversion layer is a human choice. DNS, IDNA, percent-decoding, URI normalization, authority comparison and TLS verification are not one operation.
 
 ## 5. Trailers: permissions, declarations and recipients
 
@@ -162,24 +162,24 @@ Currency caveat: the retrieved IANA registry also has permanent `Unencoded-Diges
 
 ### Accepted prefixes cannot be recalled
 
-An application can stop **new body admission** after learning a final response, but this cannot retract bytes already accepted into the coordinator, codec, TLS engine, ciphertext queue, socket, or peer. These are distinct acceptance boundaries; none implies remote execution, receipt or safe replay. This is a consequence of stream transport and the existing #34/#38 prefix contracts, not an RFC-defined rollback operation. Exact discarded/pending/accepted prefix reporting remains a design obligation.
+An application can stop **new body admission** after learning a final response, but this cannot retract bytes already accepted into the coordinator, codec, TLS engine, ciphertext queue, socket, or peer. These are distinct acceptance boundaries; none implies remote execution, receipt or safe replay. This is a consequence of stream transport and the existing ri-vno/#38 prefix contracts, not an RFC-defined rollback operation. Exact discarded/pending/accepted prefix reporting remains a design obligation.
 
-Under #38, abandoning a genuinely admitted TLS operation can poison the stream. Detecting an HTTP early final is not permission to cancel that operation, discard its stable retry storage and reuse TLS. Stopping future HTTP admission and arranging retained-operation completion/terminal cleanup are separate actions. #45 must define the safe progress/wait boundary; this research selects neither a TLS split nor a retry scheduler.
+Under ri-irw, abandoning a genuinely admitted TLS operation can poison the stream. Detecting an HTTP early final is not permission to cancel that operation, discard its stable retry storage and reuse TLS. Stopping future HTTP admission and arranging retained-operation completion/terminal cleanup are separate actions. ri-w0c must define the safe progress/wait boundary; this research selects neither a TLS split nor a retry scheduler.
 
 ### Close does not mean instant destructive transport abort
 
-[9112 §9.6](https://www.rfc-editor.org/rfc/rfc9112.html#section-9.6) describes staged server TCP closure to avoid a reset erasing the final response: write-half close, continue reading until peer closure or reasonable assurance of acknowledgment, then close fully. This is explanatory transport guidance, not an unconditional generic TLS half-close API requirement. A client TCP half-close does not delimit an HTTP request. TLS closure/truncation and #38's lack of TLS 1.2 directional shutdown cannot be inferred away by copying this TCP sequence.
+[9112 §9.6](https://www.rfc-editor.org/rfc/rfc9112.html#section-9.6) describes staged server TCP closure to avoid a reset erasing the final response: write-half close, continue reading until peer closure or reasonable assurance of acknowledgment, then close fully. This is explanatory transport guidance, not an unconditional generic TLS half-close API requirement. A client TCP half-close does not delimit an HTTP request. TLS closure/truncation and ri-irw's lack of TLS 1.2 directional shutdown cannot be inferred away by copying this TCP sequence.
 
 For a reuse claim, establish **both** HTTP boundaries and healthy transport/operation state, respect Connection/version rules, and exclude unread/ambiguous suffixes. Fully consuming a response is necessary but does not repair an incomplete sent request, TLS poison or mandated close. Completing a framed HTTP body also does not by itself certify TLS clean closure. Close-delimited responses need the lower-layer error distinction; [9112 §§8, 9.8](https://www.rfc-editor.org/rfc/rfc9112.html#section-8) distinguish normal completion from incomplete transport closure.
 
 ## 7. Remaining human choices and explicit unknowns
 
-No policy or public API is selected by this note. Before consolidating #39, settle:
+No policy or public API is selected by this note. Before consolidating ri-n5i, settle:
 
 1. **Version acceptance/support claim:** 1.0 service and optional persistence; higher 1.x treatment; honest limited-profile wording and errors without misusing 505. Separately establish when a client knows initial TE is legal.
 2. **No-body metadata:** accept legal hypothetical unsupported coding descriptions while refusing actual unsupported coding? Define invalid-field rejection separately from framing precedence and retain the already chosen strict TE+CL/CL policies.
-3. **Authority policy:** standards absolute-form routing and mandatory Host checks; any explicit mismatch rejection and its narrower acceptance claim; conversions to supported #34/#38 names without equating URI grammar with dial/verification grammar.
+3. **Authority policy:** standards absolute-form routing and mandatory Host checks; any explicit mismatch rejection and its narrower acceptance claim; conversions to supported ri-vno/#38 names without equating URI grammar with dial/verification grammar.
 4. **Trailer contract:** specification-backed outgoing permissions and any explicit extension assertion; declaration policy; separate receipt/discard/unknown-field behavior, bounds and terminal visibility. No automatic merge, digest verification or auth result follows.
-5. **Early-final disposition:** which indications stop admission, treatment of queued/accepted prefixes, response consumption, request drain/completion versus closure, and preservation of live TLS retry state through the #45 boundary.
+5. **Early-final disposition:** which indications stop admission, treatment of queued/accepted prefixes, response consumption, request drain/completion versus closure, and preservation of live TLS retry state through the ri-w0c boundary.
 
-**Liveness boundary:** RFC permissions and SHOULD-monitor guidance explain why a general-streaming coordinator cannot simply block forever writing an upload before reading a final response. They do not prescribe an invented TLS split, a particular task/channel API or progress despite an indefinitely stalled application sink. Bounded queues, resumable lower I/O, application scheduling, fair progress, cancellation cleanup and provider retry constraints still need #45's design and actual runtime/TLS evidence. Excluding pipelining/parallel handlers simplifies message correlation; it does not remove opposite-direction progress within one exchange. No completed security audit, target support, compiler acceptance or protocol conformance is asserted.
+**Liveness boundary:** RFC permissions and SHOULD-monitor guidance explain why a general-streaming coordinator cannot simply block forever writing an upload before reading a final response. They do not prescribe an invented TLS split, a particular task/channel API or progress despite an indefinitely stalled application sink. Bounded queues, resumable lower I/O, application scheduling, fair progress, cancellation cleanup and provider retry constraints still need ri-w0c's design and actual runtime/TLS evidence. Excluding pipelining/parallel handlers simplifies message correlation; it does not remove opposite-direction progress within one exchange. No completed security audit, target support, compiler acceptance or protocol conformance is asserted.

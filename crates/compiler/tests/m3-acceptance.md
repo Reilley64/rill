@@ -2,9 +2,9 @@
 
 ## Scope and authority
 
-[M3 ticket #54](https://github.com/Reilley64/rill/issues/54) records the starting commit `04fd25ff9e8b4e02621802a111263947dbeb53b0`, after PR #53 merged. The owner [approved checkpoint a41e7cc](https://github.com/Reilley64/rill/issues/54#issuecomment-6939478619), including O1 through O7, all three public test seams and the four implementation slices.
+M3 ticket ri-1fk records the starting commit `04fd25ff9e8b4e02621802a111263947dbeb53b0`, after PR #53 merged. The owner approved checkpoint a41e7cc (ri-1fk, comment 6939478619), including O1 through O7, all three public test seams and the four implementation slices.
 
-The tests below exercise the real Rust loader/resolver in `m3.rs`, using temporary files and the public `load`, `lookup_export` and `validate_inputs` interfaces. They capture source through M1 and parse through M2. These are compiler-resolution assertions, not executions of Rill programs. A resolved graph is not a checked program. Full RFC statuses, scoped prior approvals and #28's readiness/formal/production obligations remain separate.
+The tests below exercise the real Rust loader/resolver in `m3.rs`, using temporary files and the public `load`, `lookup_export` and `validate_inputs` interfaces. They capture source through M1 and parse through M2. These are compiler-resolution assertions, not executions of Rill programs. A resolved graph is not a checked program. Full RFC statuses, scoped prior approvals and ri-48g's readiness/formal/production obligations remain separate.
 
 ## RFC 0002 cases
 
@@ -45,7 +45,7 @@ Every test name in this table exists in [m3.rs](m3.rs). All listed tests passed 
 
 ## Observed commands and limits
 
-The validation host is macOS 27.0.1 AArch64, build 26A434. mise 2026.11.4 selects Rust/Cargo 1.98.0, Python 3.13.18 and uv 0.13.8. The final command results and implementation revision are also recorded in #54 and the draft PR.
+The validation host is macOS 27.0.1 AArch64, build 26A434. mise 2026.11.4 selects Rust/Cargo 1.98.0, Python 3.13.18 and uv 0.13.8. The final command results and implementation revision are also recorded in ri-1fk and the draft PR.
 
 - `mise exec -- cargo test --locked -p compiler --no-default-features` passed 138 tests, comprising two unit, 23 M1, 19 M2, 47 syntax cases and 47 M3 tests.
 - `mise run check` passed formatting, LLVM-free Clippy/workspace tests, documentation and existing scaffold/fixture checks. These fixture/tool results retain their own evidence scope, not Rill execution.

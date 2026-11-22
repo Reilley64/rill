@@ -1,6 +1,6 @@
 # Diagnostic code registry. Version 1
 
-[#24](https://github.com/Reilley64/rill/issues/24) confirms these assignments; see the [contracts](diagnostic-contracts.md) and [schema](diagnostic-report.schema.json). These initial assignments identify problem kinds, not exact prose, compiler stages or severities. Future distinct kinds receive new codes; published meanings are not recycled. This is not an exhaustive grammar/checker rejection catalogue or emitted compiler output. `rill explain <code>` provides these meanings offline; future additions require documentation, not a new language rule.
+ri-3t8 confirms these assignments; see the [contracts](diagnostic-contracts.md) and [schema](diagnostic-report.schema.json). These initial assignments identify problem kinds, not exact prose, compiler stages or severities. Future distinct kinds receive new codes; published meanings are not recycled. This is not an exhaustive grammar/checker rejection catalogue or emitted compiler output. `rill explain <code>` provides these meanings offline; future additions require documentation, not a new language rule.
 
 ### R0001. Invalid syntax
 A source construct cannot be parsed as permitted Rill syntax. Distinguish removed literal-type/general-union spelling from valid literal expressions and enum syntax in the explanation.
@@ -21,7 +21,7 @@ A top-level expectation expression is not bool. There is no truthiness conversio
 An expect declaration appears outside module top level.
 
 ### R0103. Unused Result
-A Result is discarded without the explicit handling/intent permitted by #11. This is a hard language error, not the optional unused-binding warning policy.
+A Result is discarded without the explicit handling/intent permitted by ri-8hm. This is a hard language error, not the optional unused-binding warning policy.
 
 ### R0200. Use after ownership transfer
 An owning value is used after a move/consuming operation. Show the original transfer and invalid use. Implicit copying is not a remedy.
@@ -51,7 +51,7 @@ Distinct applicable parameter patterns lack a unique most-specific implementatio
 Distinct ordinary bodies have identical canonical parameter patterns during collection, even if aliases, generic parameter names, returns or constraints differ. Repeated routes to the same body are deduplicated instead.
 
 ### R0310. Duplicate canonical conversion pair
-Under the later #41 decision, distinct conversion bodies have the same canonical destination/source pair pattern. E does not distinguish bodies; permitted generic/specific pairs are not automatically duplicates.
+Under the later ri-1wl decision, distinct conversion bodies have the same canonical destination/source pair pattern. E does not distinguish bodies; permitted generic/specific pairs are not automatically duplicates.
 
 ### R0311. Protected conversion overlap
 A user implementation displaces protected numeric conversion behavior or the standard infallible identity rule. This is a conversion-specific boundary, not sealing all ordinary families.
@@ -121,4 +121,4 @@ The compiler/server cannot trust its own analysis operation/state. This is not a
 
 ## Compatibility and examples
 
-All compiler/driver severities use R codes; there is no E/W prefix dependency or v0 Werror promotion. False expectations use `expectationResult`, not one code per expression; ordinary application Err/panic formats remain #23/#22 contracts. Codes, schema and representative [prototype 21](prototypes/21-diagnostics.md) examples are static design artifacts, not an implemented emitter. Exact #28 rules can add documented kinds without recycling these meanings.
+All compiler/driver severities use R codes; there is no E/W prefix dependency or v0 Werror promotion. False expectations use `expectationResult`, not one code per expression; ordinary application Err/panic formats remain ri-8n7/#22 contracts. Codes, schema and representative [prototype 21](prototypes/21-diagnostics.md) examples are static design artifacts, not an implemented emitter. Exact ri-48g rules can add documented kinds without recycling these meanings.

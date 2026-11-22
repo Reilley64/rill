@@ -1,14 +1,14 @@
-# #26 research: language proposal formats and processes
+# ri-9o5 research: language proposal formats and processes
 
 Research date: 2026-11-15 (UTC). This report covers Rust RFCs, Swift Evolution, Python PEPs, Go proposals/design documents, and OpenJDK JEPs. It presents research and advisory options, not agreed Rill conventions or RFC acceptance.
 
-The user subsequently confirmed the #26 conventions now recorded in [docs/rfcs/README.md](../rfcs/README.md) and [TEMPLATE.md](../rfcs/TEMPLATE.md). Statements below about unapproved suggestions describe the research stage, not the current decision state. The findings about other languages' processes remain evidence. The RFC conventions, not this advisory comparison, define Rill's selected process.
+The user subsequently confirmed the ri-9o5 conventions now recorded in [docs/rfcs/README.md](../rfcs/README.md) and [TEMPLATE.md](../rfcs/TEMPLATE.md). Statements below about unapproved suggestions describe the research stage, not the current decision state. The findings about other languages' processes remain evidence. The RFC conventions, not this advisory comparison, define Rill's selected process.
 
 ## Rill context and limits
 
-[#26](https://github.com/Reilley64/rill/issues/26) asks for organization, a shared template, linkage, example checking, and review/acceptance conventions for `docs/rfcs/`. [Repository issue-tracker guidance](../agents/issue-tracker.md#wayfinding) separates that work from #28's production of the complete, consistent, review-ready feature RFC set. Ticket answers, research, prototypes, and ADRs are inputs; neither producing the set nor accepting a source-ticket design automatically accepts an RFC.
+ri-9o5 asks for organization, a shared template, linkage, example checking, and review/acceptance conventions for `docs/rfcs/`. [Repository issue-tracker guidance](../agents/issue-tracker.md#wayfinding) separates that work from ri-48g's production of the complete, consistent, review-ready feature RFC set. Ticket answers, research, prototypes, and ADRs are inputs; neither producing the set nor accepting a source-ticket design automatically accepts an RFC.
 
-Rill has no compiler. Existing hand-checked prototypes and standalone experiments can supply evidence, but are not compiler execution or proof of the proposed language. For example, the [#30 experiment report](0030-backend-experiments.md) explicitly leaves support gates open and distinguishes finite mechanism/model results from unimplemented compiler/runtime obligations. Provider/backend gates can remain open while documents become review-ready; their precise effects on eventual acceptance or implementation readiness need an explicit Rill decision. #26 also identifies the confirmed #24 diagnostic/LSP artifacts as inputs, not delivered tooling or accepted feature RFCs.
+Rill has no compiler. Existing hand-checked prototypes and standalone experiments can supply evidence, but are not compiler execution or proof of the proposed language. For example, the [ri-dej experiment report](0030-backend-experiments.md) explicitly leaves support gates open and distinguishes finite mechanism/model results from unimplemented compiler/runtime obligations. Provider/backend gates can remain open while documents become review-ready; their precise effects on eventual acceptance or implementation readiness need an explicit Rill decision. ri-9o5 also identifies the confirmed ri-3t8 diagnostic/LSP artifacts as inputs, not delivered tooling or accepted feature RFCs.
 
 The parent agent suggested grouping related features, mapping source tickets to RFCs many-to-many, using flat independent stable IDs, and adopting `Draft`/`ReviewReady`/`Accepted`. These are unapproved proposals, not findings or constraints of this research. Nothing below selects them.
 
@@ -198,7 +198,7 @@ Sources for the matrix: [R-T, R-E, S-T, S-E, P-P, P-T, P-E, G-T, G-L, G-E, J-T, 
 
 ## Plausible Rill options. Advisory, not approved
 
-These are alternatives for #26 to evaluate, not RFCs or a decision interview. All would need explicit ownership of review/acceptance, a coverage index for #28, typed links to supporting inputs, and honest evidence/readiness labels because #26 asks for those outcomes. An index can map source tickets and features to RFC sections without fixing the ID scheme or number of links in advance.
+These are alternatives for ri-9o5 to evaluate, not RFCs or a decision interview. All would need explicit ownership of review/acceptance, a coverage index for ri-48g, typed links to supporting inputs, and honest evidence/readiness labels because ri-9o5 asks for those outcomes. An index can map source tickets and features to RFC sections without fixing the ID scheme or number of links in advance.
 
 ### A. Self-contained feature RFC, guide plus reference
 
@@ -226,7 +226,7 @@ This option fits the existing ticket-heavy workflow and avoids duplicating resea
 
 The advisory preference is to evaluate A first because it is the easiest self-contained document to review. Permit B only for justified large families, and use C's explicit issue/evidence links without making issue closure an acceptance mechanism. This is a researcher's suggestion, not user approval of grouping, IDs, headings or statuses.
 
-Regardless of option, a Rill evidence section could distinguish hand-checked against named rules, standalone experiment executed (exact environment/result/limitations), not checked, and future compiler test. Preserve both positive and negative examples with expected outcomes and the rule they exercise; label pseudocode/incomplete contexts. Future checks can cover parsing/type checking, expected diagnostics, runtime semantics, feature-interaction regressions, and provider/backend matrices once the relevant implementation exists. These are proposed documentation obligations, not implemented validators or proof claims. The existing #30 report is a concrete model for limiting experimental claims; current Swift's runnable-prototype gate should not be copied under a different name.
+Regardless of option, a Rill evidence section could distinguish hand-checked against named rules, standalone experiment executed (exact environment/result/limitations), not checked, and future compiler test. Preserve both positive and negative examples with expected outcomes and the rule they exercise; label pseudocode/incomplete contexts. Future checks can cover parsing/type checking, expected diagnostics, runtime semantics, feature-interaction regressions, and provider/backend matrices once the relevant implementation exists. These are proposed documentation obligations, not implemented validators or proof claims. The existing ri-dej report is a concrete model for limiting experimental claims; current Swift's runnable-prototype gate should not be copied under a different name.
 
 Accepted source-ticket designs should be linked with their actual decision provenance; RFC decision fields should remain independently unset until the authorized human/process accepts them. Review blockers, acceptance blockers and implementation/provider blockers can be recorded separately without asserting they all block the same stage. Whether a particular unresolved semantic question prevents review-readiness or acceptance is a policy choice, not answered by the foreign processes.
 
@@ -237,4 +237,4 @@ Accepted source-ticket designs should be linked with their actual decision prove
 3. Which open questions must be closed before review versus acceptance, especially provider/backend feasibility and unsupported mechanisms, and what hand-checked evidence is sufficient while no compiler exists.
 4. Whether accepted RFCs remain historical design records or maintained normative text, and where cross-cutting definitions, glossary terms, diagnostic contracts and future language-reference text have their authoritative home.
 
-Research establishes concrete precedents and their limits. It does not accept Rill designs, create the #26 conventions, complete #28 coverage, or close any implementation gate.
+Research establishes concrete precedents and their limits. It does not accept Rill designs, create the ri-9o5 conventions, complete ri-48g coverage, or close any implementation gate.

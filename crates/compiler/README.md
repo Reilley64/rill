@@ -2,7 +2,7 @@
 
 This crate implements M1 source snapshots/lexing, the M2 parser and M3 module resolution/declaration collection. It depends on neither LLVM nor LSP. Parsing success does not establish successful source checking or Rill execution. Product commands and acceptance gates remain unavailable.
 
-The parser follows both [syntax-annex artifacts](../../docs/grammar/v0-syntax-v1.md), including the linked EBNF. Their confirmed syntax policies do not imply full annex or owning-RFC acceptance. [M2 ticket #52](https://github.com/Reilley64/rill/issues/52) records the baseline, acceptance evidence and limitations.
+The parser follows both [syntax-annex artifacts](../../docs/grammar/v0-syntax-v1.md), including the linked EBNF. Their confirmed syntax policies do not imply full annex or owning-RFC acceptance. M2 ticket ri-lpw records the baseline, acceptance evidence and limitations.
 
 ## Strict parser entry points
 
@@ -81,7 +81,7 @@ Semantic parser checks remain excluded. Examples such as nontrailing generic def
 
 ## M3 loader and resolver
 
-The owner approved O1 through O7 and the three test seams at checkpoint `a41e7cc955e67329d6dc3a8a69de667e0af204ac`. [Ticket #54](https://github.com/Reilley64/rill/issues/54#issuecomment-6939478619) records approval. [RFC 0002](../../docs/rfcs/0002-modules-and-program-loading.md#proposed-m3-resolution-procedure) owns the scoped contract. Its full status remains Draft. A resolved graph is not a successfully checked program.
+The owner approved O1 through O7 and the three test seams at checkpoint `a41e7cc955e67329d6dc3a8a69de667e0af204ac`. Ticket ri-1fk (comment 6939478619) records approval. [RFC 0002](../../docs/rfcs/0002-modules-and-program-loading.md#proposed-m3-resolution-procedure) owns the scoped contract. Its full status remains Draft. A resolved graph is not a successfully checked program.
 
 | Interface | Contract |
 | --- | --- |

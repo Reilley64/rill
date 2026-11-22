@@ -15,4 +15,4 @@ Keep component-local unit tests beside their Rust, standard-library or runtime i
 
 [Rill prototypes](../docs/prototypes/README.md) remain chronological design evidence. [Standalone experiments](../experiments/README.md) retain their own revisions, tools, outputs and limitations. Future conformance cases can reference that evidence without moving it or rewriting expected behavior as executed results. Explicit `experiment:*` reproduction tasks do not replace product acceptance.
 
-See [development task status](../docs/development.md#task-profiles-and-current-status) for current commands and limits. [#28](https://github.com/Reilley64/rill/issues/28) retains production/formal backend acceptance, and [#42](https://github.com/Reilley64/rill/issues/42) retains complete client delivery. Infrastructure success closes neither gate.
+See [development task status](../docs/development.md#task-profiles-and-current-status) for current commands and limits. ri-48g retains production/formal backend acceptance, and ri-bv2 retains complete client delivery. Infrastructure success closes neither gate.

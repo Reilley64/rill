@@ -11,6 +11,6 @@ This repository contains the language design, standard-library contracts, Rill s
 - [RFC conventions and register](docs/rfcs/README.md) track proposals and their review status.
 - [Rill examples and case notes](docs/prototypes/README.md) distinguish source examples from executed checks.
 - [Standalone experiments](experiments/README.md) contain backend and SQLite reference programs.
-- [Language map](https://github.com/Reilley64/rill/issues/1) tracks design work and dependencies.
+- Language map (ri-kl0) tracks design work and dependencies.
 
 Created in [T3 Code](https://t3.codes).

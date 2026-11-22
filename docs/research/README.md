@@ -18,7 +18,7 @@ These reports predate later Rill decisions. Their original report-only commits a
 - [mise toolchain management](mise-toolchain-management.md) examines tool/version/task ownership, platform prerequisites and unresolved LLVM 23 installation choices.
 - [LLVM 23 provisioning options](0046-llvm23-provisioning-options.md) checks actual upstream and Conda artifacts, native prerequisites and static-link verification requirements.
 
-These reports support the setup interview. [#46](https://github.com/Reilley64/rill/issues/46) records accepted answers and open decisions; research suggestions alone do not authorize implementation.
+These reports support the setup interview. ri-x5n records accepted answers and open decisions; research suggestions alone do not authorize implementation.
 
 ## Backend experiments
 
