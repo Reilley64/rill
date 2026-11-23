@@ -272,7 +272,10 @@ const fn stats(work: usize, entries: usize, max_depth: usize) -> Statistics {
 /// parent a95e04e8 every source below stopped at its first
 /// `Result<_, string>` parameter (e.g. `forwards` 1,852/17/0, graph
 /// 185,787/3,978/3), except the two parent-cap rows at the end.
-const CASES: [(&str, Outcome, Statistics, Statistics); 23] = [
+/// The last column is the whole-graph cap before the i32 equality source root
+/// (ri-785.9, metering rule 11).
+#[allow(clippy::type_complexity)]
+const CASES: [(&str, Outcome, Statistics, Statistics, (usize, usize, usize)); 23] = [
     // Forwarding: bound, grouped operand, grouped postfix, alias, statement,
     // both known variants, the whole carrier, a grouped return, a scope and
     // a loop.
@@ -280,67 +283,78 @@ const CASES: [(&str, Outcome, Statistics, Statistics); 23] = [
         "function probe(input: Result<bool, string>, tail: string): Result<bool, string> { let flag = input?; return Result.Ok(flag); }",
         Outcome::Checked,
         stats(3_521, 522, 4),
-        stats(187_456, 4_483, 4),
+        stats(187_772, 4_617, 5),
+        (187_456, 4_483, 4),
     ),
     (
         "function probe(input: Result<bool, string>, tail: string): Result<bool, string> { let flag = ((input))?; return Result.Ok(flag); }",
         Outcome::Checked,
         stats(3_529, 524, 5),
-        stats(187_584, 4_485, 5),
+        stats(187_900, 4_619, 5),
+        (187_584, 4_485, 5),
     ),
     (
         "function probe(input: Result<bool, string>, tail: string): Result<bool, string> { let flag = (input?); return Result.Ok(flag); }",
         Outcome::Checked,
         stats(3_524, 523, 4),
-        stats(187_519, 4_484, 4),
+        stats(187_835, 4_618, 5),
+        (187_519, 4_484, 4),
     ),
     (
         "function probe(input: Result<bool, string>, tail: string): Result<bool, string> { let held = input; let flag = held?; return Result.Ok(flag); }",
         Outcome::Checked,
         stats(3_650, 586, 4),
-        stats(187_706, 4_547, 4),
+        stats(188_022, 4_681, 5),
+        (187_706, 4_547, 4),
     ),
     (
         "function probe(input: Result<bool, string>, tail: string): Result<bool, string> { input?; return Result.Ok(true); }",
         Outcome::Checked,
         stats(3_372, 444, 4),
-        stats(187_306, 4_405, 4),
+        stats(187_622, 4_539, 5),
+        (187_306, 4_405, 4),
     ),
     (
         "function probe(input: Result<bool, string>.Err, tail: string): Result<bool, string> { let flag = input?; return Result.Ok(flag); }",
         Outcome::Checked,
         stats(3_204, 353, 3),
-        stats(187_139, 4_314, 3),
+        stats(187_455, 4_448, 5),
+        (187_139, 4_314, 3),
     ),
     (
         "function probe(input: Result<bool, string>.Ok, tail: string): Result<bool, string> { let flag = input?; return Result.Ok(flag); }",
         Outcome::Checked,
         stats(3_316, 409, 4),
-        stats(187_251, 4_370, 4),
+        stats(187_567, 4_504, 5),
+        (187_251, 4_370, 4),
     ),
     (
         "function probe(input: Result<bool, string>, tail: string): Result<bool, string> { return input; }",
         Outcome::Checked,
         stats(3_077, 279, 3),
-        stats(186_771, 4_240, 3),
+        stats(187_087, 4_374, 5),
+        (186_771, 4_240, 3),
     ),
     (
         "function probe(input: Result<bool, string>, tail: string): Result<bool, string> { let flag = input?; return (Result.Ok(flag)); }",
         Outcome::Checked,
         stats(3_526, 523, 5),
-        stats(187_521, 4_484, 5),
+        stats(187_837, 4_618, 5),
+        (187_521, 4_484, 5),
     ),
     (
         "function probe(input: Result<bool, string>, flag: bool): Result<bool, string> { if (flag) { let value = input?; } else { let other = input?; } return Result.Ok(true); }",
         Outcome::Checked,
         stats(4_374, 991, 5),
-        stats(188_730, 4_952, 5),
+        stats(189_046, 5_086, 5),
+        (188_730, 4_952, 5),
     ),
     (
         "function probe(input: Result<bool, string>, flag: bool): Result<bool, string> { while (true) { let value = input?; break; } return Result.Ok(true); }",
         Outcome::Checked,
         stats(3_636, 596, 5),
-        stats(187_811, 4_557, 5),
+        stats(188_127, 4_691, 5),
+        (187_811, 4_557, 5),
     ),
     // Retiring the held error: discarded, bound, grouped operands, grouped
     // RHS, and in each branch of a scope.
@@ -348,31 +362,36 @@ const CASES: [(&str, Outcome, Statistics, Statistics); 23] = [
         "function probe(input: Result<bool, string>.Err, source: Result<string, string>.Err, tail: string): Result<bool, string> { let _ = input ? (source?); return Result.Ok(true); }",
         Outcome::Checked,
         stats(4_794, 668, 4),
-        stats(189_029, 4_629, 4),
+        stats(189_345, 4_763, 5),
+        (189_029, 4_629, 4),
     ),
     (
         "function probe(input: Result<bool, string>.Err, source: Result<string, string>.Err, tail: string): Result<bool, string> { let flag = input ? (source?); return Result.Ok(flag); }",
         Outcome::Checked,
         stats(4_885, 722, 4),
-        stats(189_181, 4_683, 4),
+        stats(189_497, 4_817, 5),
+        (189_181, 4_683, 4),
     ),
     (
         "function probe(input: Result<bool, string>.Err, source: Result<string, string>.Err, tail: string): Result<bool, string> { let _ = ((input)) ? ((source)?); return Result.Ok(true); }",
         Outcome::Checked,
         stats(4_806, 671, 5),
-        stats(189_221, 4_632, 5),
+        stats(189_537, 4_766, 5),
+        (189_221, 4_632, 5),
     ),
     (
         "function probe(input: Result<bool, string>.Err, source: Result<string, string>.Err, tail: string): Result<bool, string> { let _ = input ? ((source?)); return Result.Ok(true); }",
         Outcome::Checked,
         stats(4_797, 669, 5),
-        stats(189_092, 4_630, 5),
+        stats(189_408, 4_764, 5),
+        (189_092, 4_630, 5),
     ),
     (
         "function probe(input: Result<bool, string>.Err, source: Result<string, string>.Err, flag: bool): Result<bool, string> { if (flag) { let _ = input ? (source?); } else { let _ = input ? (source?); } return Result.Ok(true); }",
         Outcome::Checked,
         stats(5_828, 1_075, 6),
-        stats(190_603, 5_036, 6),
+        stats(190_919, 5_170, 6),
+        (190_603, 5_036, 6),
     ),
     // A second postfix, a wrap whose RHS reads its own moved operand, and a
     // move under a live loan.
@@ -384,13 +403,15 @@ const CASES: [(&str, Outcome, Statistics, Statistics); 23] = [
             ("flag = input", "input"),
         ),
         stats(3_473, 509, 4),
-        stats(187_591, 4_471, 4),
+        stats(187_907, 4_605, 5),
+        (187_591, 4_471, 4),
     ),
     (
         "function probe(source: Result<string, string>.Err, tail: string): Result<bool, string> { let _ = source ? (source?); return Result.Ok(true); }",
         Outcome::Rejected("R0200", ("(source?)", "source"), ("= source ?", "source")),
         stats(4_602, 567, 4),
-        stats(188_658, 4_529, 4),
+        stats(188_974, 4_663, 5),
+        (188_658, 4_529, 4),
     ),
     (
         "function probe(input: Result<bool, string>): Result<bool, string> { let view = &input; let flag = input?; let _ = view; return Result.Ok(flag); }",
@@ -400,7 +421,8 @@ const CASES: [(&str, Outcome, Statistics, Statistics); 23] = [
             ("view = &input", "&input"),
         ),
         stats(3_279, 382, 4),
-        stats(187_396, 4_344, 4),
+        stats(187_712, 4_478, 5),
+        (187_396, 4_344, 4),
     ),
     // Unsupported siblings. A `string` payload for a new wrapper, a call
     // RHS and an owning success payload that can continue stay Incomplete.
@@ -410,19 +432,22 @@ const CASES: [(&str, Outcome, Statistics, Statistics); 23] = [
         "function probe(input: Result<bool, string>, tail: string): Result<bool, string> { let flag = input ? tail; return Result.Ok(flag); }",
         Outcome::Blocked("input ? tail"),
         stats(2_996, 240, 4),
-        stats(186_991, 4_201, 4),
+        stats(187_307, 4_335, 5),
+        (186_991, 4_201, 4),
     ),
     (
         "function carryFailure(source: Result<string, string>.Err): Result<string, string>.Err { return source; }\nfunction probe(input: Result<bool, string>.Err, source: Result<string, string>.Err, tail: string): Result<bool, string> { let _ = input ? (carryFailure(source)?); return Result.Ok(true); }",
         Outcome::Blocked("carryFailure(source)"),
         stats(4_481, 504, 4),
-        stats(190_721, 4_722, 4),
+        stats(191_037, 4_856, 5),
+        (190_721, 4_722, 4),
     ),
     (
         "function probe(input: Result<string, string>, tail: string): Result<bool, string> { let flag = input?; return Result.Ok(true); }",
         Outcome::Blocked("input?"),
         stats(4_081, 430, 4),
-        stats(188_016, 4_391, 4),
+        stats(188_332, 4_525, 5),
+        (188_016, 4_391, 4),
     ),
     // Parent-cap regression, measured at a95e04e8 and not re-measured: a
     // `Result<_, string>` returned by a producer that can itself return is
@@ -431,7 +456,8 @@ const CASES: [(&str, Outcome, Statistics, Statistics); 23] = [
         "function probe(input: Result<bool, i32>): Result<bool, string> { return Result.Ok(input ? \"outer\"); }",
         Outcome::Blocked("Result.Ok(input ? \"outer\")"),
         stats(2_949, 215, 3),
-        stats(186_762, 4_176, 3),
+        stats(187_078, 4_310, 5),
+        (186_762, 4_176, 3),
     ),
 ];
 
@@ -469,7 +495,7 @@ fn limits(s: Statistics) -> (AnalysisLimits, Vec<AnalysisLimits>) {
 
 #[test]
 fn string_error_cases_keep_their_outcomes_at_exact_caps() {
-    for (source, outcome, targeted, whole) in CASES {
+    for (source, outcome, targeted, whole, pre_equality) in CASES {
         probe(
             "propagation::text_err::string_error_cases_keep_their_outcomes_at_exact_caps",
             source,
@@ -495,6 +521,7 @@ fn string_error_cases_keep_their_outcomes_at_exact_caps() {
                     assert_eq!(limited.completion(), Completion::ResourceLimit, "{source}");
                     assert!(limited.mir().is_none() && limited.findings().is_empty());
                 }
+                assert_pre_equality_graph_cap(receipt, pre_equality);
                 let (exact, short) = limits(whole);
                 let graph = analyze_ownership(receipt, exact);
                 assert_eq!(graph.statistics(), whole, "{source}");
