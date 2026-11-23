@@ -724,9 +724,7 @@ impl<'a, 'g> Check<'a, 'g> {
                 let Some(child) = child else {
                     return Ok(false);
                 };
-                if !references {
-                    self.budget.reserve(3)?;
-                }
+                self.budget.reserve(3)?; // three goal handles, before the slot is built
                 scoped_slots[i] = Some(ScopedJoinSlot {
                     path: [i],
                     child,
@@ -751,7 +749,7 @@ impl<'a, 'g> Check<'a, 'g> {
             }
         }
         if let [Some(left), Some(right)] = reference_plans {
-            self.budget.reserve(8)?; // two reference origins and three goal handles per slot
+            self.budget.reserve(2)?; // two reference origins; the goal handles are reserved above
             if !self.prove_reference_plan(left, depth + 1)?
                 || !self.prove_reference_plan(right, depth + 1)?
             {

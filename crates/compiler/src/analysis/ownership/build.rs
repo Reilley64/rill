@@ -27,6 +27,7 @@ mod i32_arithmetic;
 mod interpolation;
 mod iteration;
 mod list_arrows;
+mod list_i32_literal;
 mod list_source;
 mod option_calls;
 mod scoped_result;
@@ -536,6 +537,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             retaining_gate: None,
             retaining_gate_values: [true; 2],
             list_delivery_loop: None,
+            in_loop: false,
             scalar_copy_read: None,
             copied_origins: BTreeSet::new(),
             declared_shared_frame: false,
@@ -543,6 +545,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             return_contract,
             callable_frame: None,
             proved_variant_cleanup: Vec::new(),
+            observing_disposers: Vec::new(),
             budget,
         }
     }
@@ -810,13 +813,11 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         if !nested {
             return Ok(None);
         }
-        if self.outer_disposer(node, ty)?.is_some() {
-            return Err(Stop::Pending(node));
-        }
+        let disposer = self.outer_disposer(node, ty)?;
         // Keep each child record in one contiguous region with the same
         // slot order as its standalone type. A field transfer moves that
         // region; outer cleanup still walks the remaining slots in reverse.
-        let root = self.aggregate_root(node, None, 0)?;
+        let root = self.aggregate_root(node, disposer, 0)?;
         for outer in fields {
             self.budget.step(1)?;
             let child = if matches!(outer.ty.as_ref(), TypeTerm::Primitive(_)) {
@@ -1504,9 +1505,11 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         'g: 't,
     {
         let root = self.aggregate_root(node, custom_disposer, members.len())?;
+        let mut observed = false;
         for (projection, ty) in members {
             self.budget.step(1)?;
-            let reference_member = custom_disposer.is_none() && shared_primitive_reference(ty);
+            let reference_member = shared_primitive_reference(ty);
+            observed |= reference_member;
             let cleanup = if owns_text(ty) {
                 StorageCleanup::Drop
             } else if reference_member || matches!(ty.as_ref(), TypeTerm::Primitive(_)) {
@@ -1534,6 +1537,12 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 moves,
                 cleanup,
             });
+        }
+        // A custom disposer may read these references when it runs, so
+        // liveness keeps their sources until the record's cleanup.
+        if observed && custom_disposer.is_some() {
+            self.budget.reserve(1)?;
+            self.observing_disposers.push(root);
         }
         Ok(root)
     }
@@ -1834,7 +1843,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         Ok(Some(from))
     }
 
-    fn clone_region(&mut self, from: Slot, dest: NodeId) -> ResultOf<Slot> {
+    pub(super) fn clone_region(&mut self, from: Slot, dest: NodeId) -> ResultOf<Slot> {
         let region = self.slots[from].storage(from);
         let owner = self.slots.len();
         self.budget.step(region.len())?;
@@ -2745,12 +2754,15 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                         breaks: next,
                         continues: backedge,
                     });
+                    let outer = std::mem::replace(&mut self.in_loop, true);
                     let yes = self.statement(
                         children[1],
                         backedge,
                         Exits { looping, ..exits },
                         depth + 1,
-                    )?;
+                    );
+                    self.in_loop = outer;
+                    let yes = yes?;
                     self.retaining_gate_values = parent;
                     let head = self.condition(cond, yes, next, depth + 1)?;
                     self.code[backedge].edges = Edges::Next(head);
@@ -4636,6 +4648,17 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         node: NodeId,
         data: &ErrorConstruction<'g>,
     ) -> ResultOf<(&'a Flow, &'g Span, &'g DeclarationId)> {
+        let flow = self.wrap_failure_shape(node, data)?;
+        let (origin, display) = self.wrap_failure_premises(node, data)?;
+        Ok((flow, origin, display))
+    }
+
+    /// The shape of an error wrap, read from its paid RHS fact.
+    fn wrap_failure_shape(
+        &mut self,
+        node: NodeId,
+        data: &ErrorConstruction<'g>,
+    ) -> ResultOf<&'a Flow> {
         let role = self.typed.result_role().ok_or(Stop::Pending(node))?;
         let [left, right] = self.module.syntax.nodes[node].children[..] else {
             return Err(Stop::Pending(node));
@@ -4666,6 +4689,17 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         {
             return Err(Stop::Pending(node));
         }
+        Ok(&rhs.flow)
+    }
+
+    /// The retained operand's proved goals, its selected display and the
+    /// written `?` of an error wrap whose shape is checked.
+    fn wrap_failure_premises(
+        &mut self,
+        node: NodeId,
+        data: &ErrorConstruction<'g>,
+    ) -> ResultOf<(&'g Span, &'g DeclarationId)> {
+        let retained = data.retained.as_ref().ok_or(Stop::Pending(node))?;
         self.budget.step(4)?;
         let bodies = self.typed.bodies();
         for goal in [&retained.no_borrow, &retained.sendable, &retained.shareable] {
@@ -4694,7 +4728,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             .filter(|token| token.span == data.origin && token.span.bytes() == b"?")
             .ok_or(Stop::Pending(node))?
             .span;
-        Ok((&rhs.flow, origin, selected.implementation))
+        Ok((origin, selected.implementation))
     }
 
     fn wrap_result_failure(
@@ -4706,7 +4740,16 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         return_cleanup: Pc,
         depth: usize,
     ) -> ResultOf<Pc> {
-        let (flow, origin, cause_display) = self.checked_wrap_failure(node, data)?;
+        let flow = self.wrap_failure_shape(node, data)?;
+        let i32_error =
+            matches!(data.payload.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32");
+        // Rule 1 (review ci-uaa1, ri-vgz.5 #2): a `string` error screens its
+        // RHS before the premises charge; an `i32` error keeps its order.
+        let premises = if i32_error {
+            Some(self.wrap_failure_premises(node, data)?)
+        } else {
+            None
+        };
         let right = data.value;
         let (root, root_depth) = self.ungroup_expression_at(right, depth)?;
         let facts = self.value(root)?;
@@ -4714,10 +4757,13 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             && matches!(facts.data, Some(DataExpression::Propagation(_)));
         // A `string` error never builds a new wrapper (checked above for a
         // continuing RHS); a non-postfix RHS would stage its payload.
-        if !postfix && !matches!(data.payload.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32")
-        {
+        if !postfix && !i32_error {
             return Err(Stop::Pending(right));
         }
+        let (origin, cause_display) = match premises {
+            Some(premises) => premises,
+            None => self.wrap_failure_premises(node, data)?,
+        };
         // Other RHS forms keep their ordinary staging proof, including its
         // precise pending site and budget when a nested argument can return.
         let payload = (!postfix || flow.normal)
@@ -5418,6 +5464,9 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             NodeKind::Binary("==") if facts.i32_equality => {
                 return self.i32_equality(node, into, next, depth);
             }
+            NodeKind::Binary("&&") if facts.i32_equality_conjunction => {
+                return self.i32_equality_conjunction(node, into, next, depth);
+            }
             NodeKind::Index => return self.read_list_i32(node, facts, into, next, depth),
             NodeKind::Template => return self.i32_interpolation(node, facts, into, next, depth),
             NodeKind::ValueReference => Action::Read {
@@ -5548,6 +5597,9 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 };
                 let descriptor = self.bool_deref_descriptor_slot(node, path)?;
                 Action::CopyThrough { descriptor, into }
+            }
+            NodeKind::Bracket if matches!(facts.data, Some(DataExpression::List { .. })) => {
+                return self.list_i32_literal(node, facts, into, next, depth);
             }
             NodeKind::Bracket => {
                 let into = into.ok_or(Stop::Pending(node))?;
@@ -7530,6 +7582,107 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         self.closure(*argument, stage, frame, depth + 1)
     }
 
+    /// The written shape of a family call whose selected implementation the
+    /// caller reads as its declared contract (RFC 0007 line 204): one `&mut`
+    /// borrow of a named local passed to an implementation returning `&i32`.
+    /// Pure syntax and type screens; nothing here is metered, so every other
+    /// family call keeps its old blocker at its old cost.
+    fn family_view_shape(
+        &self,
+        facts: &ExpressionFacts<'g>,
+        call: &CallFacts<'g>,
+        into: Option<Slot>,
+    ) -> bool {
+        let syntax = &self.module.syntax.nodes;
+        let [argument] = call.arguments.as_slice() else {
+            return false;
+        };
+        into.is_some()
+            && !self.in_loop
+            && call.selection.is_some()
+            && call.callee.kind == DeclarationKind::Family
+            && call.callee.module.origin == Origin::Application
+            && call.pipe_input.is_none()
+            && call.defaults.is_empty()
+            && call.scoped_join.is_none()
+            && call.list_arrows.is_none()
+            && syntax[*argument].kind == NodeKind::Prefix("&mut")
+            && matches!(syntax[*argument].children.as_slice(), [operand]
+                if syntax[*operand].kind == NodeKind::ValueReference)
+            && matches!(facts.ty.as_ref(), TypeTerm::Reference { mutable: false, referent }
+                if scalar::scalar(referent) == Some(Primitive::I32))
+    }
+
+    /// A family call resolved to an `implement` in this module, checked
+    /// against that implementation's declared signature: `&mut List<i32>` in,
+    /// `&i32` out. The caller never reads the implementation's body.
+    fn call_family_selected(
+        &mut self,
+        node: NodeId,
+        facts: &ExpressionFacts<'g>,
+        call: &CallFacts<'g>,
+        into: Option<Slot>,
+        next: Pc,
+        depth: usize,
+    ) -> ResultOf<Pc> {
+        let pending = || Stop::Pending(node);
+        let (Some(into), Some(selection), [argument]) =
+            (into, call.selection.as_ref(), call.arguments.as_slice())
+        else {
+            return Err(pending());
+        };
+        let implementation = selection.implementation;
+        self.budget.step(1 + self.module.key.path.len())?;
+        if implementation.module != self.module.key
+            || implementation.kind != DeclarationKind::Implementation
+            || !selection.substitution.is_empty()
+        {
+            return Err(pending());
+        }
+        // The family's captured facts hold each implementation's declared
+        // signature. The map is keyed by a declaration identity holding the
+        // module path, so charge the probe like the header lookups.
+        let ordinary = self.typed.inventory();
+        graph::charge_key(&call.callee.module, ordinary.family_probes(), self.budget)?;
+        let family = ordinary.captured_family(call.callee).ok_or_else(pending)?;
+        self.budget.step(family.implementations.len())?;
+        let header = &family
+            .implementations
+            .iter()
+            .find(|body| body.source.declaration == *implementation)
+            .ok_or_else(pending)?
+            .header;
+        let DeclarationShape::Function { parameters, result } = &header.shape else {
+            return Err(pending());
+        };
+        let [formal] = parameters.as_slice() else {
+            return Err(pending());
+        };
+        let actual = self.normal_value(*argument)?;
+        if !header.binders.is_empty()
+            || *result != facts.ty
+            || formal.ty != actual.ty
+            || !matches!(formal.ty.as_ref(), TypeTerm::Reference { mutable: true, referent }
+                if self.is_list_i32(referent))
+        {
+            return Err(pending());
+        }
+        let actual_ty = actual.ty.clone();
+        let stage = self.slot(*argument, &actual_ty)?;
+        self.budget.reserve(2)?;
+        let index = self.calls.len();
+        self.calls.push(Call {
+            callee: implementation,
+            forwarding_prefix: None,
+            args: vec![stage],
+            into: Some(into),
+            result: CallResult::RetainsExclusiveInput,
+            destination: None,
+        });
+        let call_pc = self.emit(node, Action::Call(index), Edges::Next(next))?;
+        self.expression(*argument, Some(stage), call_pc, depth + 1)
+    }
+
     fn call(
         &mut self,
         node: NodeId,
@@ -7559,7 +7712,15 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             let [arg] = call.arguments.as_slice() else {
                 return Err(Stop::Pending(node));
             };
-            let operand = self.place(*arg)?;
+            let written = self.value(*arg)?;
+            let path = written.path.as_ref().ok_or(Stop::Pending(*arg))?;
+            // A field of a nested owned record parameter is read through its
+            // region; any other place resolves as before.
+            let operand = if path.projections.is_empty() {
+                self.resolve_place(*arg, path)?
+            } else {
+                self.read_value_place(*arg, written)?
+            };
             let mut target = WrittenDisposal::Ordinary;
             if let Some(release) = self.slots[operand].guard_release() {
                 let Some(DataExpression::NativeOwnership(native)) = &facts.data else {
@@ -7659,6 +7820,9 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             }
         }
         if checked_carrier.is_none() && !call.substitution.is_empty() {
+            if self.family_view_shape(facts, call, into) {
+                return self.call_family_selected(node, facts, call, into, next, depth);
+            }
             return self.call_declared_once(node, facts, call, into, next, depth);
         }
         if !Self::direct_application_call(call)

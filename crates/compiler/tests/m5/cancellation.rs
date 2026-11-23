@@ -587,6 +587,77 @@ fn guard_loops_without_a_proof_keep_their_parent_caps() {
     );
 }
 
+/// Review ci-uaa1 (ri-px1.9 #3): a guard-owning loop frame whose ordinary path
+/// returns the guard has no release of it to verify. It stops at the guard
+/// parameter with no delivery proof, at the caps measured at the parent
+/// 3da1d5a3 (targeted 1,888/25/2, graph 186,018/4,120/5).
+#[test]
+fn guard_returned_after_a_loop_keeps_its_parent_caps() {
+    use compiler::analysis::ownership::{Delivery, GraphCompletion, analyze_ownership};
+    probe(
+        "cancellation::guard_returned_after_a_loop_keeps_its_parent_caps",
+        "function pass(again: bool, lock: LockGuard<i32>): LockGuard<i32> { while (again) { continue; } return lock; }",
+        |_, module, receipt| {
+            let shorts = |exact: AnalysisLimits| {
+                [
+                    AnalysisLimits {
+                        max_work: exact.max_work - 1,
+                        ..exact
+                    },
+                    AnalysisLimits {
+                        max_entries: exact.max_entries - 1,
+                        ..exact
+                    },
+                    AnalysisLimits {
+                        max_depth: exact.max_depth - 1,
+                        ..exact
+                    },
+                ]
+            };
+            let graph_exact = AnalysisLimits {
+                max_work: 186_018,
+                max_entries: 4_120,
+                max_depth: 5,
+            };
+            let graph = analyze_ownership(receipt, graph_exact);
+            assert_eq!(graph.completion(), GraphCompletion::Incomplete);
+            assert!(graph.findings().is_empty());
+            for cap in shorts(graph_exact) {
+                let short = analyze_ownership(receipt, cap);
+                assert_eq!(short.completion(), GraphCompletion::ResourceLimit);
+                assert!(short.roots().iter().all(|root| root.mir().is_none()));
+            }
+            let d = module
+                .declarations
+                .iter()
+                .find(|d| d.name.as_deref() == Some("pass"))
+                .unwrap();
+            let exact = AnalysisLimits {
+                max_work: 1_888,
+                max_entries: 25,
+                max_depth: 2,
+            };
+            let local = lower_body(receipt, module, &d.id, exact).unwrap();
+            assert_eq!(local.completion(), Completion::Incomplete);
+            assert_eq!(local.blocked_at().unwrap().span.bytes(), b"lock");
+            assert!(local.mir().is_none() && local.findings().is_empty());
+            for cap in shorts(exact) {
+                let short = lower_body(receipt, module, &d.id, cap).unwrap();
+                assert_eq!(short.completion(), Completion::ResourceLimit);
+                assert!(short.mir().is_none() && short.findings().is_empty());
+            }
+            let root = graph
+                .roots()
+                .iter()
+                .find(|r| r.site().module == &module.key && r.site().node == d.node)
+                .unwrap();
+            assert_eq!(root.ordinary_completion(), Completion::Incomplete);
+            assert!(root.ordinary_mir().is_none());
+            assert!(matches!(root.enabled_frame(), Delivery::Unresolved));
+        },
+    );
+}
+
 #[test]
 fn installed_loop_backedge_cancellation_rejects_unrepaired_store() {
     check_pair(

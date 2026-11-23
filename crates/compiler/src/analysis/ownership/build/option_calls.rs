@@ -37,7 +37,14 @@ impl<'a, 'g> Build<'a, 'g, '_> {
                     ) && path.projections.is_empty()
                 })
         });
+        // The callee's visibility and scope are screened here too (review
+        // ci-uaa1, ri-vgz.3 #2): an exported callee is named through a public
+        // binding, and a callee declared inside this body starts within it.
+        let body = &self.module.syntax.nodes[self.body].span;
+        let scoped_callee = (body.start()..body.end()).contains(&call.callee.start);
         if !whole_carrier
+            || call.bindings.iter().any(|binding| binding.public)
+            || scoped_callee
             || !Self::direct_application_call(call)
             || call.pipe_input.is_some()
             || call.selection.is_some()
