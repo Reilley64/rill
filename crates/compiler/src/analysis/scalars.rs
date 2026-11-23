@@ -534,6 +534,7 @@ struct Checker<'r, 'g> {
     installed_conversions: Option<&'r super::typed::ConversionCore<'g>>,
     collections: CollectionCore<'g>,
     native_ownership: &'r [super::typed::OwnershipProtection<'g>],
+    ownership_overlaps: &'r [super::typed::OwnershipOverlap<'g>],
     ordinary_scope: Option<super::typed::InstalledOrdinaryScope<'g>>,
     data_depth: usize,
     evidence: generics::Evidence<'g>,
@@ -571,6 +572,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             installed_conversions: None,
             collections: Default::default(),
             native_ownership: &[],
+            ownership_overlaps: &[],
             ordinary_scope: None,
             data_depth: 0,
             evidence: generics::Evidence::default(),
@@ -3498,6 +3500,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         module: &'g Module,
         typed: &'r DeclarationFacts<'g>,
         pending_role: bool,
+        rejected: bool,
         enclosing: Option<(&Context<'r, 'g>, usize)>,
     ) -> Work<()> {
         let declaration = typed.declaration;
@@ -3516,7 +3519,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         if !self.source_scope_ready(module, node)? {
             return Ok(());
         }
-        if pending_role {
+        if pending_role && !rejected {
             self.defer(module, node, ScalarUnsupported::FamilySelection)?;
         }
         let before = self.marks();
@@ -3584,7 +3587,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 }
                 if declaration.id.kind == DeclarationKind::Function {
                     if let Some(typed) = self.input.facts.declarations.get(&declaration.id) {
-                        self.check_named_body(module, typed, false, None)?;
+                        self.check_named_body(module, typed, false, false, None)?;
                     } else {
                         self.defer(
                             module,
@@ -3604,14 +3607,20 @@ impl<'r, 'g> Checker<'r, 'g> {
                             .iter()
                             .filter_map(|scope| scope.provider.as_ref())
                             .any(|provider| provider.implementation.id == declaration.id);
-                        self.check_named_body(
-                            module,
-                            typed,
-                            !admitted
-                                && !delivered
-                                && !self.collections.is_wrapper(&declaration.id),
-                            None,
-                        )?;
+                        let pending = !admitted
+                            && !delivered
+                            && !self.collections.is_wrapper(&declaration.id);
+                        // Collection rejects a protected replacement (R0500), so
+                        // its family role is decided rather than pending.
+                        let mut rejected = false;
+                        if pending && !self.ownership_overlaps.is_empty() {
+                            self.elab.step(self.ownership_overlaps.len())?;
+                            rejected = self
+                                .ownership_overlaps
+                                .iter()
+                                .any(|overlap| overlap.implementation.id == declaration.id);
+                        }
+                        self.check_named_body(module, typed, pending, rejected, None)?;
                         self.clear_body_assumptions();
                     } else {
                         self.defer(module, declaration.node, ScalarUnsupported::FamilySelection)?;
