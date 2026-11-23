@@ -364,6 +364,140 @@ fn implicit_guard_release_closes_the_ordinary_root() {
     );
 }
 
+/// Review ci-uaa1 (ri-px1.8 #4): two scope-exit releases of the same provider
+/// in one block. Each `ReleaseGuard` edge re-verifies every release of the
+/// block, so the cost grows with the square of the releases. Against the
+/// parent 36f1cf15 (roots `Incomplete`, graphs 185,387 / 4,008 / 3 and
+/// 185,814 / 4,068 / 3), the i32 equality root adds 316 work and 134 entries
+/// and sets depth 5 (ri-785.9), and the verification adds 100 work for `two`
+/// and 386 for `pair`, against 24 for the single `implicit` release.
+#[test]
+fn two_guard_parameters_release_in_reverse_and_close_the_root() {
+    assert_two_releases(
+        "graph::closed_release::two_guard_parameters_release_in_reverse_and_close_the_root",
+        "function two(a: LockGuard<i32>, b: LockGuard<i32>): void {}",
+        b"function two",
+        &[
+            ("release", "b: LockGuard<i32>"),
+            ("release", "a: LockGuard<i32>"),
+        ],
+        (1_933, 45, 1),
+        (185_803, 4_142, 5),
+    );
+}
+
+/// See `two_guard_parameters_release_in_reverse_and_close_the_root`.
+#[test]
+fn two_guard_fields_release_in_reverse_and_close_the_root() {
+    assert_two_releases(
+        "graph::closed_release::two_guard_fields_release_in_reverse_and_close_the_root",
+        "type Pair = { first: LockGuard<i32>; second: LockGuard<i32>; }\nfunction pair(value: Pair): void {}",
+        b"function pair",
+        &[
+            ("release", "value: Pair.second"),
+            ("release", "value: Pair.first"),
+            ("end", "value: Pair"),
+        ],
+        (2_296, 105, 1),
+        (186_516, 4_202, 5),
+    );
+}
+
+fn assert_two_releases(
+    test: &str,
+    source: &str,
+    name: &[u8],
+    expected: &[(&str, &str)],
+    (work, entries, max_depth): (usize, usize, usize),
+    (graph_work, graph_entries, graph_depth): (usize, usize, usize),
+) {
+    probe(test, source, |_, module, receipt| {
+        let expected: Vec<_> = expected.iter().map(|(k, p)| (*k, p.to_string())).collect();
+        let short = |exact: AnalysisLimits| {
+            [
+                AnalysisLimits {
+                    max_work: exact.max_work - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_entries: exact.max_entries - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_depth: exact.max_depth - 1,
+                    ..exact
+                },
+            ]
+        };
+        let exact = AnalysisLimits {
+            max_work: graph_work,
+            max_entries: graph_entries,
+            max_depth: graph_depth,
+        };
+        let report = analyze_ownership(receipt, exact);
+        assert_eq!(
+            report.statistics(),
+            Statistics {
+                work: graph_work,
+                entries: graph_entries,
+                max_depth: graph_depth
+            }
+        );
+        assert_eq!(report.completion(), GraphCompletion::Incomplete);
+        assert!(report.findings().is_empty());
+        let root = root(&report, name);
+        assert_eq!(
+            root.ordinary_completion(),
+            Completion::Checked,
+            "{:?}",
+            root.blocked_at()
+        );
+        assert_eq!(cleanup_sequence(root.ordinary_mir().unwrap()), expected);
+        let provider = standard_root(&report, "mutex.rill", b"implement<T> dispose");
+        assert!(!root.dependencies().is_empty());
+        for edge in root.dependencies() {
+            assert_eq!(BodyOwner::Declaration(edge.declaration), provider.owner());
+            assert!(matches!(
+                edge.contract,
+                DependencyContract::ProtectedRelease { .. }
+            ));
+        }
+        for cap in short(exact) {
+            let limited = analyze_ownership(receipt, cap);
+            assert_eq!(limited.completion(), GraphCompletion::ResourceLimit);
+            assert!(limited.findings().is_empty());
+            assert!(
+                limited
+                    .roots()
+                    .iter()
+                    .all(|root| root.ordinary_mir().is_none())
+            );
+        }
+
+        let exact = AnalysisLimits {
+            max_work: work,
+            max_entries: entries,
+            max_depth,
+        };
+        let targeted = lower_root(receipt, module, root.owner(), exact).unwrap();
+        assert_eq!(targeted.completion(), Completion::Checked);
+        assert_eq!(
+            targeted.statistics(),
+            Statistics {
+                work,
+                entries,
+                max_depth
+            }
+        );
+        assert_eq!(cleanup_sequence(targeted.mir().unwrap()), expected);
+        for cap in short(exact) {
+            let limited = lower_root(receipt, module, root.owner(), cap).unwrap();
+            assert_eq!(limited.completion(), Completion::ResourceLimit);
+            assert!(limited.mir().is_none() && limited.findings().is_empty());
+        }
+    });
+}
+
 /// Rule 2: the nearest unsupported sibling, a guard moved into a local
 /// binding and released at scope exit, keeps the caps measured at the parent
 /// (36f1cf15 with D1's branch), not re-measured on the candidate.
