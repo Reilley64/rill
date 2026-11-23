@@ -667,6 +667,16 @@ pub enum Operation<'g> {
         argument: Place<'g>,
         into: Place<'g>,
     },
+    /// Call a family's selected implementation with one staged exclusive
+    /// borrow. The caller's contract is the implementation's declared
+    /// signature (RFC 0007 line 204), not its body. The returned read-only
+    /// view keeps the exclusive restriction on the borrowed place until the
+    /// view's last use; it is not a shared downgrade.
+    CallExclusiveView {
+        callee: &'g DeclarationId,
+        argument: Place<'g>,
+        into: Place<'g>,
+    },
     /// Evaluate a direct producer into statement-local storage.
     CallIntoTemporary {
         callee: &'g DeclarationId,
@@ -2607,6 +2617,9 @@ struct Build<'a, 'g, 'b> {
     retaining_gate_values: [bool; 2],
     /// A top-level empty/continue loop whose only decision reads a Bool formal.
     list_delivery_loop: Option<(NodeId, NodeId)>,
+    /// A statement of a `while` or `for` body is being built. A family-selected
+    /// call is admitted only outside loops (ri-2s0.6).
+    in_loop: bool,
     scalar_copy_read: Option<NodeId>,
     copied_origins: BTreeSet<NodeId>,
     /// This body lends a local descriptor to a declared shared frame, so
@@ -2657,6 +2670,8 @@ enum CallResult<'a, 'g> {
     ScalarCopy,
     RetainsInputs,
     RetainsRecordInput,
+    /// A returned read-only view keeps the one staged exclusive input live.
+    RetainsExclusiveInput,
     RetainsOptionCarrier(&'a DeclarationFacts<'g>),
     TransfersCallable(&'a DeclarationFacts<'g>),
 }

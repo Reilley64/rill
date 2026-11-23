@@ -714,28 +714,133 @@ function ordered(input: List<i32>): i32 {
 "#,
     outcome: Outcome::Receipt {
         typed_stats: (328846, 48424, 12),
-        graph: (GraphCompletion::Incomplete, (189575, 4219, 5)),
-        pre_equality_graph: (189259, 4085, 4),
+        graph: (GraphCompletion::SourceRejected, (191877, 4600, 6)),
+        // The caps before ri-2s0.6 (metering rule 11, third case): the family
+        // call now reaches its contract, so they give `ResourceLimit`.
+        pre_equality_graph: (189575, 4219, 5),
         roots: &[
             Root {
                 name: "conflict",
-                want: Want::Incomplete {
-                    blocker: r####"editAndView(&mut owned)"####,
+                want: Want::Rejected {
+                    code: "R0201",
+                    site: r####"&owned"####,
+                    related: r####"&mut owned"####,
                 },
                 graph: None,
-                stats: (2014, 77, 4),
+                stats: (3028, 202, 6),
             },
             Root {
                 name: "ordered",
-                want: Want::Incomplete {
-                    blocker: r####"editAndView(&mut owned)"####,
-                },
+                want: Want::Checked,
                 graph: None,
-                stats: (2032, 83, 4),
+                stats: (3316, 336, 6),
             },
         ],
     },
 }];
+
+/// Family-selected call siblings that stay unsupported (ri-2s0.6, rule 2).
+const O11_SIBLINGS: &[Source] = &[
+    Source {
+        text: r#"
+function editAndCount<L>(list: L): i32;
+implement editAndCount(list: &mut List<i32>): i32 { while (true) {} }
+function count(input: List<i32>): i32 {
+  let mut owned = input;
+  let total = editAndCount(&mut owned);
+  return total;
+}
+"#,
+        outcome: Outcome::Receipt {
+            typed_stats: (325674, 47936, 12),
+            graph: (GraphCompletion::Incomplete, (187802, 4148, 5)),
+            pre_equality_graph: (187486, 4014, 4),
+            roots: &[Root {
+                name: "count",
+                want: Want::Incomplete {
+                    blocker: r####"editAndCount(&mut owned)"####,
+                },
+                graph: None,
+                stats: (1947, 47, 3),
+            }],
+        },
+    },
+    Source {
+        text: r#"
+function readView<L>(list: L): &i32;
+implement readView(list: &List<i32>): &i32 { while (true) {} }
+function shared(input: List<i32>): i32 {
+  let owned = input;
+  let view = readView(&owned);
+  return *view;
+}
+"#,
+        outcome: Outcome::Receipt {
+            typed_stats: (325841, 47984, 12),
+            graph: (GraphCompletion::Incomplete, (187988, 4151, 5)),
+            pre_equality_graph: (187672, 4017, 4),
+            roots: &[Root {
+                name: "shared",
+                want: Want::Incomplete {
+                    blocker: r####"readView(&owned)"####,
+                },
+                graph: None,
+                stats: (1953, 50, 3),
+            }],
+        },
+    },
+    Source {
+        text: r#"
+function editAndView<L>(list: L): &i32;
+implement editAndView(list: &mut List<i32>): &i32 { while (true) {} }
+function grouped(input: List<i32>): i32 {
+  let mut owned = input;
+  let view = editAndView((&mut owned));
+  return *view;
+}
+"#,
+        outcome: Outcome::Receipt {
+            typed_stats: (326374, 48056, 12),
+            graph: (GraphCompletion::Incomplete, (188051, 4152, 5)),
+            pre_equality_graph: (187735, 4018, 4),
+            roots: &[Root {
+                name: "grouped",
+                want: Want::Incomplete {
+                    blocker: r####"editAndView((&mut owned))"####,
+                },
+                graph: None,
+                stats: (1956, 51, 3),
+            }],
+        },
+    },
+    Source {
+        text: r#"
+function editAndView<L>(list: L): &i32;
+implement editAndView(list: &mut List<i32>): &i32 { while (true) {} }
+function looped(input: List<i32>): i32 {
+  let mut owned = input;
+  while (true) {
+    let view = editAndView(&mut owned);
+    return *view;
+  }
+  return 0i32;
+}
+"#,
+        outcome: Outcome::Receipt {
+            typed_stats: (325933, 48025, 12),
+            graph: (GraphCompletion::Incomplete, (188312, 4167, 5)),
+            pre_equality_graph: (187996, 4033, 4),
+            roots: &[Root {
+                name: "looped",
+                want: Want::Incomplete {
+                    blocker: r####"editAndView(&mut owned)"####,
+                },
+                graph: None,
+                stats: (1977, 66, 5),
+            }],
+        },
+    },
+];
 
 const O12: &[Source] = &[Source {
     text: r#"
@@ -1348,10 +1453,68 @@ fn o10_owned_list_reference_extraction_has_no_receipt() {
 }
 
 #[test]
-fn o11_exclusive_return_view_contract_is_incomplete_at_its_call() {
+fn o11_exclusive_return_view_rejects_whole_read_before_last_use() {
     run(
-        "rfc_cases::o11_exclusive_return_view_contract_is_incomplete_at_its_call",
+        "rfc_cases::o11_exclusive_return_view_rejects_whole_read_before_last_use",
         O11,
+    );
+}
+
+/// Metering rule 11, third case (ri-2s0.6): the family call used to stop at
+/// `editAndView(&mut owned)`; it now reaches the implementation's declared
+/// contract, so the old `Incomplete` caps give `ResourceLimit` per root and for
+/// the whole graph. The O11 row holds the new caps.
+#[test]
+fn o11_pre_family_call_caps_now_give_resource_limit() {
+    installed(
+        "rfc_cases::o11_pre_family_call_caps_now_give_resource_limit",
+        |request| {
+            fs::write(&request.entry, format!("{IMPORTS}\n{}", O11[0].text)).unwrap();
+            for test_mode in [false, true] {
+                let request = InstalledRequest {
+                    test_mode,
+                    ..request.clone()
+                };
+                let graph = loader::load_installed(request).unwrap();
+                let typed = analyze_typed(&graph, AnalysisLimits::default());
+                assert_eq!(typed.completion(), TypedCompletion::Checked);
+                let module = graph
+                    .modules()
+                    .iter()
+                    .find(|m| m.key.origin == Origin::Application && m.key.path == "main.rill")
+                    .unwrap();
+                let receipt = typed.receipt().unwrap();
+                for (name, old) in [("conflict", (2014, 77, 4)), ("ordered", (2032, 83, 4))] {
+                    let root = module
+                        .declarations
+                        .iter()
+                        .find(|d| {
+                            d.id.kind == DeclarationKind::Function
+                                && d.name.as_deref() == Some(name)
+                        })
+                        .unwrap();
+                    let (old, _) = limits(statistics(old));
+                    let limited = lower_body(&receipt, module, &root.id, old).unwrap();
+                    assert_eq!(limited.completion(), Completion::ResourceLimit, "{name}");
+                    assert!(limited.mir().is_none() && limited.findings().is_empty());
+                }
+                let (old, _) = limits(statistics((189575, 4219, 5)));
+                assert_eq!(
+                    analyze_ownership(&receipt, old).completion(),
+                    GraphCompletion::ResourceLimit
+                );
+            }
+        },
+    );
+}
+
+/// Rule 2: a family call outside the admitted O11 shape keeps its parent
+/// blocker at the parent caps (the call is still the blocker).
+#[test]
+fn o11_unsupported_family_call_siblings_stay_incomplete_at_their_calls() {
+    run(
+        "rfc_cases::o11_unsupported_family_call_siblings_stay_incomplete_at_their_calls",
+        O11_SIBLINGS,
     );
 }
 
