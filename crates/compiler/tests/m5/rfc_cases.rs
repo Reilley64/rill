@@ -79,6 +79,11 @@ const IMPORTS: &str = r#"
     "#;
 
 fn run(test: &str, sources: &[Source]) {
+    run_with(test, sources, |_, _, _| {});
+}
+
+/// `run`, then `extra` on each source's graph in each load mode.
+fn run_with(test: &str, sources: &[Source], extra: impl Fn(usize, &loader::Graph, &str)) {
     installed(test, |request| {
         for (index, source) in sources.iter().enumerate() {
             fs::write(&request.entry, format!("{IMPORTS}\n{}", source.text)).unwrap();
@@ -127,6 +132,7 @@ fn run(test: &str, sources: &[Source]) {
                         );
                     }
                 }
+                extra(index, &graph, &context);
             }
         }
     });
@@ -208,10 +214,28 @@ fn signals(typed: &TypedReport<'_>, module: &loader::Module) -> Vec<String> {
         }
     }
     for overlap in typed.ownership_overlaps() {
+        // Related: the required provider the implementation would replace.
+        let related = typed
+            .ownership_protection()
+            .iter()
+            .find(|p| {
+                p.owner.id == overlap.owner.id
+                    && p.family == overlap.family
+                    && p.rule == overlap.rule
+            })
+            .and_then(|p| p.provider.as_ref())
+            .map(|provider| {
+                format!(
+                    "{} {}",
+                    provider.implementation.id.module.path,
+                    provider.implementation.span.bytes().escape_ascii()
+                )
+            });
         found.push(format!(
-            "overlap {} @ {}",
+            "overlap {} @ {} (related: {})",
             overlap.code(),
-            overlap.implementation.span.bytes().escape_ascii()
+            overlap.implementation.span.bytes().escape_ascii(),
+            related.as_deref().unwrap_or("none")
         ));
     }
     found
@@ -1119,22 +1143,73 @@ function render(outer: Outer): string { return `${outer.value}-${outer.value}`; 
     },
 }];
 
-const O21: &[Source] = &[Source {
-    text: r#"
+const O21: &[Source] = &[
+    Source {
+        text: r#"
 import std::core::dispose as release;
 import std::mutex::LockGuard;
 type Payload = { id: i32; }
 implement release(value: LockGuard<Payload>): void { }
 "#,
-    outcome: Outcome::Typed {
-        completion: TypedCompletion::Incomplete,
-        signals: &[
-            r####"obligation FamilySelection @ { }"####,
-            r####"overlap R0500 @ implement release(value: LockGuard<Payload>): void { }"####,
-        ],
-        stats: (323823, 47493, 12),
+        outcome: Outcome::Typed {
+            completion: TypedCompletion::SourceRejected,
+            signals: &[
+                r####"overlap R0500 @ implement release(value: LockGuard<Payload>): void { } (related: mutex.rill implement<T> dispose(value: LockGuard<T>): void { releaseGuard(value); })"####,
+            ],
+            stats: (324267, 47658, 12),
+        },
     },
-}];
+    // Siblings that stay `Incomplete`: the replacement's own body leaves a second
+    // obligation, and an unrelated root of the same module does.
+    Source {
+        text: r#"
+import std::core::dispose as release;
+import std::mutex::LockGuard;
+type Payload = { id: i32; }
+implement release(value: LockGuard<Payload>): void { let text = "a"; let view = &text; release(view); }
+"#,
+        outcome: Outcome::Typed {
+            completion: TypedCompletion::Incomplete,
+            signals: &[
+                r####"obligation FamilySelection @ release(view)"####,
+                r####"pending TypedInput @ release(view)"####,
+                r####"overlap R0500 @ implement release(value: LockGuard<Payload>): void { let text = \"a\"; let view = &text; release(view); } (related: mutex.rill implement<T> dispose(value: LockGuard<T>): void { releaseGuard(value); })"####,
+            ],
+            stats: (324633, 47683, 12),
+        },
+    },
+    Source {
+        text: r#"
+import std::core::dispose as release;
+import std::mutex::LockGuard;
+type Payload = { id: i32; }
+implement release(value: LockGuard<Payload>): void { }
+function ended(owner: string): void {
+  let view = &owner;
+  release(view);
+}
+"#,
+        outcome: Outcome::Typed {
+            completion: TypedCompletion::Incomplete,
+            signals: &[
+                r####"obligation FamilySelection @ release(view)"####,
+                r####"pending TypedInput @ release(view)"####,
+                r####"overlap R0500 @ implement release(value: LockGuard<Payload>): void { } (related: mutex.rill implement<T> dispose(value: LockGuard<T>): void { releaseGuard(value); })"####,
+            ],
+            stats: (325896, 47704, 12),
+        },
+    },
+];
+
+/// O21's exact typed cap before the replacement was rejected at collection
+/// (ri-8qlm, metering rule 11): the old `Incomplete` result stopped at the
+/// body's `FamilySelection` obligation. It now gives `ResourceLimit`.
+const O21_PRE_REJECTION: Triple = (323823, 47493, 12);
+
+/// Exact typed caps of O21's two `Incomplete` siblings measured at 7002855e,
+/// before the rejection (metering rules 1 and 2). Each still completes
+/// `Incomplete` there; it loses only the replacement body's obligation.
+const O21_SIBLINGS_PARENT: [Triple; 2] = [(325035, 47684, 12), (326297, 47705, 12)];
 
 const O22: &[Source] = &[
     Source {
@@ -1515,9 +1590,35 @@ fn o20_transitive_guard_cleanup_is_incomplete_at_interpolation() {
 
 #[test]
 fn o21_guard_release_replacement_reports_r0500() {
-    run(
+    run_with(
         "rfc_cases::o21_guard_release_replacement_reports_r0500",
         O21,
+        |index, graph, context| {
+            if index != 0 {
+                let (parent, _) = limits(statistics(O21_SIBLINGS_PARENT[index - 1]));
+                let sibling = analyze_typed(graph, parent);
+                assert_eq!(
+                    sibling.completion(),
+                    TypedCompletion::Incomplete,
+                    "{context}"
+                );
+                assert_eq!(
+                    sibling.statistics(),
+                    analyze_typed(graph, AnalysisLimits::default()).statistics(),
+                    "{context}"
+                );
+                return;
+            }
+            let (old, _) = limits(statistics(O21_PRE_REJECTION));
+            let limited = analyze_typed(graph, old);
+            assert_eq!(
+                limited.completion(),
+                TypedCompletion::ResourceLimit,
+                "{context}"
+            );
+            assert!(limited.receipt().is_none(), "{context}");
+            assert!(limited.bodies().findings().is_empty(), "{context}");
+        },
     );
 }
 
