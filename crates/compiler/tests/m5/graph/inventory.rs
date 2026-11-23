@@ -56,6 +56,10 @@ struct Capture {
     /// The graph meter before the i32 equality source root (ri-785.9); it
     /// now gives `ResourceLimit` (metering rule 11).
     pre_equality_graph: [usize; 3],
+    /// The graph meter before `joinedOrder` and its expectation became checked
+    /// roots (ri-e9t8, metering rule 11); it now gives `ResourceLimit`. Only the
+    /// capture with the O16 source has one.
+    before_o16_graph: Option<[usize; 3]>,
     app_roots: &'static [(&'static str, &'static str, &'static str, Completion)],
     /// Standard module, checked roots, incomplete roots.
     standard: &'static [(&'static str, usize, usize)],
@@ -126,13 +130,8 @@ const APP_SHARED: &[(&str, &str, &str, Completion)] = &[
         Incomplete,
     ),
     ("main.rill", "Function", "joined", Checked),
-    ("main.rill", "Function", "joinedOrder", Incomplete),
-    (
-        "main.rill",
-        "Expectation",
-        "expect joinedOrder();",
-        Incomplete,
-    ),
+    ("main.rill", "Function", "joinedOrder", Checked),
+    ("main.rill", "Expectation", "expect joinedOrder();", Checked),
 ];
 
 const STANDARD_BASELINE: &[(&str, usize, usize)] = &[
@@ -186,6 +185,7 @@ fn capture_cases() -> [Capture; 2] {
             typed: [372_246, 54_059, 12],
             graph: [203_014, 5_005, 5],
             pre_equality_graph: [202_698, 4_871, 3],
+            before_o16_graph: None,
             app_roots: APP_BASELINE,
             standard: STANDARD_BASELINE,
         },
@@ -194,8 +194,9 @@ fn capture_cases() -> [Capture; 2] {
             main: format!("{BASELINE_MAIN}{JOIN}"),
             standard_modules: 18,
             typed: [495_879, 56_822, 12],
-            graph: [243_522, 26_094, 10],
+            graph: [244_835, 26_772, 10],
             pre_equality_graph: [243_206, 25_960, 10],
+            before_o16_graph: Some([243_522, 26_094, 10]),
             app_roots: APP_SHARED,
             standard: STANDARD_SHARED,
         },
@@ -351,7 +352,14 @@ fn installed_captures_state_the_graph_root_inventory() {
                     assert_eq!(again.completion(), GraphCompletion::Incomplete);
                     assert_eq!(again.statistics(), used);
                     let [max_work, max_entries, max_depth] = case.pre_equality_graph;
-                    for short in [
+                    let before_o16 =
+                        case.before_o16_graph
+                            .map(|[max_work, max_entries, max_depth]| AnalysisLimits {
+                                max_work,
+                                max_entries,
+                                max_depth,
+                            });
+                    for short in before_o16.into_iter().chain([
                         AnalysisLimits {
                             max_work,
                             max_entries,
@@ -369,7 +377,7 @@ fn installed_captures_state_the_graph_root_inventory() {
                             max_depth: exact.max_depth - 1,
                             ..exact
                         },
-                    ] {
+                    ]) {
                         let limited = analyze_ownership(&receipt, short);
                         assert_eq!(limited.completion(), GraphCompletion::ResourceLimit);
                         assert!(limited.inventory_complete());

@@ -56,6 +56,9 @@ pub enum DependencyContract<'g> {
         bridge: &'g DeclarationId,
         arrow_bodies: [NodeId; 2],
     },
+    /// Closed at the call by the selected implementation's declared signature;
+    /// the implementation's own open source root is separate.
+    DeclaredSignature,
     ActiveDisposer,
     BuiltinDispose,
     ProtectedRelease {
@@ -649,6 +652,7 @@ fn analyze<'g>(
                         DependencyContract::CallableTransfer(_)
                             | DependencyContract::DeclaredOnceInvocation { .. }
                             | DependencyContract::DeclaredSharedInvocation { .. }
+                            | DependencyContract::DeclaredSignature
                             | DependencyContract::SynchronousListArrows { .. }
                             | DependencyContract::ScopedJoin { .. }
                             | DependencyContract::ListI32Disposal { .. }
@@ -1178,6 +1182,7 @@ pub(super) fn visit_dependencies<'g>(
                 },
                 budget,
             )?,
+            Operation::CallExclusiveView { callee, .. } => emit(callee, DeclaredSignature, budget)?,
             Operation::CallCallableTransfer { callee, layout, .. } => {
                 emit(callee, CallableTransfer(layout), budget)?
             }

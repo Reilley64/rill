@@ -6,6 +6,8 @@
 # give the first 24 fixtures; tmp-2026-11-22/rill66-rc.fAqWaF/{base-fixed,base-fwcap,base-matrix}.tsv give fixed-list to foreign-rc (fwcap-* are base-fwcap).
 # Every graph row was re-pinned under metering rule 11, D2 (b) (ri-785.9): the i32 equality source root adds 316 work and 134 entries and
 # sets depth 5 in every whole graph. m5::legacy_caps::pre_equality_graph_caps_give_resource_limit holds the old caps; the ri-785.9 ledger the table.
+# The shared, alias and competing graph rows were re-pinned again under rule 11, D2 (b) (ri-e9t8): `joinedOrder` becomes a checked root, +1,313 work
+# and +678 entries, depth unchanged (set by `joined`); its expectation adds nothing. m5::o16_join_order holds the old caps; the ri-e9t8 ledger the table.
 # fixture	subject	query	mode	outcome	work	entries	depth
 baseline	-	standard-modules	normal	17	-	-	-
 baseline	-	typed	normal	Checked	372246	54059	12
@@ -49,32 +51,32 @@ job-erased	-	standard-modules	test	17	-	-	-
 job-erased	-	typed	test	Incomplete	375533	54181	12
 shared	-	standard-modules	normal	18	-	-	-
 shared	-	typed	normal	Checked	495879	56822	12
-shared	-	graph	normal	Incomplete	243522	26094	10
+shared	-	graph	normal	Incomplete	244835	26772	10
 shared	main.rill#Function:joined	body	normal	Checked	32784	21079	10
 shared	main.rill#Function:joined	graph-root	normal	Checked/Checked	-	-	-
 shared	-	standard-modules	test	18	-	-	-
 shared	-	typed	test	Checked	495879	56822	12
-shared	-	graph	test	Incomplete	243522	26094	10
+shared	-	graph	test	Incomplete	244835	26772	10
 shared	main.rill#Function:joined	body	test	Checked	32784	21079	10
 shared	main.rill#Function:joined	graph-root	test	Checked/Checked	-	-	-
 alias	-	standard-modules	normal	18	-	-	-
 alias	-	typed	normal	Checked	495883	56823	12
-alias	-	graph	normal	Incomplete	243522	26094	10
+alias	-	graph	normal	Incomplete	244835	26772	10
 alias	main.rill#Function:joined	body	normal	Checked	32784	21079	10
 alias	main.rill#Function:joined	graph-root	normal	Checked/Checked	-	-	-
 alias	-	standard-modules	test	18	-	-	-
 alias	-	typed	test	Checked	495883	56823	12
-alias	-	graph	test	Incomplete	243522	26094	10
+alias	-	graph	test	Incomplete	244835	26772	10
 alias	main.rill#Function:joined	body	test	Checked	32784	21079	10
 alias	main.rill#Function:joined	graph-root	test	Checked/Checked	-	-	-
 competing	-	standard-modules	normal	18	-	-	-
 competing	-	typed	normal	Checked	495956	56833	12
-competing	-	graph	normal	SourceRejected	214539	5705	10
+competing	-	graph	normal	SourceRejected	215852	6383	10
 competing	main.rill#Function:joined	body	normal	SourceRejected	3802	692	10
 competing	main.rill#Function:joined	graph-root	normal	SourceRejected/SourceRejected	-	-	-
 competing	-	standard-modules	test	18	-	-	-
 competing	-	typed	test	Checked	495956	56833	12
-competing	-	graph	test	SourceRejected	214539	5705	10
+competing	-	graph	test	SourceRejected	215852	6383	10
 competing	main.rill#Function:joined	body	test	SourceRejected	3802	692	10
 competing	main.rill#Function:joined	graph-root	test	SourceRejected/SourceRejected	-	-	-
 escape	-	standard-modules	normal	18	-	-	-

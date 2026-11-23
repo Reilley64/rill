@@ -747,9 +747,20 @@ fn shared_join_rejects_a_live_fresh_error_without_wrapper_selection() {
                     assert!(limited.mir().is_none());
                 }
                 assert_pre_equality_graph_cap(&receipt, (216_846, 6_179, 10));
+                // ri-e9t8 (rule 11, D2 (b)): `joinedOrder` is now a checked root, which
+                // adds 1,313 work and 678 entries. The graph cap before it runs out.
+                let before_o16 = AnalysisLimits {
+                    max_work: 217_162,
+                    max_entries: 6_313,
+                    max_depth: 10,
+                };
+                assert_eq!(
+                    analyze_ownership(&receipt, before_o16).completion(),
+                    GraphCompletion::ResourceLimit
+                );
                 let graph_cost = Statistics {
-                    work: 217_162,
-                    entries: 6_313,
+                    work: 218_475,
+                    entries: 6_991,
                     max_depth: 10,
                 };
                 let (limit, short) = budget_caps(graph_cost);
