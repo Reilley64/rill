@@ -76,6 +76,14 @@ impl<'a, 'g> Build<'a, 'g, '_> {
                 self.admitted_option(&iteration.yielded),
                 Some((_, OptionPayload::Text(_)))
             );
+        // Screen on the declaration identity alone; record facts are charged
+        // only for a yielded application record.
+        let record = !text
+            && !option_text
+            && matches!(iteration.yielded.as_ref(), TypeTerm::Nominal { declaration, arguments }
+                if declaration.kind == DeclarationKind::Record
+                    && declaration.module.origin == Origin::Application
+                    && arguments.is_empty());
         use crate::analysis::scalars::IterationBodyKind::{
             NamedBoolPostfix, Ordinary, YieldedTextPostfix,
         };
@@ -87,7 +95,10 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         };
         if !supported
             || iteration.traversal != Some(ListTraversal::Owned)
-            || (!text && !option_text && scalar::scalar(&iteration.yielded) != Some(Primitive::I32))
+            || (!text
+                && !option_text
+                && !record
+                && scalar::scalar(&iteration.yielded) != Some(Primitive::I32))
         {
             return Err(pending());
         }
@@ -106,6 +117,7 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         if matches!(binding.pattern.as_ref(), Pattern::Wildcard)
             && (text
                 || option_text
+                || record
                 || !self.fact(&body).is_some_and(|fact| {
                     !fact.flow.pending && !fact.flow.normal && fact.flow.continues.is_empty()
                 }))
@@ -113,7 +125,24 @@ impl<'a, 'g> Build<'a, 'g, '_> {
             return Err(pending());
         }
         let actual = self.value(source).map_err(|_| pending())?;
-        let (name, source_slot, staged) = if actual.path.is_none() {
+        let mut record_source = None;
+        let (name, source_slot, staged) = if actual.path.is_none() && record {
+            let literal = iteration.list_literal.ok_or_else(pending)?;
+            let element = self.record_text_disposal(node, &iteration.yielded)?;
+            let staged = self.ordinary_list_record_source(
+                node,
+                (source, literal),
+                actual,
+                &iteration.yielded,
+                depth + 1,
+            )?;
+            // Commitment is followed directly by the cursor transfer, so the
+            // whole List has no reachable cleanup of its own.
+            let slot = self.allocate_slot(staged.literal, true, StorageCleanup::Unlowered, None)?;
+            let literal = staged.literal;
+            record_source = Some((staged, element));
+            (literal, slot, None)
+        } else if actual.path.is_none() {
             if !text {
                 return Err(pending());
             }
@@ -161,7 +190,8 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         };
         let source_cleanup = self.slots[source_slot].cleanup;
         let list_disposal = match source_cleanup {
-            StorageCleanup::DisposeListI32(_) if !text && !option_text => None,
+            StorageCleanup::Unlowered if record_source.is_some() => None,
+            StorageCleanup::DisposeListI32(_) if !text && !option_text && !record => None,
             StorageCleanup::DisposeListText(disposal) if text => Some(disposal.list),
             StorageCleanup::DisposeListOptionText {
                 disposal,
@@ -225,6 +255,9 @@ impl<'a, 'g> Build<'a, 'g, '_> {
             || staged
                 .as_ref()
                 .is_some_and(|source| !source.provider.same_link(open.artifact))
+            || record_source
+                .as_ref()
+                .is_some_and(|(source, _)| !source.provider.same_link(open.artifact))
         {
             return Err(pending());
         }
@@ -238,7 +271,17 @@ impl<'a, 'g> Build<'a, 'g, '_> {
             implementation: &release.implementation.id,
             bridge: &release.bridge.id,
         };
-        let (source_backing, cursor_cleanup) = if let Some(disposal) = list_disposal {
+        let (source_backing, cursor_cleanup) = if let Some((_, element)) = record_source {
+            let list_backing =
+                self.iteration_backing(node, list, CollectionStorage::Elements, open.artifact)?;
+            (
+                Some(list_backing),
+                StorageCleanup::DisposeOwnedListIterRecordText(RecordTextListDisposal {
+                    list: release,
+                    element,
+                }),
+            )
+        } else if let Some(disposal) = list_disposal {
             let source_release = self
                 .iteration_scope(node, list, CollectionOperation::DisposeList)?
                 .provider
@@ -306,6 +349,12 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         // Both explicit return and checked postfix failure export before taking
         // this edge: body scope, initialized item, unyielded suffix, parent.
         let returning = return_retire.map(|pc| end_item(self, pc)).transpose()?;
+        let enclosing = match cursor_cleanup {
+            StorageCleanup::DisposeOwnedListIterRecordText(disposal) => {
+                self.record_field_disposal.replace(disposal.element.field)
+            }
+            _ => self.record_field_disposal,
+        };
         let yes = self.statement(
             body,
             looping.continues,
@@ -314,7 +363,9 @@ impl<'a, 'g> Build<'a, 'g, '_> {
                 looping: Some(looping),
             },
             depth + 1,
-        )?;
+        );
+        self.record_field_disposal = enclosing;
+        let yes = yes?;
         self.code[head].edges = Edges::Branch { yes, no: retire };
         let entry = self.emit(
             name,
@@ -327,7 +378,13 @@ impl<'a, 'g> Build<'a, 'g, '_> {
             },
             Edges::Next(head),
         )?;
-        if let Some(staged) = staged {
+        if let Some((staged, _)) = record_source {
+            self.stage_list_record_source(
+                staged,
+                &iteration.yielded,
+                (source_slot, source_backing.ok_or_else(pending)?, entry),
+            )
+        } else if let Some(staged) = staged {
             self.stage_list_text_source(
                 staged,
                 Some((source_slot, source_backing.ok_or_else(pending)?, entry)),
@@ -438,6 +495,30 @@ impl<'a, 'g> Build<'a, 'g, '_> {
             return Err(Stop::Pending(node));
         }
         Ok(())
+    }
+
+    /// Default cleanup of a yielded application record of owned strings.
+    fn record_text_disposal(
+        &mut self,
+        node: NodeId,
+        yielded: &Type<'g>,
+    ) -> ResultOf<RecordTextDisposal<'g>> {
+        let pending = || Stop::Pending(node);
+        let TypeTerm::Nominal { declaration, .. } = yielded.as_ref() else {
+            return Err(pending());
+        };
+        let fields = self.record_fields(yielded)?.ok_or_else(pending)?;
+        self.budget.step(fields.len())?;
+        if fields.is_empty() || !fields.iter().all(|field| owns_text(&field.ty)) {
+            return Err(pending());
+        }
+        if self.outer_disposer(node, yielded)?.is_some() {
+            return Err(pending());
+        }
+        Ok(RecordTextDisposal {
+            record: declaration,
+            field: self.text_element_disposal(node)?,
+        })
     }
 
     pub(super) fn text_element_disposal(
