@@ -2131,6 +2131,8 @@ struct Local<'g> {
     custom_disposer: Option<&'g DeclarationId>,
     /// Materialized backing or descriptor of a computed scalar borrow.
     scalar_borrow_temporary: bool,
+    /// A local `&mut i32` written `&mut record.field` (see `Build`).
+    exclusive_field_reborrow: bool,
     reference_option: Option<ReferenceOption>,
     moves: bool,
     cleanup: StorageCleanup<'g>,
@@ -2615,6 +2617,9 @@ struct Build<'a, 'g, 'b> {
     body: NodeId,
     facts: BuildFacts<'a, 'g>,
     locals: BTreeMap<&'g DeclarationId, Slot>,
+    /// Count of local `&mut i32` bindings written `&mut record.field`, the only
+    /// local descriptors `*name += literal` writes through. Zero rules the form out.
+    exclusive_field_reborrows: usize,
     /// Checked nested regions expose value transfers, not general places.
     nested_record_values: BTreeMap<&'g DeclarationId, Slot>,
     /// Two-level owned tuple inputs kept out of general place resolution.

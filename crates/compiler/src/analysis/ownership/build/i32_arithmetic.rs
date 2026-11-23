@@ -95,6 +95,43 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         }
     }
 
+    /// Whether a binding of type `ty` is written `&mut record.field`: an
+    /// exclusive `i32` field of a local record, owned and one projection deep.
+    /// Screened from syntax and facts already in hand, so it costs nothing.
+    pub(super) fn exclusive_field_reborrow(&self, initializer: NodeId, ty: &Type<'g>) -> bool {
+        let syntax = &self.module.syntax.nodes;
+        let (NodeKind::Prefix("&mut"), &[field]) = (
+            syntax[initializer].kind,
+            syntax[initializer].children.as_slice(),
+        ) else {
+            return false;
+        };
+        let (NodeKind::Field, &[record, _]) =
+            (syntax[field].kind, syntax[field].children.as_slice())
+        else {
+            return false;
+        };
+        let (
+            Ok(field_facts),
+            TypeTerm::Reference {
+                mutable: true,
+                referent,
+            },
+        ) = (self.value(field), ty.as_ref())
+        else {
+            return false;
+        };
+        syntax[record].kind == NodeKind::ValueReference
+            && field_facts.ty == *referent
+            && matches!(referent.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32")
+            && field_facts.access == Access::Owned
+            && field_facts.place == TypedPlace::Writable
+            && field_facts.path.as_ref().is_some_and(|path| {
+                path.root.kind == DeclarationKind::Binding
+                    && matches!(path.projections.as_slice(), [PathProjection::Field(_)])
+            })
+    }
+
     /// Admit `*parameter += literal` through an incoming `&mut i32`: read the
     /// referent, add the literal with the checked scalar addition, install the
     /// sum through the descriptor and end the scratch slots.
@@ -136,12 +173,26 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         ) else {
             return Err(pending);
         };
-        if path.root.kind != DeclarationKind::Parameter
-            || !path.projections.is_empty()
+        if !path.projections.is_empty()
             || target_facts.access != Access::Owned
             || target_facts.binding != Some(path.root)
         {
             return Err(pending);
+        }
+        // A local descriptor must be written `&mut record.field`. The count is
+        // zero, so ruling the form out costs nothing, unless some binding in
+        // the body was written that way.
+        let mut local_descriptor = None;
+        match path.root.kind {
+            DeclarationKind::Parameter => {}
+            DeclarationKind::Binding if self.exclusive_field_reborrows != 0 => {
+                let slot = self.place(target)?;
+                if !self.slots[slot].exclusive_field_reborrow {
+                    return Err(pending);
+                }
+                local_descriptor = Some(slot);
+            }
+            _ => return Err(pending),
         }
         let (place, literal) = (self.value(left)?, self.value(right)?);
         if place.ty != *referent
@@ -156,7 +207,10 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         self.normal_value(left)?;
         self.normal_value(right)?;
         let ty = place.ty.clone();
-        let descriptor = self.place(target)?;
+        let descriptor = match local_descriptor {
+            Some(slot) => slot,
+            None => self.place(target)?,
+        };
         let current = self.slot(left, &ty)?;
         let operand = self.slot(right, &ty)?;
         let sum = self.slot(node, &ty)?;

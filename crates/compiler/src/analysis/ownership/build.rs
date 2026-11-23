@@ -515,6 +515,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             body,
             facts,
             locals: BTreeMap::new(),
+            exclusive_field_reborrows: 0,
             nested_record_values: BTreeMap::new(),
             nested_tuple_parameters: BTreeMap::new(),
             nested_tuple_bindings: BTreeMap::new(),
@@ -1018,6 +1019,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             has_guard_field: false,
             custom_disposer: None,
             scalar_borrow_temporary: false,
+            exclusive_field_reborrow: false,
             reference_option,
             moves,
             cleanup,
@@ -1513,6 +1515,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             has_guard_field: false,
             custom_disposer,
             scalar_borrow_temporary: false,
+            exclusive_field_reborrow: false,
             reference_option: None,
             moves: custom_disposer.is_some(),
             cleanup: StorageCleanup::End,
@@ -1558,6 +1561,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 has_guard_field: false,
                 custom_disposer: None,
                 scalar_borrow_temporary: false,
+                exclusive_field_reborrow: false,
                 reference_option: None,
                 moves,
                 cleanup,
@@ -3426,6 +3430,11 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 } else {
                     self.local(declaration, site, ty)?
                 };
+                // Marks the slot just paid for: no new entry, no lookup.
+                if self.exclusive_field_reborrow(initializer, ty) {
+                    self.slots[local].exclusive_field_reborrow = true;
+                    self.exclusive_field_reborrows += 1;
+                }
                 self.budget.reserve(1)?;
                 locals.push(local);
                 Ok(())

@@ -1,8 +1,8 @@
-//! `i32` addition over field reads of a local record (ri-fmsk, review SP-F5).
-//!
-//! WIP, not mergeable: the RFC 0007 O5 `separate` function still stops
-//! `Incomplete` at `*right += 2i32;`, a write through `&mut` that M5 does not
-//! lower. See `m5-acceptance/ri-fmsk.md`.
+//! RFC 0007 O5 (ri-fmsk, review SP-F5): `i32` addition over field reads of a
+//! local record, and `*name += literal` through a local `&mut record.field`.
+//! The O5 row itself is in `rfc_cases`; this file pins the unsupported
+//! siblings at their parent caps and the supported controls.
+//! See `m5-acceptance/ri-fmsk.md`.
 use super::*;
 use compiler::analysis::Statistics;
 use compiler::analysis::ownership::{GraphCompletion, analyze_ownership};
@@ -19,6 +19,74 @@ function product(pair: Pair): i32 { return pair.left * 10i32 + pair.right; }
 function literal(pair: Pair): i32 { return pair.left + 1i32; }
 function lent(pair: &Pair): i32 { return pair.left + pair.right; }
 function lentGrouped(pair: &Pair): i32 { return ((pair.left)) + ((pair.right)); }
+"#;
+
+/// Writes `*name += literal` through a local reference that is not an
+/// exclusive reborrow of one `i32` field of a local record, and whole-record
+/// loans that are used. Each keeps the parent's caps and blocker.
+const WRITE_SIBLINGS: &str = r#"
+type Pair = { left: i32; right: i32 };
+type Outer = { inner: Pair; extra: i32 };
+function touch(pair: &mut Pair): void {}
+function localScalar(): i32 {
+  let mut value = 1i32;
+  let view = &mut value;
+  *view += 1i32;
+  return value;
+}
+function nestedField(): i32 {
+  let mut outer = Outer { inner: Pair { left: 1, right: 2 }, extra: 3 };
+  let view = &mut outer.inner.left;
+  *view += 1i32;
+  return outer.extra;
+}
+function groupedTarget(): i32 {
+  let mut pair = Pair { left: 1, right: 2 };
+  let left = &mut pair.left;
+  (*left) += 1i32;
+  return pair.right;
+}
+function groupedDescriptor(): i32 {
+  let mut pair = Pair { left: 1, right: 2 };
+  let left = &mut pair.left;
+  *(left) += 1i32;
+  return pair.right;
+}
+function groupedOperand(): i32 {
+  let mut pair = Pair { left: 1, right: 2 };
+  let left = &mut pair.left;
+  *left += (1i32);
+  return pair.right;
+}
+function computedOperand(step: i32): i32 {
+  let mut pair = Pair { left: 1, right: 2 };
+  let left = &mut pair.left;
+  *left += step;
+  return pair.right;
+}
+function throughWholeLoan(): i32 {
+  let mut pair = Pair { left: 1, right: 2 };
+  let whole = &mut pair;
+  let left = &mut whole.left;
+  *left += 1i32;
+  return 1i32;
+}
+function wholeLoanCalled(): i32 {
+  let mut pair = Pair { left: 1, right: 2 };
+  let whole = &mut pair;
+  let left = &mut pair.left;
+  *left += 1i32;
+  touch(whole);
+  return 1i32;
+}
+function wholeLoanRead(): i32 {
+  let mut pair = Pair { left: 1, right: 2 };
+  let whole = &mut pair;
+  let left = &mut pair.left;
+  *left += 1i32;
+  let right = whole.right;
+  return right;
+}
 "#;
 
 const SUPPORTED: &str = r#"
@@ -70,81 +138,90 @@ fn named<'g>(module: &'g loader::Module, name: &str) -> &'g loader::Declaration 
         .unwrap()
 }
 
-/// Exact results measured at the parent 7002855e, before field operands lower.
-/// The unsupported siblings still stop at their parent caps and sites.
+type Row = (&'static str, usize, usize, usize, &'static str);
+
+/// Each row is a function that stays `Incomplete` at its parent caps and
+/// blocker, exact and one short, as a targeted query and as the graph root; the
+/// module's graph keeps its parent caps too. Measured in a `git worktree add`
+/// of the parent before the source change.
+fn keeps_parent_caps(test: &str, source: &'static str, graph_stats: Statistics, rows: &[Row]) {
+    probe(test, source, |_, module, receipt| {
+        let (exact, short) = caps(graph_stats);
+        let graph = analyze_ownership(receipt, exact);
+        assert_eq!(graph.completion(), GraphCompletion::Incomplete);
+        assert_eq!(graph.statistics(), graph_stats);
+        for cap in short {
+            assert_eq!(
+                analyze_ownership(receipt, cap).completion(),
+                GraphCompletion::ResourceLimit
+            );
+        }
+        for &(name, work, entries, depth, expected) in rows {
+            let decl = named(module, name);
+            let query = |cap| lower_body(receipt, module, &decl.id, cap).unwrap();
+            let stats = statistics(work, entries, depth);
+            let (exact, short) = caps(stats);
+            let target = query(exact);
+            assert_eq!(target.completion(), Completion::Incomplete, "{name}");
+            assert_eq!(target.statistics(), stats, "{name}");
+            assert!(target.mir().is_none() && target.findings().is_empty());
+            assert_eq!(
+                target.blocked_at().unwrap().span.bytes(),
+                expected.as_bytes(),
+                "{name}"
+            );
+            let root = graph
+                .roots()
+                .iter()
+                .find(|r| r.site().module == &module.key && r.site().node == decl.node)
+                .unwrap();
+            assert_eq!(root.ordinary_completion(), Completion::Incomplete, "{name}");
+            assert!(root.ordinary_mir().is_none());
+            assert_eq!(root.blocked_at().unwrap().span.bytes(), expected.as_bytes());
+            for cap in short {
+                let limited = query(cap);
+                assert_eq!(limited.completion(), Completion::ResourceLimit, "{name}");
+                assert!(limited.mir().is_none() && limited.findings().is_empty());
+            }
+        }
+    });
+}
+
+/// Measured at the parent 7002855e, before field operands lower.
 #[test]
 fn unsupported_field_arithmetic_keeps_its_parent_caps_and_sites() {
-    probe(
+    keeps_parent_caps(
         "o05_field_arithmetic::unsupported_field_arithmetic_keeps_its_parent_caps_and_sites",
         SIBLINGS,
-        |_, module, receipt| {
-            let graph_stats = statistics(195115, 4770, 5);
-            let (exact, short) = caps(graph_stats);
-            let graph = analyze_ownership(receipt, exact);
-            assert_eq!(graph.completion(), GraphCompletion::Incomplete);
-            assert_eq!(graph.statistics(), graph_stats);
-            for cap in short {
-                assert_eq!(
-                    analyze_ownership(receipt, cap).completion(),
-                    GraphCompletion::ResourceLimit
-                );
-            }
-            for (name, work, entries, depth, expected) in [
-                ("nested", 2746, 223, 3, "outer.inner.left + outer.extra"),
-                (
-                    "nestedGrouped",
-                    2746,
-                    223,
-                    3,
-                    "((outer.inner.left)) + ((outer.extra))",
-                ),
-                ("wide", 2383, 164, 3, "pair.left + pair.right"),
-                (
-                    "wideGrouped",
-                    2383,
-                    164,
-                    3,
-                    "((pair.left)) + ((pair.right))",
-                ),
-                ("product", 2383, 164, 3, "pair.left * 10i32 + pair.right"),
-                ("literal", 2383, 164, 3, "pair.left + 1i32"),
-                ("lent", 2025, 105, 3, "pair.left + pair.right"),
-                (
-                    "lentGrouped",
-                    2025,
-                    105,
-                    3,
-                    "((pair.left)) + ((pair.right))",
-                ),
-            ] {
-                let decl = named(module, name);
-                let query = |cap| lower_body(receipt, module, &decl.id, cap).unwrap();
-                let stats = statistics(work, entries, depth);
-                let (exact, short) = caps(stats);
-                let target = query(exact);
-                assert_eq!(target.completion(), Completion::Incomplete, "{name}");
-                assert_eq!(target.statistics(), stats, "{name}");
-                assert!(target.mir().is_none() && target.findings().is_empty());
-                assert_eq!(
-                    target.blocked_at().unwrap().span.bytes(),
-                    expected.as_bytes(),
-                    "{name}"
-                );
-                let root = graph
-                    .roots()
-                    .iter()
-                    .find(|r| r.site().module == &module.key && r.site().node == decl.node)
-                    .unwrap();
-                assert_eq!(root.ordinary_completion(), Completion::Incomplete, "{name}");
-                assert!(root.ordinary_mir().is_none());
-                assert_eq!(root.blocked_at().unwrap().span.bytes(), expected.as_bytes());
-                for cap in short {
-                    let limited = query(cap);
-                    assert_eq!(limited.completion(), Completion::ResourceLimit, "{name}");
-                    assert!(limited.mir().is_none() && limited.findings().is_empty());
-                }
-            }
-        },
+        statistics(195115, 4770, 5),
+        &[
+            ("nested", 2746, 223, 3, "outer.inner.left + outer.extra"),
+            (
+                "nestedGrouped",
+                2746,
+                223,
+                3,
+                "((outer.inner.left)) + ((outer.extra))",
+            ),
+            ("wide", 2383, 164, 3, "pair.left + pair.right"),
+            (
+                "wideGrouped",
+                2383,
+                164,
+                3,
+                "((pair.left)) + ((pair.right))",
+            ),
+            ("product", 2383, 164, 3, "pair.left * 10i32 + pair.right"),
+            ("literal", 2383, 164, 3, "pair.left + 1i32"),
+            ("lent", 2025, 105, 3, "pair.left + pair.right"),
+            (
+                "lentGrouped",
+                2025,
+                105,
+                3,
+                "((pair.left)) + ((pair.right))",
+            ),
+        ],
     );
 }
 
@@ -190,3 +267,95 @@ fn field_addition_checks_with_exact_and_one_short_caps() {
         },
     );
 }
+
+/// Measured at the parent f24d825b (the merge of the base into this branch,
+/// before the local field descriptor lowers); `touch` is a Checked control.
+#[test]
+fn unsupported_field_reborrow_writes_keep_their_parent_caps_and_sites() {
+    keeps_parent_caps(
+        "o05_field_arithmetic::unsupported_field_reborrow_writes_keep_their_parent_caps_and_sites",
+        WRITE_SIBLINGS,
+        statistics(201135, 5074, 5),
+        &[
+            ("localScalar", 2203, 196, 3, "*view += 1i32;"),
+            ("nestedField", 2931, 314, 3, "*view += 1i32;"),
+            ("groupedTarget", 2565, 255, 3, "(*left) += 1i32;"),
+            ("groupedDescriptor", 2565, 255, 3, "*(left) += 1i32;"),
+            ("groupedOperand", 2565, 255, 3, "*left += (1i32);"),
+            ("computedOperand", 2571, 261, 3, "*left += step;"),
+            ("throughWholeLoan", 2568, 260, 3, "*left += 1i32;"),
+            ("wholeLoanCalled", 2587, 264, 3, "whole"),
+            ("wholeLoanRead", 2584, 265, 3, "whole.right"),
+        ],
+    );
+}
+
+/// RFC 0007 O5 `separate`: both fields are borrowed exclusively before either
+/// is written; each write reads through its own descriptor, adds, installs
+/// through the same descriptor; the whole record reads after both.
+#[test]
+fn separate_borrows_both_fields_then_writes_through_each_descriptor() {
+    probe(
+        "o05_field_arithmetic::separate_borrows_both_fields_then_writes_through_each_descriptor",
+        SEPARATE,
+        |_, module, receipt| {
+            let decl = named(module, "separate");
+            let target = lower_body(receipt, module, &decl.id, AnalysisLimits::default()).unwrap();
+            assert_eq!(target.completion(), Completion::Checked);
+            assert!(target.findings().is_empty() && target.blocked_at().is_none());
+            let mir = target.mir().unwrap();
+            let mut installs = Vec::new();
+            let ops: Vec<_> = linear(mir, mir.entry)
+                .into_iter()
+                .filter_map(|op| match op {
+                    Operation::Borrow {
+                        source,
+                        exclusive: true,
+                        ..
+                    } => source
+                        .field()
+                        .map(|f| format!("borrow {}", f.name.as_deref().unwrap_or("?"))),
+                    Operation::Dereference(_) => Some("read".to_string()),
+                    Operation::CheckedI32Add { .. } => Some("add".to_string()),
+                    Operation::InstallThrough { descriptor, .. } => {
+                        installs.push(descriptor.root.node);
+                        Some("install".to_string())
+                    }
+                    Operation::Copy { from, .. } => from
+                        .field()
+                        .map(|f| format!("copy {}", f.name.as_deref().unwrap_or("?"))),
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(
+                ops,
+                [
+                    "borrow left",
+                    "borrow right",
+                    "read",
+                    "add",
+                    "install",
+                    "read",
+                    "add",
+                    "install",
+                    "copy left",
+                    "copy right",
+                    "add"
+                ]
+            );
+            assert_ne!(installs[0], installs[1], "one descriptor per field");
+        },
+    );
+}
+
+const SEPARATE: &str = r#"
+type Pair = { left: i32; right: i32 };
+function separate(): i32 {
+  let mut pair = Pair { left: 1, right: 2 };
+  let left = &mut pair.left;
+  let right = &mut pair.right;
+  *left += 1i32;
+  *right += 2i32;
+  return pair.left + pair.right;
+}
+"#;
