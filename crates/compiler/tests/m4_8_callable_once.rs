@@ -110,7 +110,10 @@ fn check_sources(entry: &Path) {
     // `-public`, `-grouped`, `-scoped` and `-loop` caps are those measured at
     // 9b93a660, before the lent route. Its screens reject them without charge.
     // A formal actual (+1 work) and a borrowed Result capture (+16 work, +3
-    // entries) are rejected after the lent residence is read.
+    // entries) are rejected after the lent residence is read, and
+    // `shared-unclosed` (+464 work, +14 entries) after the wrapper's other
+    // caller closes. Rule 1 exception of 2026-11-23 (ri-2s0.10): the parent
+    // caps 323,599, 325,321/47,868 and 325,701/47,779 give `ResourceLimit`.
     let shared = SHARED_WRAPPER;
     let shared_actual = format!("{shared}{SHARED_CALLER}");
     let shared_second = SHARED_CALLER
@@ -380,6 +383,31 @@ fn check_sources(entry: &Path) {
                     "{name} {test_mode} {short:?}"
                 );
                 assert!(short_report.receipt().is_none());
+            }
+            // Rule 1 exception (chief of staff, 2026-11-23, ri-2s0.10): these
+            // three siblings pay for their rejection before no paid fact can
+            // reject them, so each 9b93a660 cap, measured in a scratch
+            // worktree, now gives `ResourceLimit` with no receipt.
+            if let Some((work, entries, max_depth)) = match name {
+                "shared-formal-actual" => Some((323_599, 47_577, 12)),
+                "shared-result-capture" => Some((325_321, 47_868, 12)),
+                "shared-unclosed" => Some((325_701, 47_779, 12)),
+                _ => None,
+            } {
+                let parent = analyze_typed(
+                    &graph,
+                    AnalysisLimits {
+                        max_work: work,
+                        max_entries: entries,
+                        max_depth,
+                    },
+                );
+                assert_eq!(
+                    parent.completion(),
+                    TypedCompletion::ResourceLimit,
+                    "{name} {test_mode} parent cap"
+                );
+                assert!(parent.receipt().is_none());
             }
             let one_debt = |at: &[u8], origin: &[u8], kind| {
                 let [debt] = uses.discards() else {
