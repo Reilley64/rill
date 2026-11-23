@@ -784,8 +784,9 @@ pub enum Operation<'g> {
         wrapper: &'g DeclarationId,
     },
     /// Retire a proved failed stage on an interrupted wrapping RHS. Consume
-    /// its installed `OwnedErr<i32>` (including origin and retained chain)
-    /// using the pinned storage's drop, with no wrapper-level dispatch or rendering.
+    /// its installed `OwnedErr<i32>` or `OwnedErr<string>` (including origin,
+    /// owned payload and retained chain) using the pinned storage's drop,
+    /// with no wrapper-level dispatch or rendering.
     DropResultFailure {
         operand: Place<'g>,
         variant: &'g DeclarationId,

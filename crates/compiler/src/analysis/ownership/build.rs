@@ -951,6 +951,14 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 // would need variant-aware disposal.
                 (true, StorageCleanup::Unlowered)
             }
+            TypeTerm::Nominal { .. } | TypeTerm::Variant { .. }
+                if let Some((role, _)) = self.text_error_result_role(ty) =>
+            {
+                self.prove_no_variant_disposer(node, ty, [role.ok, role.err])?;
+                // Only a postfix export or a retired wrap operand consumes the
+                // carrier; lexical cleanup of a live one is not lowered.
+                (true, StorageCleanup::Unlowered)
+            }
             TypeTerm::Nominal { .. } => {
                 let fields = self.record_fields(ty)?.ok_or(Stop::Pending(node))?;
                 let disposer = self.outer_disposer(node, ty)?;
@@ -1390,6 +1398,37 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         (*declaration == &role.declaration.id
             && owns_text(success)
             && matches!(error.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32"))
+        .then_some((role, success))
+    }
+
+    /// `Result<bool, string>` or `Result<string, string>`, or one of their
+    /// variants: the error payload is an owning `string`.
+    fn text_error_result_role<'t>(
+        &self,
+        ty: &'t TypeTerm<'g>,
+    ) -> Option<(&'a ResultRole<'g>, &'t Type<'g>)> {
+        let role = self.typed.result_role()?;
+        role.representation?;
+        let parent = match ty {
+            TypeTerm::Variant {
+                parent,
+                declaration,
+            } if *declaration == &role.ok.id || *declaration == &role.err.id => parent.as_ref(),
+            other => other,
+        };
+        let TypeTerm::Nominal {
+            declaration,
+            arguments,
+        } = parent
+        else {
+            return None;
+        };
+        let [success, error] = arguments.as_slice() else {
+            return None;
+        };
+        (*declaration == &role.declaration.id
+            && (owns_text(success) || scalar::scalar(success) == Some(Primitive::Bool))
+            && owns_text(error))
         .then_some((role, success))
     }
 
@@ -2616,6 +2655,12 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                         slot
                     } else if let Some(slot) = self.scoped_result_destination(value, value, &ty)? {
                         slot
+                    } else if self.text_error_result_role(&ty).is_some()
+                        && self.fact(&value).is_none_or(|fact| fact.flow.returns)
+                    {
+                        // Screened from paid facts: a `string`-error Result whose
+                        // producer can itself return gets no return storage proof.
+                        return Err(Stop::Pending(value));
                     } else {
                         self.slot(value, &ty)?
                     };
@@ -3777,8 +3822,17 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             (source, &operand.ty, Some(operand))
         };
         let mut result_text = None;
+        let mut text_error = false;
         let (wrapper, option_take) = if let Some(error) = &exit.error {
             let role = if let Some((role, _)) = self.scalar_result_role(operand) {
+                role
+            } else if !piped
+                && fresh.is_none()
+                && let Some((role, success)) = self.text_error_result_role(operand)
+                // An owning success payload is admitted only where it cannot continue.
+                && (!owns_text(success) || !exit.can_continue)
+            {
+                text_error = true;
                 role
             } else if statement
                 && syntax.kind == NodeKind::Propagate
@@ -3799,11 +3853,21 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             } else {
                 return Err(Stop::Pending(node));
             };
-            if !matches!(self.scalar_result_role(result), Some((_, None)))
+            // A `string` error is forwarded only into the same exact error type.
+            let returns = if text_error {
+                !matches!(result.as_ref(), TypeTerm::Variant { .. })
+                    && self
+                        .text_error_result_role(result)
+                        .is_some_and(|(_, success)| !owns_text(success))
+                    && owns_text(&error.payload)
+            } else {
+                matches!(self.scalar_result_role(result), Some((_, None)))
+                    && matches!(error.payload.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32")
+            };
+            if !returns
                 || exit.success != &role.ok.id
                 || exit.failure != &role.err.id
                 || error.wrapper != &role.wrapper.id
-                || !matches!(error.payload.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32")
             {
                 return Err(Stop::Pending(node));
             }
@@ -4580,6 +4644,12 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         let NodeFactKind::Expression(value) = &rhs.kind else {
             return Err(Stop::Pending(right));
         };
+        let primitive =
+            |ty: &Type<'g>, name| matches!(ty.as_ref(), TypeTerm::Primitive(p) if p.name() == name);
+        // A `string` error is admitted only when the RHS always returns: no
+        // new wrapper is built, the RHS failure is forwarded and the held
+        // operand is retired.
+        let payloads = |name| primitive(&retained.payload, name) && primitive(&data.payload, name);
         if data.operation != ErrorOperation::Wrap
             || data.result != *result
             || data.failure != &role.err.id
@@ -4588,8 +4658,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             || retained.operand != left
             || !matches!(&*retained.wrapper, TypeTerm::Nominal { declaration, arguments }
                 if *declaration == data.wrapper && matches!(arguments.as_slice(), [payload] if *payload == retained.payload))
-            || !matches!(retained.payload.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32")
-            || !matches!(data.payload.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32")
+            || !(payloads("i32") || payloads("string") && !rhs.flow.normal)
             || value.ty != data.payload
         {
             return Err(Stop::Pending(node));
@@ -4640,6 +4709,12 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         let facts = self.value(root)?;
         let postfix = self.module.syntax.nodes[root].kind == NodeKind::Propagate
             && matches!(facts.data, Some(DataExpression::Propagation(_)));
+        // A `string` error never builds a new wrapper (checked above for a
+        // continuing RHS); a non-postfix RHS would stage its payload.
+        if !postfix && !matches!(data.payload.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32")
+        {
+            return Err(Stop::Pending(right));
+        }
         // Other RHS forms keep their ordinary staging proof, including its
         // precise pending site and budget when a nested argument can return.
         let payload = (!postfix || flow.normal)
@@ -4727,7 +4802,10 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         // The installed source is byte-pinned. Dropping the sealed wrapper
         // drops its origin and iteratively releases its retained nodes,
         // invoking their stored disposers, not their display witnesses.
+        // Its primary payload drops with it: scalar cleanup for `i32`, the
+        // ordinary owning drop for `string` (no other error type is admitted).
         let _: fn(rill_error_storage::OwnedErr<i32>) = std::mem::drop;
+        let _: fn(rill_error_storage::OwnedErr<String>) = std::mem::drop;
         self.emit(
             rhs,
             Action::DropResultFailure {
@@ -4792,7 +4870,12 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 if option.is_some_and(|role| *declaration == &role.some.id)
                     || self
                         .scalar_result_role(&data.ty)
-                        .is_some_and(|(role, _)| *declaration == &role.ok.id) =>
+                        .is_some_and(|(role, _)| *declaration == &role.ok.id)
+                    || self
+                        .text_error_result_role(&data.ty)
+                        .is_some_and(|(role, success)| {
+                            *declaration == &role.ok.id && !owns_text(success)
+                        }) =>
             {
                 Ok(Some(*value))
             }
@@ -5252,7 +5335,8 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         }
         if let Some(DataExpression::Construction(data)) = &facts.data
             && (self.admitted_option(&data.ty).is_some()
-                || self.scalar_result_role(&data.ty).is_some())
+                || self.scalar_result_role(&data.ty).is_some()
+                || self.text_error_result_role(&data.ty).is_some())
         {
             return self.construct_variant(
                 node,
