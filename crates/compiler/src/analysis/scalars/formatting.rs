@@ -71,8 +71,15 @@ impl<'r, 'g> Checker<'r, 'g> {
         };
         match (role, ty.as_ref()) {
             (PrimitiveRole::Copy, TypeTerm::Reference { referent, .. }) => supported(referent),
+            (PrimitiveRole::Dispose, TypeTerm::Reference { .. }) => Self::string_descriptor(ty),
             _ => supported(ty),
         }
+    }
+
+    /// A shared descriptor of `string`: `dispose` of it has no family winner.
+    fn string_descriptor(ty: &Type<'g>) -> bool {
+        matches!(ty.as_ref(), TypeTerm::Reference { mutable: false, referent }
+            if primitive_name(referent) == Some("string"))
     }
 
     pub(super) fn is_error_display(&self, id: &DeclarationId) -> bool {
@@ -228,6 +235,22 @@ impl<'r, 'g> Checker<'r, 'g> {
         let call = &inference.calls[&node];
         let family = call.fact.callee;
         let module = inference.module;
+        if by_value && count == 1 && Self::string_descriptor(&parameter) {
+            // Ending a descriptor releases no resource, so no disposal winner
+            // is selected (RFC 0007 O22).
+            let result = self.primitive("void")?;
+            let call = inference.calls.get_mut(&node).unwrap();
+            self.elab.reserve(1)?;
+            call.fact.substitution = vec![sub];
+            call.parameters.fill(parameter);
+            call.result = result.clone();
+            call.family = false;
+            call.infer = false;
+            self.record_callee(module, call.callee_node, family)?;
+            inference.slots.get_mut(&node).unwrap().installed_operation =
+                Some(data::DataExpression::DescriptorEnd);
+            return self.establish(inference, node, result, false);
+        }
         let (goal, state) = self.canonical_goal(
             Self::site(module, node),
             family,

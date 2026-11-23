@@ -88,6 +88,8 @@ pub enum DataExpression<'g> {
     CallableCopy(Arc<generics::CallableCopy<'g>>),
     NumericInto(crate::analysis::typed::NumericConversion),
     NativeOwnership(Arc<crate::analysis::typed::NativeOwnershipCall<'g>>),
+    /// `dispose` of a shared `string` descriptor: ends that value, no family winner.
+    DescriptorEnd,
     Conversion(crate::analysis::typed::ConversionProvider),
 }
 #[derive(Debug)]

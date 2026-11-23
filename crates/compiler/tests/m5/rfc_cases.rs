@@ -1620,8 +1620,10 @@ implement release(value: LockGuard<Payload>): void { }
             stats: (324267, 47658, 12),
         },
     },
-    // Siblings that stay `Incomplete`: the replacement's own body leaves a second
-    // obligation, and an unrelated root of the same module does.
+    // Siblings with a second obligation: since ri-2s0.9 both are `SourceRejected`
+    // (R0500 only); the replacement's own body and an unrelated root of the same
+    // module both call `release(view)` on a `&string`, which O22 admits. The
+    // `Incomplete` witness is the last source.
     Source {
         text: r#"
 import std::core::dispose as release;
@@ -1630,13 +1632,11 @@ type Payload = { id: i32; }
 implement release(value: LockGuard<Payload>): void { let text = "a"; let view = &text; release(view); }
 "#,
         outcome: Outcome::Typed {
-            completion: TypedCompletion::Incomplete,
+            completion: TypedCompletion::SourceRejected,
             signals: &[
-                r####"obligation FamilySelection @ release(view)"####,
-                r####"pending TypedInput @ release(view)"####,
                 r####"overlap R0500 @ implement release(value: LockGuard<Payload>): void { let text = \"a\"; let view = &text; release(view); } (related: mutex.rill implement<T> dispose(value: LockGuard<T>): void { releaseGuard(value); })"####,
             ],
-            stats: (324633, 47683, 12),
+            stats: (324760, 47779, 12),
         },
     },
     Source {
@@ -1651,13 +1651,31 @@ function ended(owner: string): void {
 }
 "#,
         outcome: Outcome::Typed {
+            completion: TypedCompletion::SourceRejected,
+            signals: &[
+                r####"overlap R0500 @ implement release(value: LockGuard<Payload>): void { } (related: mutex.rill implement<T> dispose(value: LockGuard<T>): void { releaseGuard(value); })"####,
+            ],
+            stats: (326030, 47803, 12),
+        },
+    },
+    // Witness that a second obligation still keeps the module `Incomplete` after
+    // O22 (ri-2s0.9, chief ruling): `release(view)` of a `&mut string` is not a
+    // shared descriptor end, so its `FamilySelection` obligation stays unresolved.
+    Source {
+        text: r#"
+import std::core::dispose as release;
+import std::mutex::LockGuard;
+type Payload = { id: i32; }
+implement release(value: LockGuard<Payload>): void { let mut text = "a"; let view = &mut text; release(view); }
+"#,
+        outcome: Outcome::Typed {
             completion: TypedCompletion::Incomplete,
             signals: &[
                 r####"obligation FamilySelection @ release(view)"####,
                 r####"pending TypedInput @ release(view)"####,
-                r####"overlap R0500 @ implement release(value: LockGuard<Payload>): void { } (related: mutex.rill implement<T> dispose(value: LockGuard<T>): void { releaseGuard(value); })"####,
+                r####"overlap R0500 @ implement release(value: LockGuard<Payload>): void { let mut text = \"a\"; let view = &mut text; release(view); } (related: mutex.rill implement<T> dispose(value: LockGuard<T>): void { releaseGuard(value); })"####,
             ],
-            stats: (325896, 47704, 12),
+            stats: (324633, 47683, 12),
         },
     },
 ];
@@ -1667,10 +1685,18 @@ function ended(owner: string): void {
 /// body's `FamilySelection` obligation. It now gives `ResourceLimit`.
 const O21_PRE_REJECTION: Triple = (323823, 47493, 12);
 
-/// Exact typed caps of O21's two `Incomplete` siblings measured at 7002855e,
-/// before the rejection (metering rules 1 and 2). Each still completes
-/// `Incomplete` there; it loses only the replacement body's obligation.
+/// Exact typed caps of O21's two siblings measured at 7002855e, before the
+/// rejection (metering rules 1 and 2). Each completed `Incomplete` there at the
+/// `dispose(view)` `FamilySelection` obligation. Since ri-2s0.9 that call ends
+/// its descriptor, each sibling is `SourceRejected` (R0500 only) and these
+/// caps give `ResourceLimit`.
 const O21_SIBLINGS_PARENT: [Triple; 2] = [(325035, 47684, 12), (326297, 47705, 12)];
+
+/// O22 source 0's exact typed cap before `dispose(view)` of a `&string` ended
+/// that descriptor (ri-2s0.9, metering rule 11): the old `Incomplete` result
+/// stopped at each `dispose(view)` `FamilySelection` obligation. The new
+/// `Checked` result needs 64 more entries, so the old cap gives `ResourceLimit`.
+const O22_PRE_DESCRIPTOR_END: Triple = (325919, 47848, 12);
 
 const O22: &[Source] = &[
     Source {
@@ -1689,15 +1715,28 @@ function ended(owner: string): void {
   let last = other;
 }
 "#,
-        outcome: Outcome::Typed {
-            completion: TypedCompletion::Incomplete,
-            signals: &[
-                r####"obligation FamilySelection @ dispose(view)"####,
-                r####"obligation FamilySelection @ dispose(view)"####,
-                r####"pending TypedInput @ dispose(view)"####,
-                r####"pending TypedInput @ dispose(view)"####,
+        outcome: Outcome::Receipt {
+            typed_stats: (325422, 47912, 12),
+            graph: (GraphCompletion::SourceRejected, (188285, 4569, 5)),
+            pre_equality_graph: (187969, 4435, 5),
+            roots: &[
+                Root {
+                    name: "aliased",
+                    want: Want::Rejected {
+                        code: "R0203",
+                        site: r####"dispose(owner)"####,
+                        related: r####"&owner"####,
+                    },
+                    graph: None,
+                    stats: (2303, 237, 4),
+                },
+                Root {
+                    name: "ended",
+                    want: Want::Checked,
+                    graph: None,
+                    stats: (2383, 264, 4),
+                },
             ],
-            stats: (325919, 47848, 12),
         },
     },
     Source {
@@ -1723,6 +1762,43 @@ function aliased(owner: string): void {
                 graph: None,
                 stats: (2105, 144, 4),
             }],
+        },
+    },
+    Source {
+        text: r#"
+function reused(owner: string): void {
+  let view = &owner;
+  dispose(view);
+  let again = view;
+}
+function released(owner: string): void {
+  let view = &owner;
+  dispose(view);
+  dispose(owner);
+}
+"#,
+        outcome: Outcome::Receipt {
+            typed_stats: (325124, 47814, 12),
+            graph: (GraphCompletion::SourceRejected, (188456, 4447, 5)),
+            pre_equality_graph: (188140, 4313, 5),
+            roots: &[
+                Root {
+                    name: "released",
+                    want: Want::Checked,
+                    graph: None,
+                    stats: (2244, 217, 4),
+                },
+                Root {
+                    name: "reused",
+                    want: Want::Rejected {
+                        code: "R0200",
+                        site: r####"view"####,
+                        related: r####"dispose(view)"####,
+                    },
+                    graph: None,
+                    stats: (2116, 155, 4),
+                },
+            ],
         },
     },
 ];
@@ -2775,19 +2851,19 @@ fn o21_guard_release_replacement_reports_r0500() {
         "rfc_cases::o21_guard_release_replacement_reports_r0500",
         O21,
         |index, graph, context| {
+            if index == 3 {
+                return;
+            }
             if index != 0 {
                 let (parent, _) = limits(statistics(O21_SIBLINGS_PARENT[index - 1]));
                 let sibling = analyze_typed(graph, parent);
                 assert_eq!(
                     sibling.completion(),
-                    TypedCompletion::Incomplete,
+                    TypedCompletion::ResourceLimit,
                     "{context}"
                 );
-                assert_eq!(
-                    sibling.statistics(),
-                    analyze_typed(graph, AnalysisLimits::default()).statistics(),
-                    "{context}"
-                );
+                assert!(sibling.receipt().is_none(), "{context}");
+                assert!(sibling.bodies().findings().is_empty(), "{context}");
                 return;
             }
             let (old, _) = limits(statistics(O21_PRE_REJECTION));
@@ -2804,10 +2880,24 @@ fn o21_guard_release_replacement_reports_r0500() {
 }
 
 #[test]
-fn o22_descriptor_disposal_has_no_family_and_owner_disposal_rejects() {
-    run(
-        "rfc_cases::o22_descriptor_disposal_has_no_family_and_owner_disposal_rejects",
+fn o22_descriptor_disposal_ends_only_that_descriptor_and_owner_disposal_rejects() {
+    run_with(
+        "rfc_cases::o22_descriptor_disposal_ends_only_that_descriptor_and_owner_disposal_rejects",
         O22,
+        |index, graph, context| {
+            if index != 0 {
+                return;
+            }
+            let (old, _) = limits(statistics(O22_PRE_DESCRIPTOR_END));
+            let limited = analyze_typed(graph, old);
+            assert_eq!(
+                limited.completion(),
+                TypedCompletion::ResourceLimit,
+                "{context}"
+            );
+            assert!(limited.receipt().is_none(), "{context}");
+            assert!(limited.bodies().findings().is_empty(), "{context}");
+        },
     );
 }
 
