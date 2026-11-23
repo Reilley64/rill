@@ -1238,24 +1238,234 @@ function joined(flag: bool, left: string, right: string, seed: &string): void {
 "#,
         outcome: Outcome::Receipt {
             typed_stats: (332133, 48966, 12),
-            graph: (GraphCompletion::Incomplete, (190003, 4236, 5)),
+            graph: (GraphCompletion::SourceRejected, (193195, 5097, 8)),
             pre_equality_graph: (189687, 4102, 3),
             roots: &[
                 Root {
                     name: "clear",
                     want: Want::Checked,
                     graph: None,
-                    stats: (1993, 88, 1),
+                    stats: (2047, 114, 1),
                 },
                 Root {
                     name: "joined",
-                    want: Want::Incomplete {
-                        blocker: r####"&mut slot"####,
+                    want: Want::Rejected {
+                        code: "R0203",
+                        site: r####"dispose(left)"####,
+                        related: r####"&left"####,
                     },
                     graph: None,
-                    stats: (2015, 97, 3),
+                    stats: (5150, 931, 8),
                 },
             ],
+        },
+    },
+];
+
+/// Retained-store A (ri-2s0.11), stage 1: the same two sources through plain
+/// functions, so the `&string` contents contract and the one-destination `clear`
+/// call are checked without family admission. Written for this ticket.
+const O13_PLAIN: &[Source] = &[Source {
+    text: r#"
+function remember(slot: &mut &string, source: &string): void { }
+function clear(slot: &mut &string): void { }
+function joined(flag: bool, left: string, right: string, seed: &string): void {
+  let mut slot = seed;
+  if (flag) { remember(&mut slot, &left); } else { remember(&mut slot, &right); }
+  clear(&mut slot);
+  dispose(left);
+  let last = slot;
+}
+function loops(flag: bool, left: string, seed: &string): void {
+  let mut slot = seed;
+  while (flag) { remember(&mut slot, &left); continue; }
+  clear(&mut slot);
+  dispose(left);
+  let last = slot;
+}
+function released(flag: bool, left: string, right: string, seed: &string): void {
+  let mut slot = seed;
+  if (flag) { remember(&mut slot, &left); } else { remember(&mut slot, &right); }
+  clear(&mut slot);
+  let last = slot;
+  dispose(left);
+  dispose(right);
+}
+"#,
+    outcome: Outcome::Receipt {
+        typed_stats: (337065, 49293, 12),
+        graph: (GraphCompletion::SourceRejected, (203549, 7569, 8)),
+        pre_equality_graph: (203548, 7569, 8),
+        roots: &[
+            Root {
+                name: "remember",
+                want: Want::Checked,
+                graph: None,
+                stats: (2234, 202, 1),
+            },
+            Root {
+                name: "clear",
+                want: Want::Checked,
+                graph: None,
+                stats: (2183, 182, 1),
+            },
+            Root {
+                name: "joined",
+                want: Want::Rejected {
+                    code: "R0203",
+                    site: r####"dispose(left)"####,
+                    related: r####"&left"####,
+                },
+                graph: None,
+                stats: (3746, 999, 8),
+            },
+            Root {
+                name: "loops",
+                want: Want::Rejected {
+                    code: "R0203",
+                    site: r####"dispose(left)"####,
+                    related: r####"&left"####,
+                },
+                graph: None,
+                stats: (3791, 1018, 8),
+            },
+            Root {
+                name: "released",
+                want: Want::Checked,
+                graph: None,
+                stats: (9199, 1887, 8),
+            },
+        ],
+    },
+}];
+
+/// Retained-store A (ri-2s0.11), stage 2: the O13 family contract in a loop,
+/// and with the release after the slot's last use. Written for this ticket.
+const O13_FAMILY: &[Source] = &[Source {
+    text: r#"
+function remember<D, S>(slot: D, source: S): void;
+implement remember(slot: &mut &string, source: &string): void { while (true) {} }
+function clear(slot: &mut &string): void { }
+function loops(flag: bool, left: string, seed: &string): void {
+  let mut slot = seed;
+  while (flag) { remember(&mut slot, &left); continue; }
+  clear(&mut slot);
+  dispose(left);
+  let last = slot;
+}
+function released(flag: bool, left: string, right: string, seed: &string): void {
+  let mut slot = seed;
+  if (flag) { remember(&mut slot, &left); } else { remember(&mut slot, &right); }
+  clear(&mut slot);
+  let last = slot;
+  dispose(left);
+  dispose(right);
+}
+"#,
+    outcome: Outcome::Receipt {
+        typed_stats: (337785, 49820, 12),
+        graph: (GraphCompletion::SourceRejected, (202579, 6570, 8)),
+        pre_equality_graph: (202578, 6570, 8),
+        roots: &[
+            Root {
+                name: "loops",
+                want: Want::Rejected {
+                    code: "R0203",
+                    site: r####"dispose(left)"####,
+                    related: r####"&left"####,
+                },
+                graph: None,
+                stats: (4491, 983, 8),
+            },
+            Root {
+                name: "released",
+                want: Want::Checked,
+                graph: None,
+                stats: (8406, 1630, 8),
+            },
+        ],
+    },
+}];
+
+/// Rule 2 (ri-2s0.11): a family store outside the admitted retained contract
+/// keeps its parent blocker at the parent caps. A Bool beside a string
+/// destination, three sources and a grouped destination are each refused by the
+/// unmetered screen, so the call is still the blocker at the old cost. The caps
+/// were measured at `1fb84233`, before the family-store admission.
+const O13_SIBLINGS: &[Source] = &[
+    Source {
+        text: r#"
+function remember<D, S, G>(slot: D, source: S, gate: G): void;
+implement remember(slot: &mut &string, source: &string, gate: bool): void { while (true) {} }
+function gated(flag: bool, left: string, seed: &string): void {
+  let mut slot = seed;
+  remember(&mut slot, &left, flag);
+  dispose(left);
+  let last = slot;
+}
+"#,
+        outcome: Outcome::Receipt {
+            typed_stats: (328486, 48489, 12),
+            graph: (GraphCompletion::Incomplete, (188672, 4174, 5)),
+            pre_equality_graph: (188671, 4174, 5),
+            roots: &[Root {
+                name: "gated",
+                want: Want::Incomplete {
+                    blocker: r####"remember(&mut slot, &left, flag)"####,
+                },
+                graph: None,
+                stats: (1969, 73, 3),
+            }],
+        },
+    },
+    Source {
+        text: r#"
+function remember<D, A, B, C>(slot: D, first: A, second: B, third: C): void;
+implement remember(slot: &mut &string, first: &string, second: &string, third: &string): void { while (true) {} }
+function triple(left: string, middle: string, right: string, seed: &string): void {
+  let mut slot = seed;
+  remember(&mut slot, &left, &middle, &right);
+  dispose(left);
+  let last = slot;
+}
+"#,
+        outcome: Outcome::Receipt {
+            typed_stats: (331252, 49199, 12),
+            graph: (GraphCompletion::Incomplete, (189179, 4186, 5)),
+            pre_equality_graph: (189178, 4186, 5),
+            roots: &[Root {
+                name: "triple",
+                want: Want::Incomplete {
+                    blocker: r####"remember(&mut slot, &left, &middle, &right)"####,
+                },
+                graph: None,
+                stats: (1992, 85, 3),
+            }],
+        },
+    },
+    Source {
+        text: r#"
+function remember<D, S>(slot: D, source: S): void;
+implement remember(slot: &mut &string, source: &string): void { while (true) {} }
+function grouped(left: string, seed: &string): void {
+  let mut slot = seed;
+  remember((&mut slot), &left);
+  dispose(left);
+  let last = slot;
+}
+"#,
+        outcome: Outcome::Receipt {
+            typed_stats: (328296, 48419, 12),
+            graph: (GraphCompletion::Incomplete, (188476, 4167, 5)),
+            pre_equality_graph: (188475, 4167, 5),
+            roots: &[Root {
+                name: "grouped",
+                want: Want::Incomplete {
+                    blocker: r####"remember((&mut slot), &left)"####,
+                },
+                graph: None,
+                stats: (1957, 66, 3),
+            }],
         },
     },
 ];
@@ -2328,6 +2538,81 @@ fn o13_joined_retained_sources_reject_early_release() {
     run(
         "rfc_cases::o13_joined_retained_sources_reject_early_release",
         O13,
+    );
+}
+
+#[test]
+fn o13_plain_string_retained_contract_rejects_early_release() {
+    run(
+        "rfc_cases::o13_plain_string_retained_contract_rejects_early_release",
+        O13_PLAIN,
+    );
+}
+
+#[test]
+fn o13_family_store_in_a_loop_rejects_and_after_the_last_use_checks() {
+    run(
+        "rfc_cases::o13_family_store_in_a_loop_rejects_and_after_the_last_use_checks",
+        O13_FAMILY,
+    );
+}
+
+/// Metering rule 11, third case (ri-2s0.11): the second O13 source's `clear`
+/// root now holds retained `&string` contents, and `remember(&mut slot, ..)`
+/// is read from the implementation's declared contract, so the caps at which
+/// `joined` was `Incomplete` at `&mut slot` now give `ResourceLimit` per root
+/// and for the whole graph. The O13 row holds the new caps.
+#[test]
+fn o13_pre_retained_string_caps_now_give_resource_limit() {
+    installed(
+        "rfc_cases::o13_pre_retained_string_caps_now_give_resource_limit",
+        |request| {
+            fs::write(&request.entry, format!("{IMPORTS}\n{}", O13[1].text)).unwrap();
+            for test_mode in [false, true] {
+                let request = InstalledRequest {
+                    test_mode,
+                    ..request.clone()
+                };
+                let graph = loader::load_installed(request).unwrap();
+                let typed = analyze_typed(&graph, AnalysisLimits::default());
+                assert_eq!(typed.completion(), TypedCompletion::Checked);
+                let module = graph
+                    .modules()
+                    .iter()
+                    .find(|m| m.key.origin == Origin::Application && m.key.path == "main.rill")
+                    .unwrap();
+                let receipt = typed.receipt().unwrap();
+                for (name, old) in [("clear", (1993, 88, 1)), ("joined", (2015, 97, 3))] {
+                    let root = module
+                        .declarations
+                        .iter()
+                        .find(|d| {
+                            d.id.kind == DeclarationKind::Function
+                                && d.name.as_deref() == Some(name)
+                        })
+                        .unwrap();
+                    let (old, _) = limits(statistics(old));
+                    let limited = lower_body(&receipt, module, &root.id, old).unwrap();
+                    assert_eq!(limited.completion(), Completion::ResourceLimit, "{name}");
+                    assert!(limited.mir().is_none() && limited.findings().is_empty());
+                }
+                let (old, _) = limits(statistics((190003, 4236, 5)));
+                assert_eq!(
+                    analyze_ownership(&receipt, old).completion(),
+                    GraphCompletion::ResourceLimit
+                );
+            }
+        },
+    );
+}
+
+/// Rule 2: the siblings of the family store stay `Incomplete` at their calls,
+/// at the caps the parent measured.
+#[test]
+fn o13_unsupported_family_store_siblings_stay_incomplete_at_their_calls() {
+    run(
+        "rfc_cases::o13_unsupported_family_store_siblings_stay_incomplete_at_their_calls",
+        O13_SIBLINGS,
     );
 }
 
