@@ -7765,6 +7765,13 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             }) = self.slots[operand].cleanup
             {
                 self.check_list_dispose_call(node, facts, call, *arg, disposal, depth)?;
+            } else if matches!(&facts.data, Some(DataExpression::DescriptorEnd)) {
+                // Only a named descriptor local ends; a projected descriptor
+                // stays pending.
+                if !path.projections.is_empty() {
+                    return Err(Stop::Pending(node));
+                }
+                target = WrittenDisposal::Descriptor;
             } else {
                 let actual = self.value(*arg)?;
                 if scalar::scalar(&actual.ty).is_some()

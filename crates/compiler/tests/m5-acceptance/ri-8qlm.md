@@ -75,3 +75,5 @@ Logs in `~/.t3/evidence/rill/m5-build-2026-11-22/ci-mhpj/`:
 - This covers ownership protection overlaps (`ownership_overlaps`). Collection and primitive protected overlaps also report R0500, and this change does not credit them. Neither does it credit an overlapping implementation whose contract cannot be formed: that path still records `FamilySelection` at the declaration. O21 needs neither path.
 - The R0500 overlap is not a body finding. Its related item is derived from the protection scope in the report. No diagnostic renderer consumes `ownership_overlaps` yet.
 - Correction to `ri-px1.10.md` (K3 row and the third "Limits" entry): O21 is no longer `Incomplete`. It is `SourceRejected` with R0500, closed by this ticket.
+
+2026-11-24: the two siblings in the table above are superseded in part by `ri-2s0.9.md`: O22 admits `dispose` of a `&string`, so both are now `SourceRejected` (R0500 only), and a `&mut string` sibling keeps the `Incomplete` witness.
