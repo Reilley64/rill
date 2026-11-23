@@ -396,6 +396,7 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
             conversions: Some(&core.conversions),
             collections,
             native_ownership: &ownership.protection,
+            ownership_overlaps: &ownership.overlaps,
             ordinary_scope,
             exhausted: authority_exhausted || roles_complete.is_err() || routine_role.is_err(),
         },

@@ -24,6 +24,7 @@ use crate::parser::NodeKind;
 use std::sync::Arc;
 
 mod i32_arithmetic;
+mod interpolation;
 mod iteration;
 mod list_arrows;
 mod list_source;
@@ -5418,6 +5419,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 return self.i32_equality(node, into, next, depth);
             }
             NodeKind::Index => return self.read_list_i32(node, facts, into, next, depth),
+            NodeKind::Template => return self.i32_interpolation(node, facts, into, next, depth),
             NodeKind::ValueReference => Action::Read {
                 // Only exact named transfers and owned pattern staging supply this slot.
                 from: match proof {
