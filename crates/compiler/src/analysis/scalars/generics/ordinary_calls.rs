@@ -522,6 +522,16 @@ impl<'r, 'g> Checker<'r, 'g> {
                 )?;
             }
             if let Some(ty) = receiving[i].clone() {
+                // The receiver of a List get is a borrow of a named List of
+                // shared application-record references whose own type has not
+                // arrived. Its width context waits for it: a hypothetical
+                // premise given now would stay on the index and stop the call.
+                if i == 1
+                    && inputs[0].is_none()
+                    && self.pending_list_reference_receiver(inference, call.fact.arguments[0])
+                {
+                    continue;
+                }
                 let argument = call.fact.arguments[i];
                 let leaf = self.source_leaf(module, argument)?;
                 // A named operand has its own type even through grouping.
@@ -740,6 +750,32 @@ impl<'r, 'g> Checker<'r, 'g> {
         self.elab.reserve(1)?;
         inference.calls.insert(node, call);
         Ok(false)
+    }
+
+    /// `&name` over a named `List<&Record>` (shared reference to an
+    /// application record) whose borrow has no type yet. Decided from syntax and
+    /// the operand's established type alone, so it charges nothing.
+    fn pending_list_reference_receiver(&self, inference: &Inference<'g>, argument: NodeId) -> bool {
+        let nodes = &inference.module.syntax.nodes;
+        let borrow = &nodes[argument];
+        let Some(&operand) = borrow.children.first() else {
+            return false;
+        };
+        borrow.kind == NodeKind::Prefix("&")
+            && nodes[operand].kind == NodeKind::ValueReference
+            && inference.slots[&argument].ty.is_none()
+            && inference.slots[&operand]
+                .ty
+                .as_ref()
+                .zip(self.collections.list)
+                .and_then(|(ty, list)| list.element(ty))
+                .is_some_and(|element| {
+                    matches!(element.as_ref(), TypeTerm::Reference { mutable: false, referent }
+                        if matches!(referent.as_ref(), TypeTerm::Nominal { declaration, arguments }
+                            if declaration.kind == DeclarationKind::Record
+                                && declaration.module.origin == crate::loader::Origin::Application
+                                && arguments.is_empty()))
+                })
     }
 
     fn native_call(

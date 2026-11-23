@@ -767,14 +767,18 @@ import std::collection::get;
 type User = { id: i32 };
 function slot(users: List<&User>): Option<&&User> { return get(&users, 0u64); }
 "#,
-        outcome: Outcome::Typed {
-            completion: TypedCompletion::Incomplete,
-            signals: &[
-                r####"obligation FamilySelection @ get(&users, 0u64)"####,
-                r####"pending TypedInput @ get(&users, 0u64)"####,
-                r####"pending TypedInput @ return get(&users, 0u64);"####,
-            ],
-            stats: (325319, 47875, 12),
+        outcome: Outcome::Receipt {
+            typed_stats: (325899, 48063, 12),
+            graph: (GraphCompletion::Incomplete, (186123, 4117, 5)),
+            pre_equality_graph: (185807, 3983, 3),
+            roots: &[Root {
+                name: "slot",
+                want: Want::Incomplete {
+                    blocker: "get(&users, 0u64)",
+                },
+                graph: None,
+                stats: (1869, 22, 2),
+            }],
         },
     },
 ];
@@ -810,6 +814,75 @@ function scalar(users: List<&i32>): Option<&i32> {
                 r####"pending Storage @ for (let number of users) { return Option.Some(number); }"####,
             ],
             stats: (322461, 47631, 12),
+        },
+    },
+];
+
+/// Rules 1, 2 and 5: `get` over a borrowed List of anything but shared
+/// application-record references, and the grouped receiver, keep their parent
+/// caps (the index literal keeps its hypothetical premise, as before ri-2s0.7.1).
+const O10_GET_SIBLINGS: &[Source] = &[
+    Source {
+        text: r#"
+import std::collection::get;
+type User = { id: i32 };
+function mutable(users: List<&mut User>): Option<&&mut User> { return get(&users, 0u64); }
+"#,
+        outcome: Outcome::Typed {
+            completion: TypedCompletion::Incomplete,
+            signals: &[
+                r####"obligation FamilySelection @ get(&users, 0u64)"####,
+                r####"pending TypedInput @ get(&users, 0u64)"####,
+                r####"pending TypedInput @ return get(&users, 0u64);"####,
+            ],
+            stats: (325319, 47875, 12),
+        },
+    },
+    Source {
+        text: r#"
+import std::collection::get;
+function scalar(users: List<&i32>): Option<&&i32> { return get(&users, 0u64); }
+"#,
+        outcome: Outcome::Typed {
+            completion: TypedCompletion::Incomplete,
+            signals: &[
+                r####"obligation FamilySelection @ get(&users, 0u64)"####,
+                r####"pending TypedInput @ get(&users, 0u64)"####,
+                r####"pending TypedInput @ return get(&users, 0u64);"####,
+            ],
+            stats: (324494, 47829, 12),
+        },
+    },
+    Source {
+        text: r#"
+import std::collection::get;
+type User = { id: i32 };
+function owned(users: List<User>): Option<&User> { return get(&users, 0u64); }
+"#,
+        outcome: Outcome::Typed {
+            completion: TypedCompletion::Incomplete,
+            signals: &[
+                r####"obligation FamilySelection @ get(&users, 0u64)"####,
+                r####"pending TypedInput @ get(&users, 0u64)"####,
+                r####"pending TypedInput @ return get(&users, 0u64);"####,
+            ],
+            stats: (325250, 47838, 12),
+        },
+    },
+    Source {
+        text: r#"
+import std::collection::get;
+type User = { id: i32 };
+function grouped(users: List<&User>): Option<&&User> { return get(&(users), 0u64); }
+"#,
+        outcome: Outcome::Typed {
+            completion: TypedCompletion::Incomplete,
+            signals: &[
+                r####"obligation FamilySelection @ get(&(users), 0u64)"####,
+                r####"pending TypedInput @ get(&(users), 0u64)"####,
+                r####"pending TypedInput @ return get(&(users), 0u64);"####,
+            ],
+            stats: (325123, 47792, 12),
         },
     },
 ];
@@ -2052,6 +2125,38 @@ fn o10_pre_extraction_typed_cap_now_gives_resource_limit() {
                 };
                 let graph = loader::load_installed(request).unwrap();
                 let (old, _) = limits(statistics((323289, 47677, 12)));
+                let typed = analyze_typed(&graph, old);
+                assert_eq!(typed.completion(), TypedCompletion::ResourceLimit);
+                assert!(typed.receipt().is_none());
+            }
+        },
+    );
+}
+
+#[test]
+fn o10_get_siblings_keep_their_parent_caps() {
+    run(
+        "rfc_cases::o10_get_siblings_keep_their_parent_caps",
+        O10_GET_SIBLINGS,
+    );
+}
+
+/// Metering rule 11, mandated flip (ri-2s0.7.1): admitting `get(&users, 0u64)`
+/// on a `List<&Record>` moved its typed cap, so the cap before it,
+/// 325,319/47,875/12, now gives `ResourceLimit`.
+#[test]
+fn o10_pre_slot_get_typed_cap_now_gives_resource_limit() {
+    installed(
+        "rfc_cases::o10_pre_slot_get_typed_cap_now_gives_resource_limit",
+        |request| {
+            fs::write(&request.entry, format!("{IMPORTS}\n{}", O10[1].text)).unwrap();
+            for test_mode in [false, true] {
+                let request = InstalledRequest {
+                    test_mode,
+                    ..request.clone()
+                };
+                let graph = loader::load_installed(request).unwrap();
+                let (old, _) = limits(statistics((325319, 47875, 12)));
                 let typed = analyze_typed(&graph, old);
                 assert_eq!(typed.completion(), TypedCompletion::ResourceLimit);
                 assert!(typed.receipt().is_none());
