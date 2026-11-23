@@ -1728,6 +1728,94 @@ The 17-source capture is [`tests/installed/typed`](../../../tests/installed/type
 
 This is compiler and MIR evidence. No Rill program ran, and the inventory does not discharge any obligation.
 
+## 2026-11-23: M4 Result use for a borrowed declared callable (ri-785.5)
+
+`function run<F>(job: &F): bool where callable(F, [], bool) { return job(); }` closed by `return run(&f);`, where `f` is a local read-only `() => bool` arrow, now issues an M4 receipt (`declared-shared-actual`, 325,244 work / 47,828 entries / depth 12). The [callable-once test](m4_8_callable_once.rs) covers it in both installed load modes, with exact caps and each limit independently one short. The wrapper's deferred `CallBoundary` at `job()` resolves only when every reference to the private wrapper is such a closed call. Each call reads the referent residence of `&f` in place: the caller keeps the descriptor and every capture occurrence. It never consumes through the borrow.
+
+Unchanged from the parent revision: the uncalled wrapper `declared-shared-only` stays `Incomplete` at 321,706 / 47,419 / 12, `declared-shared-output-discard` keeps `R0103` at `run(&f);` at 325,584 / 47,950 / 12, and `borrowed-once` stays M4 `SourceRejected` at 324,058 / 47,748 / 12. The dead-only, exported, grouped-argument (`run((&f))`), block-scoped and loop-wrapped controls keep their parent caps. A formal actual costs one more step (323,599 → 323,600) and an arrow borrowing a caller's `Result` 16 more (325,321 → 325,337); both stay `Incomplete`, and the latter keeps its `R0103` at the caller's exit. The 17-source baseline still checks at exactly 372,246 / 54,059 / 12 in both modes.
+
+This is Result use only. M5 still stops `caller` at `Incomplete` in the target (1,891 / 42 / 3) and the ordinary graph root, with no MIR; the borrowed invocation's ownership proof is ri-785 B3. No Rill program ran.
+
+## O15 arithmetic on a charged M4 fact (2026-11-22, ri-785.1)
+
+This answers Standards blocker `c61a0a14`. M4's flow pass now classifies each normal `i32` expression from its children's classes and publishes one fact, `bounded_i32_arithmetic`, for `local * literal` and for a local or that product plus a local. M5 admits `*` and `+` on that fact and no longer probes nodes or locals to decide admission. Each arithmetic read of a local charges its key with `charge_key`, once per probe.
+
+The tests run in both installed load modes:
+
+- `arithmetic_local_reads_charge_their_module_path` reproduces the finding. The same body in a module whose path is 48 bytes longer costs 192 more work than a control body that reads the same locals without arithmetic. Before the fix the difference was 0.
+- `rfc_counter_caps_include_the_charged_local_reads`: `counter` is `Checked` at 2,562/329/6 and `ResourceLimit` one short on each axis. The graph is `Incomplete` at 187,543/4,297/6, with `ResourceLimit` one short on each axis. The reads of `first` and `second` add 2 × (10 × 3 − 1) = 58 work to each; the 2026-11-21 replay before this change recorded 2,504 and 187,485.
+- `counter_expectation_keeps_its_incomplete_cap`: on the 17-source baseline plus the counter, `counter() == 12i32` stays `Incomplete` at 2,279/210/1, both targeted and as an ordinary graph root, with `ResourceLimit` one short on each axis.
+
+The six earlier O15 tests pass with no number changed. The M4 17-source baseline was measured before and after the change: exactly 372,246/54,059/12 in both modes, with no receipt one short on any axis. No Rill program ran.
+
+## Re-pinning the O15 counter row of `m5::rfc_cases` (2026-11-23, ri-785.1)
+
+This applies the planner's decision of 2026-11-23 on `ri-2s0` and metering rule 11 to the first `rfc_cases` row that a mandated change moves. H2 (`ri-px1.2`) pinned the O15 source after A2 was built, with the pre-A2 numbers. The merge of A2 blocked on that one expectation.
+
+| Meter | Old | New |
+| --- | --- | --- |
+| `counter` targeted | 2,504 / 329 / 6 | 2,562 / 329 / 6 |
+| Whole graph (`Incomplete`) | 187,485 / 4,297 / 6 | 187,543 / 4,297 / 6 |
+
+The reason is one cause: A2 charges the reads of `first` and `second` in `first * 10i32 + second` with `charge_key`, so each read charges the 10-byte key `"main.rill"` three times in place of one step. That is 2 × (10 × 3 − 1) = 58 work, in `counter`'s targeted query and again in the whole graph. Entries and depth are unchanged, and the targeted query sets the graph's depth as before. This is the effect of review `c61a0a14`; no other cause moves either meter. The `expect` root (1,893 / 32 / 1) and the typed receipt (323,681 / 47,925 / 12) are unchanged. The numbers of the new row equal those that `m5/o15_arithmetic.rs::rfc_counter_caps_include_the_charged_local_reads` already pins.
+
+`m5::rfc_cases::o15_pre_charge_counter_caps_now_give_resource_limit` asserts, in both installed load modes, that the old caps give `ResourceLimit`: 2,504 / 329 / 6 on the `counter` query (no MIR, no findings) and 187,485 / 4,297 / 6 on the graph. No other `rfc_cases` row and no number in `o15_arithmetic.rs` changed. No Rill program ran.
+
+## An owned guard wrapper beside a borrowed view (ri-px1.6, 2026-11-23)
+
+This is ticket D1. Since `f2e3459`, a body that owned a guard-bearing parameter stopped at any reference parameter whose referent bore a guard. At the parent `37a0a99e`, [`mixed_wrapper_exports_the_view_then_cleans_the_owned_wrapper`](m5/disposers/mixed_wrapper.rs) first returned `Incomplete` at `view: &Plain` for `mixedWrapper(owned: Plain, view: &Plain): &Plain`. The screen now admits a **shared** view of a flat guard wrapper. A borrowed guard (`&LockGuard<i32>`) and an exclusive wrapper view (`&mut Plain`) stay outside. Up to each of those rejections, the screen charges what it charged before.
+
+In both installed modes, `mixedWrapper` copies the incoming view and exports it. The view's storage ends, and then the owned wrapper is cleaned once in reverse field order: drop `plainTail`, release `plainLock` with the installed provider, drop `plainHead`. The test compares the whole ordered action list. Targeted caps, each exact and independently one short:
+
+| Function | Work / entries / depth | Ordinary graph root |
+| --- | --- | --- |
+| `mixedWrapper` | 2,630 / 266 / 3 | `Incomplete` at the body. The implicit guard release is an unverified `ProtectedRelease` edge (row D3). |
+| `mixedGrouped`, `return ((view));` | 2,636 / 266 / 5 | As `mixedWrapper`. |
+| `mixedExplicit`, which moves `plainLock` to `held` and writes `dispose(held)` | 2,959 / 425 / 3 | `Checked`, with the targeted MIR. |
+| `guardBesideView`, an owned bare guard | 2,196 / 174 / 3 | `Incomplete`, as `mixedWrapper`. |
+| `disposedWrapperForward`, a custom-disposed `Kept` beside `&Kept` | 5,744 / 639 / 3 | `Incomplete`, with an `ActiveDisposer` edge. |
+
+The source's whole receipt is 197,974 / 5,550 / 5 (`Incomplete`); each one-short cap gives `ResourceLimit`. The siblings keep the targeted caps measured at `37a0a99e`. `wrapperReferenceOnly` checks at 2,153 / 166 / 3. `exclusiveWrapper` stops at `view: &mut Plain` at 2,432 / 169 / 1. `guardForward` stops at `view: &LockGuard<i32>` at 2,421 / 169 / 1. `disposedGuardForward`, which disposes the owned wrapper with `release(owned)`, stops at the same parameter at 2,427 / 170 / 1. The `mixedWrapper` row of `protected_fields_keep_their_obligation_through_disposer_cleanup` moves from its `Incomplete` list to a reverse-cleanup assertion.
+
+The literal `mixedWrapper` graph root stays `Incomplete` until the implicit release of a guard field is a verified graph edge. Only the written-release body `mixedExplicit` has root MIR. No Rill program ran.
+
+## Interrupted tuple staging and a postfix condition, 2026-11-23 (ri-vgz.6)
+
+This section closes the two witnesses of audit 4(c) (`old-partial`, `old-entangled` in `r76-audit`). [`staging.rs`](m5/propagation/staging.rs) checks them through the installed compiler in both load modes, with the targeted query and the ordinary graph root, at exact caps and one short on each axis. At the parent `37a0a99e` both were `Incomplete`: `tuple` at its bracket (4,000/625/4) and `condition` at `gate?` (3,405/439/6).
+
+A named flat tuple of primitives may now hold one `Option<bool>` postfix element, as the flat record already could. `let value: [string, string, bool, string] = [stage(first), stage(second), gate?, stage(suffix)];` has these MIR paths:
+
+| Reached edge | What owns the strings |
+| --- | --- |
+| `gate?` returns `None` | Export `None`, then drop `value.1`, `value.0` (reverse written order), then lexical cleanup. `stage(suffix)` never runs, `value` is never initialized and the unmoved `suffix` drops with the other formals. |
+| `gate?` continues | Copy the payload into `value.2`, call `stage(suffix)`, initialize `value`, then the ordinary return and cleanup. |
+
+`tuple` checks at 8,617/2,053/7 and its grouped `((gate?))` form at 8,625/2,053/9. Scoped and loop-wrapped forms drop the same reached prefix. A known `None` stops after the prefix, so a previously moved suffix source is not reached and the body checks. A moved suffix source reached on the success edge and a moved prefix source each give `R0200` at the reached read, related to the earlier move. The ordinary `checkTuple` control is unchanged.
+
+The ordinary continuation witness is `if (gate?)`. `None` exports before lexical cleanup and reaches neither branch. `Some` continues to the ordinary branch on the payload. `condition` checks at 4,072/821/6, its grouped form at 4,077/821/9, and an `else` with a move in each branch moves only that branch's formal. A known `None` reaches neither branch. `conditionRead` gives `R0200` at its second `dispose(retired)`, related to the first.
+
+Both routes are screened from typed facts before their first charge. These siblings keep the caps and blockers measured at `37a0a99e`: in a tuple, an embedded postfix (`relay(gate?)`), two postfixes, an `Option<string>` postfix and a nested tuple; in a condition, `while (gate?)`, `!(gate?)`, `relay(gate?)` and a `Result<bool, i32>` postfix. The interrupted-record route now shares its lowering with the tuple; the tests in `records.rs` and `patterns/commitment.rs` pass unchanged.
+
+No fixed cap moved. This is not general aggregate initialization, a return-constructor postfix such as `Option.Some(gate?)`, or a postfix in a loop condition. No Rill program ran.
+
+## Custom disposer over owning `string` fields (ri-px1.7, 2026-11-23)
+
+This is ticket D2. The [normal-edge](#normal-edge-custom-disposer-cleanup) and [explicit](#explicit-custom-disposal-of-local-records) disposer slices already lowered records whose fields own `string` values: `string` is a prelude primitive, so "primitive fields" in those sections includes it. Their tests asserted only the targeted query. This ticket adds no compiler change. [`owning_text.rs`](m5/disposers/owning_text.rs) checks the same behavior in both installed modes through the targeted query and the ordinary graph root, at the parent `36f1cf15`. The compiler already had the behavior, so the new tests had no red step.
+
+`type Note = { head: string; moved: string; tail: string; }` has a canonical disposer, reached through the alias `release`, whose body moves `value.moved` into `saved`. Each caller invokes the selected implementation once and drops no field. The body drops `saved`, passes the remaining fields to the epilogue, and the epilogue drops `tail`, then `head`. It does not drop `moved` again. The graph's reached active body has the same ordered actions and no edges. Each root's only edge is `ActiveDisposer` to that implementation. Caps are exact, and each axis is independently one short:
+
+| Function | Target work / entries / depth | Outcome | Ordinary graph root |
+| --- | --- | --- | --- |
+| `normal(value: Note)` | 5,552 / 542 / 3 | `Checked`: disposer | `Checked`, same MIR |
+| `explicit(value: Note, later: string)`, `release(value)` | 5,701 / 622 / 3 | `Checked`: disposer, then drop `later` | `Checked`, same MIR |
+| `canonical(value: Note)`, `dispose(value)` | 5,664 / 604 / 3 | `Checked`: disposer | `Checked`, same MIR |
+| `outside`, `return value.moved;` | 2,428 / 179 / 3 | `R0501` at `value.moved`, related `value: Note` | `SourceRejected` |
+| `outsideLocal`, `let taken = value.head;` | 2,438 / 188 / 3 | `R0501` at `value.head`, related `value: Note` | `SourceRejected` |
+| `reread`, body rereads moved `value.text` | 5,369 / 470 / 3 | `R0200` at the second `value.text`, related the first | `SourceRejected`; the finding is recorded once, in the active body |
+| `manual`, body writes `dispose(value.second)` | 5,487 / 518 / 3 | `Checked`: the body disposes `second`, the epilogue drops `first` | `Incomplete` at `dispose(value.second)` |
+
+The source's whole receipt is 197,595 / 5,829 / 3 (`SourceRejected`); each one-short cap gives `ResourceLimit`. `manual` marks the boundary. `graph/closed_release.rs` verifies a written `dispose` only for an operand with no field projection, so the active body and its caller stay `Incomplete`. That is filed as `ri-4lq`. The same shape occurs in `active_disposer_cleans_only_remaining_fields` and `custom_record_rebuild`, which assert only the targeted query. No source changed, so no fixed cap moved, including the scalar and primitive-field caps in `m5/disposers.rs`. No Rill program ran.
+
 ## Open acceptance obligations
 
 - Nested and borrowed place projections, nested mutable storage effects and callee-exit checks for retained destinations. Preserve the covered distinction between a carried reference and a borrow of its slot when extending these routes.

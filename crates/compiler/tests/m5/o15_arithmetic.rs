@@ -138,6 +138,173 @@ fn counter_probe(test: &str, source: &str, name: &str) {
     });
 }
 
+#[test]
+fn rfc_counter_caps_include_the_charged_local_reads() {
+    probe(
+        "o15_arithmetic::rfc_counter_caps_include_the_charged_local_reads",
+        O15,
+        |_, module, receipt| {
+            let decl = named(module, "counter");
+            let query = |cap| lower_body(receipt, module, &decl.id, cap).unwrap();
+            // The reads of `first` and `second` charge "main.rill" (10) three
+            // times each in place of one step: 2 x (10 x 3 - 1) = 58 work.
+            let stats = statistics(2562, 329, 6);
+            let (exact, short) = caps(stats);
+            let target = query(exact);
+            assert_eq!(target.completion(), Completion::Checked);
+            assert_eq!(target.statistics(), stats);
+            for cap in short {
+                let limited = query(cap);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none() && limited.findings().is_empty());
+            }
+            let graph_stats = statistics(187543, 4297, 6);
+            let (exact, short) = caps(graph_stats);
+            let graph = analyze_ownership(receipt, exact);
+            assert_eq!(graph.completion(), GraphCompletion::Incomplete);
+            assert_eq!(graph.statistics(), graph_stats);
+            let root = graph_root(&graph, module, decl.node);
+            assert_eq!(root.ordinary_completion(), Completion::Checked);
+            for cap in short {
+                assert_eq!(
+                    analyze_ownership(receipt, cap).completion(),
+                    GraphCompletion::ResourceLimit
+                );
+            }
+        },
+    );
+}
+
+#[test]
+fn counter_expectation_keeps_its_incomplete_cap() {
+    // The parked fixture of task 5dd0ff7d: the 17-source typed baseline plus
+    // the counter, measured before the arithmetic fact.
+    let baseline = include_str!("../../../../tests/installed/typed/main.rill");
+    let checks = include_str!("../../../../tests/installed/typed/checks.rill");
+    let counter = ORIGINAL_COUNTER.replace("originalCounter", "counter");
+    installed(
+        "o15_arithmetic::counter_expectation_keeps_its_incomplete_cap",
+        |request| {
+            fs::write(
+                &request.entry,
+                format!("{baseline}{}", counter.trim_start()),
+            )
+            .unwrap();
+            fs::write(request.entry.with_file_name("checks.rill"), checks).unwrap();
+            for test_mode in [false, true] {
+                let graph = loader::load_installed(InstalledRequest {
+                    test_mode,
+                    ..request.clone()
+                })
+                .unwrap();
+                let typed = analyze_typed(&graph, AnalysisLimits::default());
+                let receipt = typed.receipt().unwrap();
+                let module = graph
+                    .modules()
+                    .iter()
+                    .find(|m| m.key.origin == Origin::Application && m.key.path == "main.rill")
+                    .unwrap();
+                let expect = module
+                    .declarations
+                    .iter()
+                    .find(|d| {
+                        d.id.kind == DeclarationKind::Expectation
+                            && d.span.bytes().starts_with(b"expect counter(")
+                    })
+                    .unwrap();
+                let query = |cap| {
+                    lower_root(&receipt, module, BodyOwner::Declaration(&expect.id), cap).unwrap()
+                };
+                let stats = statistics(2279, 210, 1);
+                let (exact, short) = caps(stats);
+                let target = query(exact);
+                let graph = analyze_ownership(&receipt, AnalysisLimits::default());
+                let root = graph_root(&graph, module, expect.node);
+                assert_eq!(target.statistics(), stats);
+                assert!(target.findings().is_empty());
+                for (completion, mir, blocked) in [
+                    (target.completion(), target.mir(), target.blocked_at()),
+                    (
+                        root.ordinary_completion(),
+                        root.ordinary_mir(),
+                        root.blocked_at(),
+                    ),
+                ] {
+                    assert_eq!(completion, Completion::Incomplete);
+                    assert!(mir.is_none());
+                    assert_eq!(blocked.unwrap().span.bytes(), b"counter() == 12i32");
+                }
+                for cap in short {
+                    let limited = query(cap);
+                    assert_eq!(limited.completion(), Completion::ResourceLimit);
+                    assert!(limited.mir().is_none() && limited.findings().is_empty());
+                }
+            }
+        },
+    );
+}
+
+#[test]
+fn arithmetic_local_reads_charge_their_module_path() {
+    // Review c61a0a14: arithmetic looked up locals keyed by a module path
+    // without charging it. The same body in a longer-named module must cost
+    // more than a control body that reads the same locals without arithmetic.
+    const SHORT: &str = "short.rill";
+    const LONG: &str = "arithmetic_read_from_a_module_with_a_much_longer_path.rill";
+    const BODIES: &str = r#"
+export function mix(left: i32, right: i32): i32 { return left * 10i32 + right; }
+export function pick(left: i32, right: i32): i32 { return right; }
+"#;
+    installed(
+        "o15_arithmetic::arithmetic_local_reads_charge_their_module_path",
+        |request| {
+            fs::write(
+                &request.entry,
+                format!(
+                    "{IMPORTS}\nimport short::mix as shortMix;\n\
+                     import arithmetic_read_from_a_module_with_a_much_longer_path::mix as longMix;\n"
+                ),
+            )
+            .unwrap();
+            for file in [SHORT, LONG] {
+                fs::write(request.entry.with_file_name(file), BODIES).unwrap();
+            }
+            for test_mode in [false, true] {
+                let graph = loader::load_installed(InstalledRequest {
+                    test_mode,
+                    ..request.clone()
+                })
+                .unwrap();
+                let typed = analyze_typed(&graph, AnalysisLimits::default());
+                let receipt = typed.receipt().unwrap();
+                let work = |path: &str, name: &str| {
+                    let module = graph
+                        .modules()
+                        .iter()
+                        .find(|m| m.key.origin == Origin::Application && m.key.path == path)
+                        .unwrap();
+                    let target = lower_body(
+                        &receipt,
+                        module,
+                        &named(module, name).id,
+                        AnalysisLimits::default(),
+                    )
+                    .unwrap();
+                    assert_eq!(target.completion(), Completion::Checked, "{path} {name}");
+                    target.statistics().work as isize
+                };
+                let arithmetic = work(LONG, "mix") - work(SHORT, "mix");
+                let control = work(LONG, "pick") - work(SHORT, "pick");
+                // Two local reads, each two probes of a key ending in the path.
+                assert_eq!(
+                    arithmetic - control,
+                    4 * (LONG.len() - SHORT.len()) as isize
+                );
+            }
+        },
+    );
+}
+
 fn check_counter(mir: &Mir<'_>) {
     let path = linear(mir, mir.entry);
     let effects: Vec<_> = path

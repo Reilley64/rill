@@ -45,7 +45,7 @@ depends = ["doctor"]
 run = "cargo test --locked -p compiler --no-default-features"
 
 [tasks."test:m5"]
-description = "Run the full M5 ownership test binary without LLVM, two test threads"
+description = "Run the M5 ownership test binary without LLVM, two test threads; pass a test filter after -- (mise run test:m5 -- <filter>)"
 depends = ["doctor"]
 run = "cargo test --locked --no-default-features -p compiler --test m5 -- --test-threads=2"
 
