@@ -1862,6 +1862,7 @@ Other deferrals recorded in the ticket index (`tickets/INDEX.md` of the planner'
 | Deferred item | Bead | Decision |
 | --- | --- | --- |
 | Heterogeneous error wrap with canonical display (gated C7) | `ri-ink` | D7 |
+| P2: a wrap that builds a new wrapper has no graph-root MIR, including the scalar `input ? 3i32` (`closeout::wraps_after_rhs_has_no_graph_root_mir_only_because_of_the_retained_display_edge`) | `ri-ink` | D7, by owner decision of 2026-11-23 (review `ci-uaa1`, O6) |
 | Borrowed `Result` payloads (gated C8) | `ri-ijq` | D7 |
 | Borrowed iteration, M4 `Storage` handoff and M5 exit (gated C9, C10) | `ri-9z0` | D7 |
 | Explicit `dispose(Option<string>)` (gated D7) | `ri-082` | D8 |
@@ -1869,6 +1870,7 @@ Other deferrals recorded in the ticket index (`tickets/INDEX.md` of the planner'
 | `replay:installed` task | `ri-fu8` | none |
 | Base-versus-candidate differential for M5 caps | `ri-jp5` | none |
 | `tools/check_metering.py` lint for uncharged keyed lookups | `ri-30q` | none |
+| Metering rule 3 at the existing path-keyed probes (charged lookup wrappers; review `ci-uaa1` S1-F1..F4, S2-F1..F3, S2-F5, ri-vgz.7 #2); its re-pins fall under rule 11's third case | `ri-qlh.3` | Owner decision of 2026-11-23 (review `ci-uaa1`, O2) |
 
 Found beads still open, each pinned at its current outcome in the audits (state checked 2026-11-23):
 
@@ -1879,6 +1881,7 @@ Found beads still open, each pinned at its current outcome in the audits (state 
 | `ri-o62c` | needs triage | A grouped List literal of records loses the M4 receipt (P6). |
 | `ri-4lq` | needs triage | A written `dispose(value.field)` in an active disposer is not a verified graph edge (K2 and O14 graph roots). |
 | `ri-kdi` | open | Records with reference fields are Incomplete at construction (O7, O19). |
+| `ri-grwx` | needs triage | `analyze_ownership` keeps findings published with `ResourceLimit` (metering rule 8); found by the review `ci-uaa1` fixes. |
 
 Also open and named by `m5-status.md` rows: `ri-w0g` (borrowed temporaries, `List<&T>` extraction, descriptor disposal, guard interpolation: O10, O12, O20, O22), `ri-ema` (user-declared retaining contracts: O9, O11, O13) and `ri-1up` (M4 `Storage` blocker on writes through `&mut`: O1, O2, O6, O8).
 
