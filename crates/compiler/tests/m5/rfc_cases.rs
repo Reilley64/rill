@@ -1221,6 +1221,89 @@ function released(flag: bool, left: string, right: string, seed: &string): void 
     },
 }];
 
+/// Rule 2 (ri-2s0.11): a family store outside the admitted retained contract
+/// keeps its parent blocker at the parent caps. A Bool beside a string
+/// destination, three sources and a grouped destination are each refused by the
+/// unmetered screen, so the call is still the blocker at the old cost. The caps
+/// were measured at `1fb84233`, before the family-store admission.
+const O13_SIBLINGS: &[Source] = &[
+    Source {
+        text: r#"
+function remember<D, S, G>(slot: D, source: S, gate: G): void;
+implement remember(slot: &mut &string, source: &string, gate: bool): void { while (true) {} }
+function gated(flag: bool, left: string, seed: &string): void {
+  let mut slot = seed;
+  remember(&mut slot, &left, flag);
+  dispose(left);
+  let last = slot;
+}
+"#,
+        outcome: Outcome::Receipt {
+            typed_stats: (0, 0, 0),
+            graph: (GraphCompletion::Incomplete, (0, 0, 0)),
+            pre_equality_graph: (0, 0, 0),
+            roots: &[Root {
+                name: "gated",
+                want: Want::Incomplete {
+                    blocker: r####"remember(&mut slot, &left, flag)"####,
+                },
+                graph: None,
+                stats: (0, 0, 0),
+            }],
+        },
+    },
+    Source {
+        text: r#"
+function remember<D, A, B, C>(slot: D, first: A, second: B, third: C): void;
+implement remember(slot: &mut &string, first: &string, second: &string, third: &string): void { while (true) {} }
+function triple(left: string, middle: string, right: string, seed: &string): void {
+  let mut slot = seed;
+  remember(&mut slot, &left, &middle, &right);
+  dispose(left);
+  let last = slot;
+}
+"#,
+        outcome: Outcome::Receipt {
+            typed_stats: (0, 0, 0),
+            graph: (GraphCompletion::Incomplete, (0, 0, 0)),
+            pre_equality_graph: (0, 0, 0),
+            roots: &[Root {
+                name: "triple",
+                want: Want::Incomplete {
+                    blocker: r####"remember(&mut slot, &left, &middle, &right)"####,
+                },
+                graph: None,
+                stats: (0, 0, 0),
+            }],
+        },
+    },
+    Source {
+        text: r#"
+function remember<D, S>(slot: D, source: S): void;
+implement remember(slot: &mut &string, source: &string): void { while (true) {} }
+function grouped(left: string, seed: &string): void {
+  let mut slot = seed;
+  remember((&mut slot), &left);
+  dispose(left);
+  let last = slot;
+}
+"#,
+        outcome: Outcome::Receipt {
+            typed_stats: (0, 0, 0),
+            graph: (GraphCompletion::Incomplete, (0, 0, 0)),
+            pre_equality_graph: (0, 0, 0),
+            roots: &[Root {
+                name: "grouped",
+                want: Want::Incomplete {
+                    blocker: r####"remember((&mut slot), &left)"####,
+                },
+                graph: None,
+                stats: (0, 0, 0),
+            }],
+        },
+    },
+];
+
 const O14: &[Source] = &[Source {
     text: r#"
 import std::core::dispose as release;
@@ -1893,6 +1976,16 @@ fn o13_pre_retained_string_caps_now_give_resource_limit() {
                 );
             }
         },
+    );
+}
+
+/// Rule 2: the siblings of the family store stay `Incomplete` at their calls,
+/// at the caps the parent measured.
+#[test]
+fn o13_unsupported_family_store_siblings_stay_incomplete_at_their_calls() {
+    run(
+        "rfc_cases::o13_unsupported_family_store_siblings_stay_incomplete_at_their_calls",
+        O13_SIBLINGS,
     );
 }
 

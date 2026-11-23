@@ -7666,20 +7666,43 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         let Some(&destination) = call.arguments.first() else {
             return false;
         };
-        call.selection.is_some()
-            && call.callee.kind == DeclarationKind::Family
-            && call.callee.module.origin == Origin::Application
-            && call.pipe_input.is_none()
-            && call.defaults.is_empty()
-            && call.scoped_join.is_none()
-            && call.list_arrows.is_none()
-            && matches!(facts.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "void")
-            && syntax[destination].kind == NodeKind::Prefix("&mut")
-            && matches!(syntax[destination].children.as_slice(), [operand]
+        let Some(selection) = call.selection.as_ref() else {
+            return false;
+        };
+        if selection.implementation.module != self.module.key
+            || selection.implementation.kind != DeclarationKind::Implementation
+            || !selection.substitution.is_empty()
+            || call.callee.kind != DeclarationKind::Family
+            || call.callee.module.origin != Origin::Application
+            || call.pipe_input.is_some()
+            || !call.defaults.is_empty()
+            || call.scoped_join.is_some()
+            || call.list_arrows.is_some()
+            || syntax[destination].kind != NodeKind::Prefix("&mut")
+            || !matches!(syntax[destination].children.as_slice(), [operand]
                 if syntax[*operand].kind == NodeKind::ValueReference)
-            && self
-                .value(destination)
-                .is_ok_and(|value| retained_contents_type(&value.ty).is_some())
+        {
+            return false;
+        }
+        // The written arguments' types are the declared formals' types (the
+        // call checks that they agree). Decide the contract from them, free.
+        let mut types: [Option<&'a Type<'g>>; 4] = [None; 4];
+        let Some(slots) = types.get_mut(..call.arguments.len()) else {
+            return false;
+        };
+        for (slot, &argument) in slots.iter_mut().zip(&call.arguments) {
+            let Ok(value) = self.value(argument) else {
+                return false;
+            };
+            *slot = Some(&value.ty);
+        }
+        retained_contract_of(
+            slots.iter().map(|ty| ty.unwrap()),
+            &facts.ty,
+            0,
+            &mut |_| Ok(()),
+        )
+        .is_ok_and(|contract| contract.is_some())
     }
 
     /// A family call resolved to an `implement` in this module, checked
