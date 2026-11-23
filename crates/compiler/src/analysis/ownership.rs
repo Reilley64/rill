@@ -429,6 +429,13 @@ impl<'g> Place<'g> {
     }
 }
 
+/// The key of a List lookup: a written `u64` literal, or a `u64` read from a place.
+#[derive(Clone, Copy, Debug)]
+pub enum ElementIndex<P> {
+    Literal(u64),
+    Local(P),
+}
+
 #[derive(Debug)]
 pub enum Operation<'g> {
     None,
@@ -559,6 +566,16 @@ pub enum Operation<'g> {
         owner: &'g DeclarationId,
         representation: CollectionArtifact<'g>,
         provider: CollectionArtifact<'g>,
+    },
+    /// `get` of a List by index: initialize `into` with an Option
+    /// whose payload refers to the List's element slot (not a copy of the
+    /// stored element). `into` holds a shared loan of `list`, so the reference
+    /// ends before the List does. Never traps: an index past the end gives None.
+    LookupListElement {
+        list: Place<'g>,
+        index: ElementIndex<Place<'g>>,
+        into: Place<'g>,
+        lookup: &'g DeclarationId,
     },
     /// Compare the initialized i32 scratch value with the written literal,
     /// ending the scratch and initializing the bool result.
@@ -2396,6 +2413,12 @@ enum Action<'g> {
         owner: &'g DeclarationId,
         representation: CollectionArtifact<'g>,
         provider: CollectionArtifact<'g>,
+    },
+    LookupListElement {
+        list: Slot,
+        index: ElementIndex<Slot>,
+        into: Slot,
+        lookup: &'g DeclarationId,
     },
     EqualI32Literal {
         from: Slot,

@@ -771,15 +771,39 @@ function slot(users: List<&User>): Option<&&User> { return get(&users, 0u64); }
 "#,
         outcome: Outcome::Receipt {
             typed_stats: (325899, 48063, 12),
-            graph: (GraphCompletion::Incomplete, (186123, 4117, 5)),
-            pre_equality_graph: (185807, 3983, 3),
+            graph: (GraphCompletion::SourceRejected, (187315, 4363, 5)),
+            pre_equality_graph: (186999, 4229, 5),
             roots: &[Root {
                 name: "slot",
-                want: Want::Incomplete {
-                    blocker: "get(&users, 0u64)",
+                want: Want::Rejected {
+                    code: "R0202",
+                    site: "return get(&users, 0u64);",
+                    related: "get(&users, 0u64)",
                 },
                 graph: None,
-                stats: (1869, 22, 2),
+                stats: (3059, 267, 5),
+            }],
+        },
+    },
+    Source {
+        text: r#"
+import std::collection::get;
+type User = { id: i32 };
+function indexed(users: List<&User>, index: u64): Option<&&User> { return get(&users, index); }
+"#,
+        outcome: Outcome::Receipt {
+            typed_stats: (325821, 48013, 12),
+            graph: (GraphCompletion::SourceRejected, (187398, 4374, 5)),
+            pre_equality_graph: (187082, 4240, 5),
+            roots: &[Root {
+                name: "indexed",
+                want: Want::Rejected {
+                    code: "R0202",
+                    site: "return get(&users, index);",
+                    related: "get(&users, index)",
+                },
+                graph: None,
+                stats: (3081, 278, 5),
             }],
         },
     },
@@ -819,6 +843,74 @@ function scalar(users: List<&i32>): Option<&i32> {
         },
     },
 ];
+
+/// Rules 1 and 2 (ri-2s0.7.2): lookups the ownership route does not admit keep
+/// their parent caps. Each types `Checked` and stays `Incomplete` in ownership.
+const O10_LOOKUP_SIBLINGS: &[Source] = &[Source {
+    text: r#"
+import std::collection::{get, first};
+type User = { id: i32 };
+function computed(users: List<&User>, index: u64): Option<&&User> { return get(&users, index + 1u64); }
+function grouped(users: List<&User>): Option<&&User> { return get(&users, (0u64)); }
+function view(users: &List<&User>): Option<&&User> { return get(users, 0u64); }
+function head(users: List<&User>): Option<&&User> { return first(&users); }
+function bound(users: List<&User>): Option<&&User> { let found = get(&users, 0u64); return found; }
+function discarded(users: List<&User>): void { get(&users, 0u64); }
+"#,
+    outcome: Outcome::Receipt {
+        typed_stats: (342897, 50941, 12),
+        graph: (GraphCompletion::Incomplete, (191091, 4248, 5)),
+        pre_equality_graph: (190775, 4114, 3),
+        roots: &[
+            Root {
+                name: "computed",
+                want: Want::Incomplete {
+                    blocker: "get(&users, index + 1u64)",
+                },
+                graph: None,
+                stats: (2009, 93, 2),
+            },
+            Root {
+                name: "grouped",
+                want: Want::Incomplete {
+                    blocker: "get(&users, (0u64))",
+                },
+                graph: None,
+                stats: (2003, 89, 2),
+            },
+            Root {
+                name: "view",
+                want: Want::Incomplete {
+                    blocker: "get(users, 0u64)",
+                },
+                graph: None,
+                stats: (1992, 89, 2),
+            },
+            Root {
+                name: "head",
+                want: Want::Incomplete {
+                    blocker: "first(&users)",
+                },
+                graph: None,
+                stats: (2003, 89, 2),
+            },
+            Root {
+                name: "bound",
+                want: Want::Incomplete { blocker: "found" },
+                graph: None,
+                stats: (2002, 89, 1),
+            },
+            Root {
+                name: "discarded",
+                want: Want::Incomplete {
+                    blocker: "get(&users, 0u64)",
+                },
+                graph: None,
+                stats: (2011, 89, 3),
+            },
+        ],
+    },
+}];
 
 /// Rules 1, 2 and 5: `get` over a borrowed List of anything but shared
 /// application-record references, and the grouped receiver, keep their parent
@@ -2171,9 +2263,9 @@ fn o09_retained_list_source_contract_is_incomplete_at_its_calls() {
 }
 
 #[test]
-fn o10_extracted_reference_checks_and_slot_get_stays_incomplete() {
+fn o10_extracted_reference_checks_and_slot_reference_is_rejected() {
     run(
-        "rfc_cases::o10_extracted_reference_checks_and_slot_get_stays_incomplete",
+        "rfc_cases::o10_extracted_reference_checks_and_slot_reference_is_rejected",
         O10,
     );
 }
@@ -2210,6 +2302,14 @@ fn o10_pre_extraction_typed_cap_now_gives_resource_limit() {
 }
 
 #[test]
+fn o10_lookup_siblings_keep_their_parent_caps() {
+    run(
+        "rfc_cases::o10_lookup_siblings_keep_their_parent_caps",
+        O10_LOOKUP_SIBLINGS,
+    );
+}
+
+#[test]
 fn o10_get_siblings_keep_their_parent_caps() {
     run(
         "rfc_cases::o10_get_siblings_keep_their_parent_caps",
@@ -2236,6 +2336,50 @@ fn o10_pre_slot_get_typed_cap_now_gives_resource_limit() {
                 let typed = analyze_typed(&graph, old);
                 assert_eq!(typed.completion(), TypedCompletion::ResourceLimit);
                 assert!(typed.receipt().is_none());
+            }
+        },
+    );
+}
+
+/// Metering rule 11, mandated flip (ri-2s0.7.2): rejecting the reference to the
+/// destroyed element slot moved the `slot` root and the whole graph, so the caps
+/// before it (root 1,869/22/2, graph 186,123/4,117/5) now give `ResourceLimit`.
+#[test]
+fn o10_pre_slot_lookup_caps_now_give_resource_limit() {
+    installed(
+        "rfc_cases::o10_pre_slot_lookup_caps_now_give_resource_limit",
+        |request| {
+            fs::write(&request.entry, format!("{IMPORTS}\n{}", O10[1].text)).unwrap();
+            for test_mode in [false, true] {
+                let request = InstalledRequest {
+                    test_mode,
+                    ..request.clone()
+                };
+                let graph = loader::load_installed(request).unwrap();
+                let typed = analyze_typed(&graph, AnalysisLimits::default());
+                assert_eq!(typed.completion(), TypedCompletion::Checked);
+                let module = graph
+                    .modules()
+                    .iter()
+                    .find(|m| m.key.origin == Origin::Application && m.key.path == "main.rill")
+                    .unwrap();
+                let receipt = typed.receipt().unwrap();
+                let root = module
+                    .declarations
+                    .iter()
+                    .find(|d| {
+                        d.id.kind == DeclarationKind::Function && d.name.as_deref() == Some("slot")
+                    })
+                    .unwrap();
+                let (old, _) = limits(statistics((1869, 22, 2)));
+                let limited = lower_body(&receipt, module, &root.id, old).unwrap();
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none() && limited.findings().is_empty());
+                let (old, _) = limits(statistics((186123, 4117, 5)));
+                assert_eq!(
+                    analyze_ownership(&receipt, old).completion(),
+                    GraphCompletion::ResourceLimit
+                );
             }
         },
     );
