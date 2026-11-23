@@ -126,6 +126,9 @@ pub struct ExpressionFacts<'g> {
     /// The written shape is `left == right` on two `i32` operands. M5 still
     /// checks that each operand is normal and lowers it.
     pub(in crate::analysis) i32_equality: bool,
+    /// The written shape is `left && right` where each operand, through
+    /// groups, has the `i32_equality` shape (ri-e9t8).
+    pub(in crate::analysis) i32_equality_conjunction: bool,
 }
 pub use core::{
     ErrorConstruction, Propagation, PropagationError, PropagationTarget, RetainedError, Wrapping,
@@ -439,6 +442,8 @@ enum I32Operand {
     Literal,
     Product,
     Sum,
+    /// A read of one component of a local or parameter tuple, `pair[0]`.
+    TupleElement,
 }
 struct ExpressionResult<'g> {
     ty: Type<'g>,
@@ -2693,6 +2698,26 @@ impl<'r, 'g> Checker<'r, 'g> {
                     {
                         Literal
                     }
+                    // `slot.path` is rooted at the tuple and projects one component, so the
+                    // read cannot be a List index, which can trap on its bound.
+                    (NodeKind::Index, _)
+                        if slot.access == data::Access::Owned
+                            && matches!(
+                                inference.data.get(&node).map(|prepared| &prepared.fact),
+                                Some(data::DataExpression::TupleIndex { .. })
+                            )
+                            && slot.path.as_ref().is_some_and(|path| {
+                                matches!(
+                                    path.projections.as_slice(),
+                                    [data::PathProjection::TupleElement(_)]
+                                ) && matches!(
+                                    path.root.kind,
+                                    DeclarationKind::Parameter | DeclarationKind::Binding
+                                )
+                            }) =>
+                    {
+                        TupleElement
+                    }
                     (NodeKind::Binary("*"), [left, right])
                         if matches!((operand(left), operand(right)), (Local, Literal)) =>
                     {
@@ -2807,6 +2832,30 @@ impl<'r, 'g> Checker<'r, 'g> {
                     list_literal = Some(node);
                 }
                 self.iteration_expression(module, node, slot, data.as_ref(), call.as_deref())?;
+                // Classified from the operand classes and types already inferred, so M5
+                // admits equality without a lookup of its own. Each operand, through
+                // groups, is a call or an operand that M5's checked arithmetic or tuple
+                // component read reads.
+                let i32_comparison = |node: NodeId| {
+                    module.syntax.nodes[node].kind == NodeKind::Binary("==")
+                        && inference
+                            .slots
+                            .get(&node)
+                            .and_then(|slot| slot.ty.as_ref())
+                            .and_then(primitive_name)
+                            == Some("bool")
+                        && module.syntax.nodes[node].children.iter().all(|&child| {
+                            let mut operand = child;
+                            while module.syntax.nodes[operand].kind == NodeKind::Group {
+                                operand = module.syntax.nodes[operand].children[0];
+                            }
+                            inference.slots.get(&operand).is_some_and(|slot| {
+                                slot.ty.as_ref().and_then(primitive_name) == Some("i32")
+                                    && (module.syntax.nodes[operand].kind == NodeKind::Call
+                                        || !matches!(slot.i32_operand, I32Operand::Other))
+                            })
+                        })
+                };
                 let facts = NodeFacts {
                     site: Self::site(module, node),
                     flow: slot.flow.clone(),
@@ -2834,18 +2883,21 @@ impl<'r, 'g> Checker<'r, 'g> {
                         // inferred, so M5 admits equality without a lookup of its
                         // own. Each operand, through groups, is a call or an
                         // operand that M5's checked arithmetic reads.
-                        i32_equality: module.syntax.nodes[node].kind == NodeKind::Binary("==")
+                        i32_equality: i32_comparison(node),
+                        // Classified from the same inferred facts: both operands, through
+                        // groups, are i32 equalities, so the check adds no lookup.
+                        i32_equality_conjunction: module.syntax.nodes[node].kind
+                            == NodeKind::Binary("&&")
                             && primitive_name(ty) == Some("bool")
+                            && module.syntax.nodes[node].children.len() == 2
                             && module.syntax.nodes[node].children.iter().all(|&child| {
                                 let mut operand = child;
                                 while module.syntax.nodes[operand].kind == NodeKind::Group {
                                     operand = module.syntax.nodes[operand].children[0];
                                 }
                                 inference.slots.get(&operand).is_some_and(|slot| {
-                                    slot.ty.as_ref().and_then(primitive_name) == Some("i32")
-                                        && (module.syntax.nodes[operand].kind == NodeKind::Call
-                                            || !matches!(slot.i32_operand, I32Operand::Other))
-                                })
+                                    slot.ty.as_ref().and_then(primitive_name) == Some("bool")
+                                }) && i32_comparison(operand)
                             }),
                     }),
                 };

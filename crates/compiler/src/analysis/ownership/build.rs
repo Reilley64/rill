@@ -27,6 +27,7 @@ mod i32_arithmetic;
 mod interpolation;
 mod iteration;
 mod list_arrows;
+mod list_i32_literal;
 mod list_source;
 mod option_calls;
 mod scoped_result;
@@ -5449,6 +5450,9 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             NodeKind::Binary("==") if facts.i32_equality => {
                 return self.i32_equality(node, into, next, depth);
             }
+            NodeKind::Binary("&&") if facts.i32_equality_conjunction => {
+                return self.i32_equality_conjunction(node, into, next, depth);
+            }
             NodeKind::Index => return self.read_list_i32(node, facts, into, next, depth),
             NodeKind::Template => return self.i32_interpolation(node, facts, into, next, depth),
             NodeKind::ValueReference => Action::Read {
@@ -5579,6 +5583,9 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 };
                 let descriptor = self.bool_deref_descriptor_slot(node, path)?;
                 Action::CopyThrough { descriptor, into }
+            }
+            NodeKind::Bracket if matches!(facts.data, Some(DataExpression::List { .. })) => {
+                return self.list_i32_literal(node, facts, into, next, depth);
             }
             NodeKind::Bracket => {
                 let into = into.ok_or(Stop::Pending(node))?;

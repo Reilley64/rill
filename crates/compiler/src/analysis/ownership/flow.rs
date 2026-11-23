@@ -2622,6 +2622,7 @@ pub(super) fn run<'a, 'g>(
                         return Err(Stop::Pending(node));
                     }
                     let width = slots[first].storage(first).len();
+                    let scalars = matches!(slots[into].cleanup, StorageCleanup::DisposeListI32(_));
                     budget.step(count * width)?;
                     budget.reserve(count)?;
                     let mut elements = Vec::with_capacity(count);
@@ -2631,12 +2632,24 @@ pub(super) fn run<'a, 'g>(
                     {
                         for slot in stage.iter_mut() {
                             initialized(slot, node)?;
-                            *slot = State::Moved(node);
+                            // A scalar stage is ended, as an equality ends its scratch.
+                            *slot = if scalars {
+                                State::Vacant
+                            } else {
+                                State::Moved(node)
+                            };
                         }
                         elements.push(local(first + index * width));
                     }
                     state[into] = State::Initialized(empty.clone());
-                    if width == 1 {
+                    if scalars {
+                        Operation::CommitListI32 {
+                            elements,
+                            into: local(into),
+                            backing,
+                            provider,
+                        }
+                    } else if width == 1 {
                         Operation::CommitListText {
                             elements,
                             into: local(into),
