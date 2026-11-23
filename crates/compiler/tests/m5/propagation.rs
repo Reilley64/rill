@@ -4,6 +4,8 @@ use super::*;
 mod exclusive_option_caller;
 #[path = "propagation/option_caller.rs"]
 mod option_caller;
+#[path = "propagation/result_text.rs"]
+mod result_text;
 
 #[test]
 fn owned_option_postfix_preserves_shared_text_backing() {
