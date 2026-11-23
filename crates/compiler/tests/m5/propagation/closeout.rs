@@ -122,8 +122,11 @@ fn wraps_after_rhs_has_no_graph_root_mir_only_because_of_the_retained_display_ed
                 max_entries: s.entries,
                 max_depth: s.max_depth,
             };
-            // Measured on this fixture, both modes: 203,035 / 7,345 / 6.
-            assert_eq!((s.work, s.entries, s.max_depth), (203_035, 7_345, 6));
+            // Measured on this fixture, both modes: 203,035 / 7,345 / 6. With
+            // the i32 equality source root (ri-785.9, metering rule 11, D2 (b))
+            // it is 203,351 / 7,479 / 6, and the old cap gives ResourceLimit.
+            assert_pre_equality_graph_cap(receipt, (203_035, 7_345, 6));
+            assert_eq!((s.work, s.entries, s.max_depth), (203_351, 7_479, 6));
             let again = analyze_ownership(receipt, exact);
             assert_eq!(again.completion(), GraphCompletion::Incomplete);
             for short in [
