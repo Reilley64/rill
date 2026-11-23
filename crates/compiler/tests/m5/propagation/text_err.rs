@@ -275,7 +275,7 @@ const fn stats(work: usize, entries: usize, max_depth: usize) -> Statistics {
 /// The last column is the whole-graph cap before the i32 equality source root
 /// (ri-785.9, metering rule 11).
 #[allow(clippy::type_complexity)]
-const CASES: [(&str, Outcome, Statistics, Statistics, (usize, usize, usize)); 23] = [
+const CASES: [(&str, Outcome, Statistics, Statistics, (usize, usize, usize)); 24] = [
     // Forwarding: bound, grouped operand, grouped postfix, alias, statement,
     // both known variants, the whole carrier, a grouped return, a scope and
     // a loop.
@@ -441,6 +441,18 @@ const CASES: [(&str, Outcome, Statistics, Statistics, (usize, usize, usize)); 23
         stats(4_481, 504, 4),
         stats(191_037, 4_856, 5),
         (190_721, 4_722, 4),
+    ),
+    // Review ci-uaa1 (ri-vgz.5 #2): a non-postfix `string` RHS that always
+    // returns. Rule 1: it is rejected after its RHS fact and grouping, before
+    // the retained goals, display and `?` token are charged (before that fix,
+    // 4,107/435/4 and graph 189,351/4,600/5). At a95e04e8 it stopped at its
+    // parameter (1,878/30/0).
+    (
+        "function label(value: string): string { return value; }\nfunction probe(input: Result<bool, string>.Err, source: Result<string, string>.Err, tail: string): Result<bool, string> { let _ = input ? (label(source?)); return Result.Ok(true); }",
+        Outcome::Blocked("(label(source?))"),
+        stats(4_095, 435, 4),
+        stats(189_339, 4_600, 5),
+        (189_023, 4_466, 4),
     ),
     (
         "function probe(input: Result<string, string>, tail: string): Result<bool, string> { let flag = input?; return Result.Ok(true); }",
