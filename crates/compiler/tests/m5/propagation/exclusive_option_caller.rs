@@ -2,6 +2,7 @@
 //! `Option<&mut bool>` moves the carrier and its descriptor across a checked
 //! ordinary relay, with no shared copy.
 use super::*;
+use compiler::analysis::typed::TypedCompletion;
 use compiler::analysis::{
     Statistics,
     ownership::{DependencyContract, GraphCompletion, Place, analyze_ownership},
@@ -504,6 +505,56 @@ function dead(): Option<bool> {
     ] {
         exclusive_relay_caller(test, name, caller, expect, target, graph, graph_completion);
     }
+}
+
+/// Review ci-uaa1 (ri-vgz.3 #3): the relayed descriptor carries no exact
+/// target, so a write through it is the open question. M4 issues no receipt
+/// for the write, so ownership never runs: the typed query stops `Incomplete`
+/// at the write with a pending `Storage` Result use (as RFC 0007 O1/O2, `ri-1up`).
+#[test]
+fn write_through_a_relayed_view_has_no_typed_receipt() {
+    let source = format!(
+        "{SIBLINGS}{}",
+        r#"
+function writeThrough(input: Option<&mut bool>): Option<bool> {
+    let view = forward(input)?;
+    *view = true;
+    return Option.Some(true);
+}
+"#
+    );
+    probe_report(
+        "propagation::exclusive_option_caller::write_through_a_relayed_view_has_no_typed_receipt",
+        &source,
+        |request, _, _| {
+            let graph = loader::load_installed(request.clone()).unwrap();
+            let (stats, exact, short) = pinned((328_076, 48_338, 12));
+            let typed = analyze_typed(&graph, exact);
+            assert_eq!(typed.completion(), TypedCompletion::Incomplete);
+            assert_eq!(typed.statistics(), stats);
+            assert!(typed.receipt().is_none());
+            let pending: Vec<_> = typed
+                .result_use()
+                .into_iter()
+                .flat_map(|uses| uses.pending())
+                .map(|p| {
+                    (
+                        format!("{:?}", p.blocker),
+                        p.site.span.bytes().escape_ascii().to_string(),
+                    )
+                })
+                .collect();
+            assert_eq!(
+                pending,
+                [("Storage".to_string(), "*view = true;".to_string())]
+            );
+            for cap in short {
+                let limited = analyze_typed(&graph, cap);
+                assert_eq!(limited.completion(), TypedCompletion::ResourceLimit);
+                assert!(limited.receipt().is_none());
+            }
+        },
+    );
 }
 
 /// The relay is admitted only at a postfix over an exclusive Boolean carrier:
