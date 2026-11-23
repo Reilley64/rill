@@ -135,6 +135,114 @@ fn pre_equality_graph_caps_give_resource_limit() {
     );
 }
 
+/// Owner decision of 2026-11-23 on review ci-uaa1 (O3): the base-matrix caps
+/// published at 68f3788, before the forwarding proof, are re-pinned in the
+/// manifest at today's values. Each old cap now gives `ResourceLimit` with no
+/// MIR and no finding. `None` is the whole graph; `infeasibleOuter` still
+/// reproduces its 68f3788 cap and is not listed.
+const BASE_MATRIX: [(&str, Option<&str>, (usize, usize, usize)); 7] = [
+    ("retaining-rc", None, (246818, 14458, 11)),
+    (
+        "retaining-rc",
+        Some("nestedGoodWithOwner"),
+        (12151, 3338, 6),
+    ),
+    ("retaining-rc", Some("nestedCaller"), (10348, 2397, 6)),
+    ("safe-rc", None, (199807, 6904, 11)),
+    ("safe-rc", Some("nestedGoodWithOwner"), (9679, 2102, 6)),
+    ("foreign-rc", None, (193281, 5176, 6)),
+    ("foreign-rc", Some("rejected"), (7463, 895, 6)),
+];
+
+/// The two roots that flipped from `Checked` to `SourceRejected` reach a
+/// callee that stores `&flag` through `slot` before a loop that can deliver
+/// cancellation: RFC 0007 applies exit checks to cancellation exits, "A planned
+/// later overwrite cannot excuse invalid outward state at a possible delivery
+/// point". The finding is the callee's `R0202`.
+#[test]
+fn base_matrix_caps_give_resource_limit() {
+    installed(
+        "legacy_caps::base_matrix_caps_give_resource_limit",
+        |request| {
+            let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/m5/legacy-caps");
+            let app = request.entry.parent().unwrap();
+            let mut failures = Vec::new();
+            for (fixture, subject, (max_work, max_entries, max_depth)) in BASE_MATRIX {
+                for stale in fs::read_dir(app).unwrap() {
+                    fs::remove_file(stale.unwrap().path()).unwrap();
+                }
+                for file in fs::read_dir(fixtures.join(fixture)).unwrap() {
+                    let file = file.unwrap();
+                    fs::copy(file.path(), app.join(file.file_name())).unwrap();
+                }
+                for test_mode in [false, true] {
+                    let graph = loader::load_installed(InstalledRequest {
+                        test_mode,
+                        ..request.clone()
+                    })
+                    .unwrap();
+                    let typed = analyze_typed(&graph, AnalysisLimits::default());
+                    let receipt = typed.receipt().unwrap();
+                    let old = AnalysisLimits {
+                        max_work,
+                        max_entries,
+                        max_depth,
+                    };
+                    let at = format!("{fixture} {subject:?} test_mode={test_mode} at {old:?}");
+                    let Some(name) = subject else {
+                        let report = analyze_ownership(&receipt, old);
+                        if report.completion() != GraphCompletion::ResourceLimit
+                            || report.roots().iter().any(|r| r.mir().is_some())
+                        {
+                            failures.push(format!("{at}: {:?}", report.completion()));
+                        }
+                        continue;
+                    };
+                    let module = graph
+                        .modules()
+                        .iter()
+                        .find(|m| m.key.origin == Origin::Application && m.key.path == "main.rill")
+                        .unwrap();
+                    let id = &module
+                        .declarations
+                        .iter()
+                        .find(|d| d.name.as_deref() == Some(name))
+                        .unwrap()
+                        .id;
+                    let report =
+                        lower_root(&receipt, module, BodyOwner::Declaration(id), old).unwrap();
+                    if report.completion() != Completion::ResourceLimit
+                        || report.mir().is_some()
+                        || !report.findings().is_empty()
+                    {
+                        failures.push(format!("{at}: {:?}", report.completion()));
+                    }
+                    if matches!(name, "nestedCaller" | "rejected") {
+                        let now = lower_root(
+                            &receipt,
+                            module,
+                            BodyOwner::Declaration(id),
+                            AnalysisLimits::default(),
+                        )
+                        .unwrap();
+                        let found = now
+                            .findings()
+                            .iter()
+                            .map(|f| (f.code(), f.site.span.bytes(), f.related.span.bytes()))
+                            .collect::<Vec<_>>();
+                        if now.completion() != Completion::SourceRejected
+                            || found != [("R0202", &b"*slot = &flag;"[..], &b"&flag"[..])]
+                        {
+                            failures.push(format!("{at}: now {:?} {found:?}", now.completion()));
+                        }
+                    }
+                }
+            }
+            assert!(failures.is_empty(), "{failures:#?}");
+        },
+    );
+}
+
 struct Row<'a> {
     fixture: &'a str,
     subject: &'a str,
