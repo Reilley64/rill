@@ -40,7 +40,7 @@ Depth stays 5 in both. It is set by the i32 equality root (ri-785.9), not by the
 
 ## Local checks at this branch
 
-Logs in `~/.t3/evidence/rill/m5-build-2026-11-22/ci-1cxp/`: `check-iteration.log` (41 passed), `check-cancellation::.log` (15), `check-disposers::.log` (11), `check-records::.log` (16), `check-graph::.log` (41, including `graph::inventory`), `check-legacy_caps.log` (2), `check-rfc_cases.log` (27), `check-roots::.log` (6); `fmt.log`; `clippy-compiler.log` (`-p compiler --all-targets -D warnings`). The full M5 binary runs in hosted CI only.
+Run after merging the base tip `247c2f26` (ri-w0g, ri-8qlm). Logs in `~/.t3/evidence/rill/m5-build-2026-11-22/ci-1cxp/`, prefix `merged-`: `disposers::` (11 passed), `records::` (16), `graph::` (41, including `graph::inventory`), `legacy_caps` (2), `rfc_cases` (31), `roots::` (6), `iteration` (41), `cancellation::` (15). Also `m4_8_scoped_join_caps` and `m4_8_match_boolean_snapshots` (1 passed each); `cargo fmt --all -- --check`; clippy `-p compiler --all-targets -D warnings`; `mise run check:docs`; `git diff --check`. Before the merge, the same filters passed at `21f1260f` (logs `check-*.log`). The full M5 binary runs in hosted CI only.
 
 ## Not established
 
