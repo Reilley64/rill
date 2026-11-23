@@ -457,6 +457,15 @@ pub enum Operation<'g> {
         backing: CollectionRepresentation<'g>,
         provider: CollectionArtifact<'g>,
     },
+    /// Move the initialized i32 stages in written order into a new backing
+    /// using the linked `List::from_elements`. Each stage ends; no partial
+    /// List is published.
+    CommitListI32 {
+        elements: Vec<Place<'g>>,
+        into: Place<'g>,
+        backing: CollectionRepresentation<'g>,
+        provider: CollectionArtifact<'g>,
+    },
     /// Consume the List and initialize the sole owner of its unyielded slots.
     OpenOwnedListI32 {
         source: Place<'g>,
@@ -2279,8 +2288,8 @@ enum Action<'g> {
         forwarding_possible: bool,
     },
     Init(Slot),
-    /// `count` equal-width stage regions starting at `first`: string leaves
-    /// or whole records of string fields.
+    /// `count` equal-width stage regions starting at `first`: string leaves,
+    /// whole records of string fields, or i32 scalars for a `List<i32>`.
     CommitList {
         first: Slot,
         count: usize,

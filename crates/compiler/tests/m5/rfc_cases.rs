@@ -965,7 +965,7 @@ expect joinedOrder();
 "#,
     outcome: Outcome::Receipt {
         typed_stats: (434255, 50090, 12),
-        graph: (GraphCompletion::Incomplete, (225554, 25180, 10)),
+        graph: (GraphCompletion::Incomplete, (226867, 25858, 10)),
         pre_equality_graph: (225238, 25046, 10),
         roots: &[
             Root {
@@ -976,19 +976,15 @@ expect joinedOrder();
             },
             Root {
                 name: "joinedOrder",
-                want: Want::Incomplete {
-                    blocker: r####"pair[0] == 13i32 && pair[1] == 29i32"####,
-                },
+                want: Want::Checked,
                 graph: None,
-                stats: (2392, 139, 3),
+                stats: (36060, 21717, 10),
             },
             Root {
                 name: "expect",
-                want: Want::Incomplete {
-                    blocker: r####"pair[0] == 13i32 && pair[1] == 29i32"####,
-                },
+                want: Want::Checked,
                 graph: None,
-                stats: (4431, 219, 3),
+                stats: (38099, 21797, 10),
             },
         ],
     },
