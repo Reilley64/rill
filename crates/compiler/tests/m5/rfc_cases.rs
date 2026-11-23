@@ -15,7 +15,7 @@
 //! These are compiler judgments over MIR, not Rill execution.
 use super::*;
 use compiler::analysis::Statistics;
-use compiler::analysis::ownership::{GraphCompletion, analyze_ownership, lower_root};
+use compiler::analysis::ownership::{GraphCompletion, Place, analyze_ownership, lower_root};
 use compiler::analysis::scalars::{BodyOwner, Site};
 use compiler::analysis::typed::TypedCompletion;
 use compiler::loader::DeclarationKind;
@@ -1107,15 +1107,13 @@ function ordered(seed: &string): void {
 "#,
     outcome: Outcome::Receipt {
         typed_stats: (326418, 47921, 12),
-        graph: (GraphCompletion::Incomplete, (187190, 4193, 5)),
+        graph: (GraphCompletion::Incomplete, (189320, 4794, 5)),
         pre_equality_graph: (186874, 4059, 3),
         roots: &[Root {
             name: "ordered",
-            want: Want::Incomplete {
-                blocker: r####"holder"####,
-            },
+            want: Want::Checked,
             graph: None,
-            stats: (2250, 93, 1),
+            stats: (6121, 711, 5),
         }],
     },
 }];
@@ -1602,10 +1600,218 @@ fn o18_custom_disposer_rejects_field_extraction() {
 }
 
 #[test]
-fn o19_cleanup_order_holder_is_incomplete_at_its_construction() {
+fn o19_cleanup_order_disposes_the_holder_before_its_source() {
     run(
-        "rfc_cases::o19_cleanup_order_holder_is_incomplete_at_its_construction",
+        "rfc_cases::o19_cleanup_order_disposes_the_holder_before_its_source",
         O19,
+    );
+}
+
+/// A place as written, with its field when it has one. The compiler-only
+/// epilogue that receives a disposer's remaining fields is `epilogue`.
+fn place_text(place: &Place<'_>, epilogue: Option<usize>) -> String {
+    let root = if Some(place.root.node) == epilogue {
+        "epilogue".to_string()
+    } else {
+        String::from_utf8_lossy(place.root.span.bytes()).into_owned()
+    };
+    match place.field() {
+        Some(field) => format!("{root}.{}", field.name.as_deref().unwrap()),
+        None => root,
+    }
+}
+
+/// The whole ordered action list of a straight path, one `(kind, place)` per
+/// action, with no filtering.
+fn o19_sequence(mir: &Mir<'_>) -> Vec<(&'static str, String)> {
+    let blocks = straight_blocks(mir, mir.entry);
+    assert!(matches!(
+        blocks.last().unwrap().terminator,
+        Terminator::Return
+    ));
+    let mut epilogue = None;
+    let mut events = Vec::new();
+    for block in blocks {
+        let text = |place: &Place<'_>| place_text(place, epilogue);
+        match &block.operation {
+            Operation::None => {}
+            Operation::Initialize(place) => events.push(("init", text(place))),
+            Operation::Copy { from, into } => events.push((
+                "copy",
+                match into {
+                    Some(into) => format!("{} -> {}", text(from), text(into)),
+                    None => text(from),
+                },
+            )),
+            Operation::Borrow {
+                source,
+                holder,
+                exclusive: false,
+            } => events.push(("borrow", format!("{} -> {}", text(source), text(holder)))),
+            Operation::Install { target, incoming } => {
+                events.push(("install", format!("{} -> {}", text(incoming), text(target))))
+            }
+            Operation::Cleanup(actions) => {
+                for action in actions {
+                    if let Obligation::DeferDisposerFields { into, .. } = action {
+                        epilogue = Some(into.root.node);
+                    }
+                    let text = |place: &Place<'_>| place_text(place, epilogue);
+                    events.push(match action {
+                        Obligation::EndStorage(place) => ("end", text(place)),
+                        Obligation::Drop(place) => ("drop", text(place)),
+                        Obligation::InvokeDisposer { operand, .. } => ("disposer", text(operand)),
+                        Obligation::DeferDisposerFields { from, into } => {
+                            ("defer", format!("{} -> {}", text(from), text(into)))
+                        }
+                        other => panic!("unexpected cleanup {other:?}"),
+                    });
+                }
+            }
+            other => panic!("unexpected operation {other:?}"),
+        }
+    }
+    events
+}
+
+/// RFC 0007 O19 (ri-kdi): the replaced holder's disposer runs before the new
+/// value is installed, and at the end of the scope the holder's disposer,
+/// which reads `view`, runs before `source` is dropped. Targeted query and
+/// ordinary graph root, in both load modes.
+#[test]
+fn o19_cleanup_sequence_disposes_the_holder_before_drop_source() {
+    installed(
+        "rfc_cases::o19_cleanup_sequence_disposes_the_holder_before_drop_source",
+        |request| {
+            fs::write(&request.entry, format!("{IMPORTS}\n{}", O19[0].text)).unwrap();
+            let expected: Vec<(&str, String)> = [
+                ("copy", "seed: &string -> holder.view"),
+                ("init", "holder"),
+                ("init", "source"),
+                ("borrow", "source -> Holder { view: &source }.view"),
+                ("init", "Holder { view: &source }"),
+                // The replaced value, before the new one is installed.
+                ("disposer", "holder"),
+                ("install", "Holder { view: &source } -> holder"),
+                // The dependent holder before the later-declared source.
+                ("disposer", "holder"),
+                ("drop", "source"),
+                ("end", "seed: &string"),
+            ]
+            .into_iter()
+            .map(|(kind, place)| (kind, place.to_string()))
+            .collect();
+            // The active disposer reads `view` from its consumed operand,
+            // then ends the remaining fields it did not move.
+            let active: Vec<(&str, String)> = [
+                ("copy", "value: Holder.view -> seen"),
+                ("end", "seen"),
+                ("defer", "value: Holder -> epilogue"),
+                ("end", "epilogue.view"),
+                ("end", "epilogue"),
+            ]
+            .into_iter()
+            .map(|(kind, place)| (kind, place.to_string()))
+            .collect();
+            for test_mode in [false, true] {
+                let request = InstalledRequest {
+                    test_mode,
+                    ..request.clone()
+                };
+                let graph = loader::load_installed(request).unwrap();
+                let typed = analyze_typed(&graph, AnalysisLimits::default());
+                let receipt = typed.receipt().unwrap();
+                let module = graph
+                    .modules()
+                    .iter()
+                    .find(|m| m.key.origin == Origin::Application && m.key.path == "main.rill")
+                    .unwrap();
+                let find = |kind, name: Option<&str>| {
+                    module
+                        .declarations
+                        .iter()
+                        .find(|d| {
+                            d.id.kind == kind && (name.is_none() || d.name.as_deref() == name)
+                        })
+                        .unwrap()
+                };
+                let ordered = find(DeclarationKind::Function, Some("ordered"));
+                let release = find(DeclarationKind::Implementation, None);
+                let targeted =
+                    lower_body(&receipt, module, &ordered.id, AnalysisLimits::default()).unwrap();
+                assert_eq!(targeted.completion(), Completion::Checked);
+                let mir = targeted.mir().unwrap();
+                assert_eq!(o19_sequence(mir), expected, "test_mode {test_mode}");
+                let disposer = mir.disposer(&release.id).unwrap();
+                assert_eq!(o19_sequence(disposer), active, "test_mode {test_mode}");
+
+                let report = analyze_ownership(&receipt, AnalysisLimits::default());
+                let root = report
+                    .roots()
+                    .iter()
+                    .find(|r| r.site().module == &module.key && r.site().node == ordered.node)
+                    .unwrap();
+                assert_eq!(root.ordinary_completion(), Completion::Checked);
+                assert_eq!(
+                    o19_sequence(root.ordinary_mir().unwrap()),
+                    expected,
+                    "test_mode {test_mode}"
+                );
+                let [frame] = report.active_disposers() else {
+                    panic!("one active disposer, test_mode {test_mode}");
+                };
+                assert_eq!(frame.site().node, release.node);
+                assert_eq!(frame.ordinary_completion(), Completion::Checked);
+                assert_eq!(
+                    o19_sequence(frame.ordinary_mir().unwrap()),
+                    active,
+                    "test_mode {test_mode}"
+                );
+            }
+        },
+    );
+}
+
+/// Metering rule 11, ticket's mandated flip (ri-kdi): admitting a reference
+/// member in a record with a custom disposer moves O19 from `Incomplete` at
+/// `holder` (2,250/93/1 targeted, 187,190/4,193/5 graph) to `Checked`. The
+/// old caps now give `ResourceLimit`; the row above holds the new caps and
+/// `m5-acceptance/ri-kdi.md` the reason.
+#[test]
+fn o19_pre_admission_caps_now_give_resource_limit() {
+    installed(
+        "rfc_cases::o19_pre_admission_caps_now_give_resource_limit",
+        |request| {
+            fs::write(&request.entry, format!("{IMPORTS}\n{}", O19[0].text)).unwrap();
+            for test_mode in [false, true] {
+                let request = InstalledRequest {
+                    test_mode,
+                    ..request.clone()
+                };
+                let graph = loader::load_installed(request).unwrap();
+                let typed = analyze_typed(&graph, AnalysisLimits::default());
+                let receipt = typed.receipt().unwrap();
+                let module = graph
+                    .modules()
+                    .iter()
+                    .find(|m| m.key.origin == Origin::Application && m.key.path == "main.rill")
+                    .unwrap();
+                let ordered = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some("ordered"))
+                    .unwrap();
+                let (old, _) = limits(statistics((2250, 93, 1)));
+                let limited = lower_body(&receipt, module, &ordered.id, old).unwrap();
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none() && limited.findings().is_empty());
+                let (old, _) = limits(statistics((187190, 4193, 5)));
+                assert_eq!(
+                    analyze_ownership(&receipt, old).completion(),
+                    GraphCompletion::ResourceLimit
+                );
+            }
+        },
     );
 }
 
@@ -1672,5 +1878,129 @@ fn o24_scoped_children_keep_caller_sources_and_native_has_no_source_form() {
     run(
         "rfc_cases::o24_scoped_children_keep_caller_sources_and_native_has_no_source_form",
         O24,
+    );
+}
+
+/// O19's neighbours (ri-kdi). A holder's disposer reads its reference until
+/// the holder's own cleanup, so a source that ends first, in a nested scope or
+/// through an explicit `dispose`, is rejected (RFC 0007: cleanup does not
+/// extend a source from an earlier-ending nested scope). Grouped and
+/// loop-wrapped forms check. A custom-disposer record with an exclusive or a
+/// two-level reference field stays unsupported, at the caps measured at the
+/// parent revision 7002855e (metering rule 2).
+const O19_NEIGHBOURS: &str = r#"
+import std::core::dispose as release;
+type Holder = { view: &string; }
+implement release(value: Holder): void { let seen = value.view; }
+type Exclusive = { view: &mut string; }
+implement release(value: Exclusive): void {}
+type Deep = { view: &&string; }
+implement release(value: Deep): void {}
+function scoped(seed: &string): void {
+  let mut holder = Holder { view: seed };
+  if (true) { let source = "inner"; holder = Holder { view: &source }; }
+}
+function early(seed: &string): void {
+  let mut holder = Holder { view: seed };
+  let source = "later";
+  holder = Holder { view: &source };
+  dispose(source);
+}
+function grouped(seed: &string): void {
+  let mut holder = (Holder { view: (seed) });
+  let source = "later";
+  holder = (Holder { view: (&source) });
+}
+function looped(seed: &string, flag: bool): void {
+  let mut holder = Holder { view: seed };
+  let source = "later";
+  while (flag) { holder = Holder { view: &source }; }
+}
+function exclusive(seed: string): void {
+  let mut source = seed;
+  let holder = Exclusive { view: &mut source };
+}
+function deep(seed: &string): void {
+  let holder = Deep { view: &seed };
+}
+"#;
+
+#[test]
+fn o19_neighbours_reject_an_earlier_ending_source() {
+    installed(
+        "rfc_cases::o19_neighbours_reject_an_earlier_ending_source",
+        |request| {
+            fs::write(&request.entry, format!("{IMPORTS}\n{O19_NEIGHBOURS}")).unwrap();
+            for test_mode in [false, true] {
+                let request = InstalledRequest {
+                    test_mode,
+                    ..request.clone()
+                };
+                let graph = loader::load_installed(request).unwrap();
+                let typed = analyze_typed(&graph, AnalysisLimits::default());
+                assert_eq!(typed.completion(), TypedCompletion::Checked);
+                let module = graph
+                    .modules()
+                    .iter()
+                    .find(|m| m.key.origin == Origin::Application && m.key.path == "main.rill")
+                    .unwrap();
+                check_receipt(
+                    &format!("test_mode {test_mode}"),
+                    &typed,
+                    module,
+                    (GraphCompletion::SourceRejected, (201497, 6580, 7)),
+                    &[
+                        Root {
+                            name: "scoped",
+                            want: Want::Rejected {
+                                code: "R0203",
+                                site: r####"{ let source = \"inner\"; holder = Holder { view: &source }; }"####,
+                                related: r####"&source"####,
+                            },
+                            graph: None,
+                            stats: (3399, 541, 7),
+                        },
+                        Root {
+                            name: "early",
+                            want: Want::Rejected {
+                                code: "R0203",
+                                site: r####"dispose(source)"####,
+                                related: r####"&source"####,
+                            },
+                            graph: None,
+                            stats: (3384, 522, 5),
+                        },
+                        Root {
+                            name: "grouped",
+                            want: Want::Checked,
+                            graph: None,
+                            stats: (6555, 897, 7),
+                        },
+                        Root {
+                            name: "looped",
+                            want: Want::Checked,
+                            graph: None,
+                            stats: (7086, 1138, 7),
+                        },
+                        Root {
+                            name: "exclusive",
+                            want: Want::Incomplete {
+                                blocker: r####"holder"####,
+                            },
+                            graph: None,
+                            stats: (2444, 185, 1),
+                        },
+                        Root {
+                            name: "deep",
+                            want: Want::Incomplete {
+                                blocker: r####"holder"####,
+                            },
+                            graph: None,
+                            stats: (2440, 182, 1),
+                        },
+                    ],
+                );
+            }
+        },
     );
 }

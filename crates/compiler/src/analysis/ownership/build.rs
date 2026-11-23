@@ -544,6 +544,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             return_contract,
             callable_frame: None,
             proved_variant_cleanup: Vec::new(),
+            observing_disposers: Vec::new(),
             budget,
         }
     }
@@ -1503,9 +1504,11 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         'g: 't,
     {
         let root = self.aggregate_root(node, custom_disposer, members.len())?;
+        let mut observed = false;
         for (projection, ty) in members {
             self.budget.step(1)?;
-            let reference_member = custom_disposer.is_none() && shared_primitive_reference(ty);
+            let reference_member = shared_primitive_reference(ty);
+            observed |= reference_member;
             let cleanup = if owns_text(ty) {
                 StorageCleanup::Drop
             } else if reference_member || matches!(ty.as_ref(), TypeTerm::Primitive(_)) {
@@ -1533,6 +1536,12 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 moves,
                 cleanup,
             });
+        }
+        // A custom disposer may read these references when it runs, so
+        // liveness keeps their sources until the record's cleanup.
+        if observed && custom_disposer.is_some() {
+            self.budget.reserve(1)?;
+            self.observing_disposers.push(root);
         }
         Ok(root)
     }
