@@ -1,5 +1,7 @@
 use super::*;
 
+#[path = "propagation/exclusive_option_caller.rs"]
+mod exclusive_option_caller;
 #[path = "propagation/option_caller.rs"]
 mod option_caller;
 #[path = "propagation/result_text.rs"]
@@ -666,10 +668,6 @@ fn exclusive_option_postfix_does_not_prove_call_or_slot_contracts() {
         function caller(input: Option<&mut bool>): Option<&mut bool> {
             return forward(input);
         }
-        function callerPostfix(input: Option<&mut bool>): Option<&mut bool> {
-            let view = forward(input)?;
-            return Option.Some(view);
-        }
         function otherPayload(input: Option<&mut i32>): Option<&mut i32> {
             let view = input?;
             return Option.Some(view);
@@ -678,7 +676,6 @@ fn exclusive_option_postfix_does_not_prove_call_or_slot_contracts() {
         |_, module, receipt| {
             for (name, blocked) in [
                 ("caller", b"forward(input)".as_slice()),
-                ("callerPostfix", b"forward(input)?".as_slice()),
                 ("otherPayload", b"input: Option<&mut i32>".as_slice()),
             ] {
                 let function = module

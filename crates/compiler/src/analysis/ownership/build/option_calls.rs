@@ -1,8 +1,9 @@
-//! Ordinary postfix calls returning a canonical shared text carrier.
+//! Ordinary postfix calls relaying a canonical reference carrier: a shared
+//! text carrier is copied into the call, an exclusive Boolean one is moved.
 use super::*;
 
 #[derive(Clone, Copy)]
-pub(super) struct SharedOptionCall<'a, 'g> {
+pub(super) struct OptionRelayCall<'a, 'g> {
     header: &'a DeclarationFacts<'g>,
     site: NodeId,
     argument: NodeId,
@@ -11,13 +12,13 @@ pub(super) struct SharedOptionCall<'a, 'g> {
 }
 
 impl<'a, 'g> Build<'a, 'g, '_> {
-    pub(super) fn check_shared_option_call(
+    pub(super) fn check_option_relay_call(
         &mut self,
         postfix: NodeId,
         site: NodeId,
         result: &Type<'g>,
         depth: usize,
-    ) -> ResultOf<SharedOptionCall<'a, 'g>> {
+    ) -> ResultOf<OptionRelayCall<'a, 'g>> {
         let pending = Stop::Pending(postfix);
         let facts = self.normal_value(site)?;
         let call = facts.call.as_deref().ok_or_else(|| pending.clone())?;
@@ -86,7 +87,7 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         if parent != result {
             return Err(pending);
         }
-        Ok(SharedOptionCall {
+        Ok(OptionRelayCall {
             header,
             site,
             argument,
@@ -95,9 +96,9 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         })
     }
 
-    pub(super) fn stage_shared_option_call(
+    pub(super) fn stage_option_relay_call(
         &mut self,
-        call: SharedOptionCall<'a, 'g>,
+        call: OptionRelayCall<'a, 'g>,
         into: Slot,
         next: Pc,
     ) -> ResultOf<Pc> {
@@ -109,7 +110,7 @@ impl<'a, 'g> Build<'a, 'g, '_> {
             forwarding_prefix: None,
             args: vec![argument],
             into: Some(into),
-            result: CallResult::RetainsSharedOption(call.header),
+            result: CallResult::RetainsOptionCarrier(call.header),
             destination: None,
         });
         let invoke = self.emit(call.site, Action::Call(index), Edges::Next(next))?;
