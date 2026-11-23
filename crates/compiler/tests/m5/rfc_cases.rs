@@ -695,12 +695,16 @@ function extract(users: List<&User>): Option<&User> {
   return Option.None;
 }
 "#,
-        outcome: Outcome::Typed {
-            completion: TypedCompletion::Incomplete,
-            signals: &[
-                r####"pending Storage @ for (let user of users) { return Option.Some(user); }"####,
-            ],
-            stats: (323289, 47677, 12),
+        outcome: Outcome::Receipt {
+            typed_stats: (324131, 47845, 12),
+            graph: (GraphCompletion::Incomplete, (188037, 4612, 6)),
+            pre_equality_graph: (187721, 4478, 3),
+            roots: &[Root {
+                name: "extract",
+                want: Want::Checked,
+                graph: None,
+                stats: (3539, 513, 6),
+            }],
         },
     },
     Source {
