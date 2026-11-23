@@ -173,7 +173,19 @@ impl<'a, 'g> Check<'a, 'g> {
         }
         if let Some(iteration) = iteration
             && iteration.traversal == Some(crate::analysis::typed::ListTraversal::Owned)
-            && matches!(iteration.yielded.as_ref(), TypeTerm::Primitive(p) if p.name() != "never")
+            && match iteration.yielded.as_ref() {
+                TypeTerm::Primitive(p) => p.name() != "never",
+                // A shared reference to an application record owes no Result
+                // and holds no cleanup.
+                TypeTerm::Reference {
+                    mutable: false,
+                    referent,
+                } => matches!(referent.as_ref(), TypeTerm::Nominal { declaration, arguments }
+                    if declaration.kind == DeclarationKind::Record
+                        && declaration.module.origin == crate::loader::Origin::Application
+                        && arguments.is_empty()),
+                _ => false,
+            }
             && self
                 .facts(iteration.pattern)?
                 .is_some_and(|fact| matches!(fact.kind, NodeFactKind::Pattern(_)))
