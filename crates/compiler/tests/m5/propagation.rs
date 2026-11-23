@@ -1,5 +1,7 @@
 use super::*;
 
+#[path = "propagation/closeout.rs"]
+mod closeout;
 #[path = "propagation/exclusive_option_caller.rs"]
 mod exclusive_option_caller;
 #[path = "propagation/option_caller.rs"]
