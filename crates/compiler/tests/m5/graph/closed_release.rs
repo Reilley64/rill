@@ -304,10 +304,13 @@ fn implicit_guard_release_closes_the_ordinary_root() {
             // Rule 11: 185,222 / 3,993 / 3 (Incomplete, pinned by c668ad4)
             // becomes 185,246 / 3,993 / 3 (Checked root). All 24 work is the
             // `implicit` root's scope-exit verification; see the ledger.
+            // Rule 11 again (ri-785.9): the i32 equality source root adds 316
+            // work and 134 entries and sets depth 5, so 185,246 / 3,993 / 3
+            // becomes 185,562 / 4,127 / 5 and gives ResourceLimit below.
             let exact = AnalysisLimits {
-                max_work: 185246,
-                max_entries: 3993,
-                max_depth: 3,
+                max_work: 185562,
+                max_entries: 4127,
+                max_depth: 5,
             };
             assert_eq!(
                 report.statistics(),
@@ -323,12 +326,17 @@ fn implicit_guard_release_closes_the_ordinary_root() {
                 root(&replay, b"function implicit").ordinary_completion(),
                 Completion::Checked
             );
-            let old = AnalysisLimits {
-                max_work: 185222,
-                ..exact
-            };
             for short in [
-                old,
+                AnalysisLimits {
+                    max_work: 185222,
+                    max_entries: 3993,
+                    max_depth: 3,
+                },
+                AnalysisLimits {
+                    max_work: 185246,
+                    max_entries: 3993,
+                    max_depth: 3,
+                },
                 AnalysisLimits {
                     max_work: exact.max_work - 1,
                     ..exact
@@ -378,10 +386,13 @@ fn implicit_guard_binding_release_keeps_its_parent_caps() {
                     max_depth: 3
                 }
             );
+            // Rule 11 (ri-785.9): the parent graph cap 185,441 / 4,038 / 3 gives
+            // ResourceLimit; the i32 equality source root adds 316 work and
+            // 134 entries and sets depth 5.
             let exact = AnalysisLimits {
-                max_work: 185441,
-                max_entries: 4038,
-                max_depth: 3,
+                max_work: 185757,
+                max_entries: 4172,
+                max_depth: 5,
             };
             assert_eq!(
                 report.statistics(),
@@ -408,6 +419,11 @@ fn implicit_guard_binding_release_keeps_its_parent_caps() {
                 );
             }
             for short in [
+                AnalysisLimits {
+                    max_work: 185441,
+                    max_entries: 4038,
+                    max_depth: 3,
+                },
                 AnalysisLimits {
                     max_work: exact.max_work - 1,
                     ..exact

@@ -405,7 +405,9 @@ fn relay_caller_keeps_caps(
     call: &str,
     expected: Completion,
     target: (usize, usize, usize),
-    graph: (usize, usize, usize),
+    // The whole graph now, then before the i32 equality source root
+    // (ri-785.9, metering rule 11), which must give ResourceLimit.
+    graph: [(usize, usize, usize); 2],
 ) {
     let payload = if name == "callerExclusive" {
         "&mut bool"
@@ -464,6 +466,12 @@ fn relay_caller_keeps_caps(
             assert!(limited.mir().is_none() && limited.findings().is_empty());
         }
 
+        let [graph, pre_equality] = graph;
+        assert_eq!(
+            analyze_ownership(receipt, pinned(pre_equality).1).completion(),
+            GraphCompletion::ResourceLimit,
+            "{name}"
+        );
         let (stats, exact, short) = pinned(graph);
         let report = analyze_ownership(receipt, exact);
         assert_eq!(report.completion(), GraphCompletion::Incomplete, "{name}");
@@ -514,31 +522,31 @@ fn unsupported_option_relay_siblings_keep_parent_caps() {
             "callerNonmonomorphic",
             "generic(input)",
             (3089, 284, 4),
-            (195691, 5792, 4),
+            [(196007, 5926, 5), (195691, 5792, 4)],
         ),
         (
             "callerComputed",
             "relay(((relay(input))))",
             (3097, 288, 4),
-            (195939, 5796, 4),
+            [(196255, 5930, 5), (195939, 5796, 4)],
         ),
         (
             "callerPipe",
             "input |> relay(_)",
             (3087, 283, 4),
-            (195629, 5791, 4),
+            [(195945, 5925, 5), (195629, 5791, 4)],
         ),
         (
             "callerGroupPipe",
             "(input |> relay(_))",
             (3092, 285, 4),
-            (195754, 5793, 4),
+            [(196070, 5927, 5), (195754, 5793, 4)],
         ),
         (
             "callerMultiple",
             "choose(input, input)",
             (3091, 285, 4),
-            (195753, 5793, 4),
+            [(196069, 5927, 5), (195753, 5793, 4)],
         ),
     ] {
         relay_caller_keeps_caps(test, name, call, Completion::Incomplete, target, graph);
@@ -558,19 +566,19 @@ fn admitted_option_relay_callers_keep_their_caps() {
             "callerDirect",
             "relay(input)",
             (9516, 1677, 4),
-            (198554, 6624, 4),
+            [(198870, 6758, 5), (198554, 6624, 4)],
         ),
         (
             "callerGroup",
             "((relay(((input)))))",
             (9536, 1685, 8),
-            (198806, 6628, 8),
+            [(199122, 6762, 8), (198806, 6628, 8)],
         ),
         (
             "callerExclusive",
             "relayExclusive(input)",
             (9466, 1677, 4),
-            (198521, 6624, 4),
+            [(198837, 6758, 5), (198521, 6624, 4)],
         ),
     ] {
         relay_caller_keeps_caps(test, name, call, Completion::Checked, target, graph);

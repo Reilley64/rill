@@ -26,7 +26,21 @@ fn ordinary_only_list_loops_keep_the_pre_delivery_caps() {
                 max_entries,
                 max_depth,
             };
-            let graph = analyze_ownership(receipt, limits(191781, 4867, 6));
+            // Metering rule 11 (ri-785.9): the whole-graph cap was
+            // 191,781/4,867/6 until the i32 equality source root (+316/+134).
+            assert_eq!(
+                analyze_ownership(receipt, limits(191781, 4867, 6)).completion(),
+                compiler::analysis::ownership::GraphCompletion::ResourceLimit
+            );
+            let graph = analyze_ownership(receipt, limits(192097, 5001, 6));
+            assert_eq!(
+                graph.statistics(),
+                compiler::analysis::Statistics {
+                    work: 192097,
+                    entries: 5001,
+                    max_depth: 6
+                }
+            );
             for (name, work, entries, depth) in [
                 ("entryOnly", 2197, 175, 6),
                 ("across", 4353, 344, 5),

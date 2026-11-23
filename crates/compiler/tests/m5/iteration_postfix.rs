@@ -313,10 +313,11 @@ fn installed_postfix_keeps_unadmitted_loop_shapes_pending() {
                 assert!(report.receipt().is_none());
             }
 
+            assert_pre_equality_graph_cap(receipt, (191_179, 4_263, 4));
             let graph_stats = Statistics {
-                work: 191_179,
-                entries: 4_263,
-                max_depth: 4,
+                work: 191_495,
+                entries: 4_397,
+                max_depth: 5,
             };
             let (exact, short) = limits(graph_stats);
             let graph = analyze_ownership(receipt, exact);
@@ -389,10 +390,11 @@ function siblingPostfix(xs: List<string>, unrelated: List<string>, gate: Option<
 }
 "#,
         |_, module, receipt| {
+            assert_pre_equality_graph_cap(receipt, (187_799, 4_016, 3));
             let graph_stats = Statistics {
-                work: 187_799,
-                entries: 4_016,
-                max_depth: 3,
+                work: 188_115,
+                entries: 4_150,
+                max_depth: 5,
             };
             let (exact, short) = limits(graph_stats);
             let graph = analyze_ownership(receipt, exact);

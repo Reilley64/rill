@@ -308,10 +308,11 @@ fn unrelated_and_unadmitted_option_lists_keep_the_first_blocker() {
                     max_depth: 12
                 }
             );
+            assert_pre_equality_graph_cap(receipt, (189_508, 4_050, 3));
             let stats = Statistics {
-                work: 189_508,
-                entries: 4_050,
-                max_depth: 3,
+                work: 189_824,
+                entries: 4_184,
+                max_depth: 5,
             };
             let (exact, short) = limits(stats);
             let graph = analyze_ownership(receipt, exact);
@@ -401,7 +402,16 @@ function dead(xs: List<Option<string>>): Option<bool> {
 /// of the yielded `Option<string>` cursor. `Some(second read)` expects the
 /// independent `R0200`; `None` expects the source formal to stay pending,
 /// which means the typed result-use check did not stamp `xs`.
-const REVIEW_COUNTEREXAMPLES: [(&str, Option<&str>, Statistics, Statistics); 5] = [
+/// The last column is the whole-graph cap before the i32 equality source root
+/// (ri-785.9, metering rule 11).
+#[allow(clippy::type_complexity)]
+const REVIEW_COUNTEREXAMPLES: [(
+    &str,
+    Option<&str>,
+    Statistics,
+    Statistics,
+    (usize, usize, usize),
+); 5] = [
     // 3987757f: an ordinary body that borrows the carrier. A stamped `xs`
     // moved the blocker to `&item` at 4,215/429/6.
     (
@@ -413,10 +423,11 @@ const REVIEW_COUNTEREXAMPLES: [(&str, Option<&str>, Statistics, Statistics); 5] 
             max_depth: 0,
         },
         Statistics {
-            work: 185_969,
-            entries: 3_980,
-            max_depth: 3,
+            work: 186_285,
+            entries: 4_114,
+            max_depth: 5,
         },
+        (185_969, 3_980, 3),
     ),
     // 3987757f: an unused `List<string>` sibling. A stamped `xs` moved the
     // blocker to `spare` at 3,048/214/3.
@@ -429,10 +440,11 @@ const REVIEW_COUNTEREXAMPLES: [(&str, Option<&str>, Statistics, Statistics); 5] 
             max_depth: 0,
         },
         Statistics {
-            work: 186_160,
-            entries: 3_984,
-            max_depth: 3,
+            work: 186_476,
+            entries: 4_118,
+            max_depth: 5,
         },
+        (186_160, 3_984, 3),
     ),
     // ed35f525: the postfix fixture with an unsupported `List<bool>` sibling.
     (
@@ -444,10 +456,11 @@ const REVIEW_COUNTEREXAMPLES: [(&str, Option<&str>, Statistics, Statistics); 5] 
             max_depth: 0,
         },
         Statistics {
-            work: 186_222,
-            entries: 3_985,
-            max_depth: 3,
+            work: 186_538,
+            entries: 4_119,
+            max_depth: 5,
         },
+        (186_222, 3_985, 3),
     ),
     // ed35f525: an ordinary body keeps its reached move finding.
     (
@@ -459,10 +472,11 @@ const REVIEW_COUNTEREXAMPLES: [(&str, Option<&str>, Statistics, Statistics); 5] 
             max_depth: 5,
         },
         Statistics {
-            work: 189_076,
-            entries: 4_683,
+            work: 189_392,
+            entries: 4_817,
             max_depth: 5,
         },
+        (189_076, 4_683, 5),
     ),
     (
         "function probe(xs: List<Option<string>>): void { for (let item of xs) { let s = \"owned\"; let moved = s; let again = s; break; } }",
@@ -473,16 +487,17 @@ const REVIEW_COUNTEREXAMPLES: [(&str, Option<&str>, Statistics, Statistics); 5] 
             max_depth: 5,
         },
         Statistics {
-            work: 187_654,
-            entries: 4_436,
+            work: 187_970,
+            entries: 4_570,
             max_depth: 5,
         },
+        (187_654, 4_436, 5),
     ),
 ];
 
 #[test]
 fn review_counterexamples_keep_their_outcomes_at_exact_caps() {
-    for (source, second_read, targeted, whole) in REVIEW_COUNTEREXAMPLES {
+    for (source, second_read, targeted, whole, pre_equality) in REVIEW_COUNTEREXAMPLES {
         probe(
             "iteration::option_text::review_counterexamples_keep_their_outcomes_at_exact_caps",
             source,
@@ -508,6 +523,7 @@ fn review_counterexamples_keep_their_outcomes_at_exact_caps() {
                     assert_eq!(limited.completion(), Completion::ResourceLimit, "{source}");
                     assert!(limited.mir().is_none() && limited.findings().is_empty());
                 }
+                assert_pre_equality_graph_cap(receipt, pre_equality);
                 let (exact, short) = limits(whole);
                 let graph = analyze_ownership(receipt, exact);
                 assert_eq!(graph.statistics(), whole, "{source}");

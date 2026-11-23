@@ -53,6 +53,9 @@ struct Capture {
     /// M4 typed work, entries and depth: the fixed caps.
     typed: [usize; 3],
     graph: [usize; 3],
+    /// The graph meter before the i32 equality source root (ri-785.9); it
+    /// now gives `ResourceLimit` (metering rule 11).
+    pre_equality_graph: [usize; 3],
     app_roots: &'static [(&'static str, &'static str, &'static str, Completion)],
     /// Standard module, checked roots, incomplete roots.
     standard: &'static [(&'static str, usize, usize)],
@@ -137,7 +140,7 @@ const STANDARD_BASELINE: &[(&str, usize, usize)] = &[
     ("channel.rill", 1, 3),
     ("char.rill", 1, 2),
     ("collection.rill", 1, 4),
-    ("compare.rill", 1, 14),
+    ("compare.rill", 2, 13),
     ("convert.rill", 1, 14),
     ("core.rill", 29, 2),
     ("error.rill", 1, 22),
@@ -158,7 +161,7 @@ const STANDARD_SHARED: &[(&str, usize, usize)] = &[
     ("channel.rill", 1, 3),
     ("char.rill", 1, 2),
     ("collection.rill", 1, 4),
-    ("compare.rill", 1, 14),
+    ("compare.rill", 2, 13),
     ("convert.rill", 1, 14),
     ("core.rill", 29, 2),
     ("error.rill", 1, 22),
@@ -181,7 +184,8 @@ fn capture_cases() -> [Capture; 2] {
             main: BASELINE_MAIN.into(),
             standard_modules: 17,
             typed: [372_246, 54_059, 12],
-            graph: [202_698, 4_871, 3],
+            graph: [203_014, 5_005, 5],
+            pre_equality_graph: [202_698, 4_871, 3],
             app_roots: APP_BASELINE,
             standard: STANDARD_BASELINE,
         },
@@ -190,7 +194,8 @@ fn capture_cases() -> [Capture; 2] {
             main: format!("{BASELINE_MAIN}{JOIN}"),
             standard_modules: 18,
             typed: [495_879, 56_822, 12],
-            graph: [243_206, 25_960, 10],
+            graph: [243_522, 26_094, 10],
+            pre_equality_graph: [243_206, 25_960, 10],
             app_roots: APP_SHARED,
             standard: STANDARD_SHARED,
         },
@@ -319,7 +324,7 @@ fn installed_captures_state_the_graph_root_inventory() {
                     assert_eq!(
                         families,
                         [
-                            ("core text and comparison", 22),
+                            ("core text and comparison", 21),
                             ("bytes, conversions and string", 22),
                             ("List and iterator", 13),
                             ("native and protected wrappers", 6),
@@ -345,7 +350,13 @@ fn installed_captures_state_the_graph_root_inventory() {
                     let again = analyze_ownership(&receipt, exact);
                     assert_eq!(again.completion(), GraphCompletion::Incomplete);
                     assert_eq!(again.statistics(), used);
+                    let [max_work, max_entries, max_depth] = case.pre_equality_graph;
                     for short in [
+                        AnalysisLimits {
+                            max_work,
+                            max_entries,
+                            max_depth,
+                        },
                         AnalysisLimits {
                             max_work: exact.max_work - 1,
                             ..exact

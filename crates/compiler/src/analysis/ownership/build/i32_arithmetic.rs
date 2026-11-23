@@ -65,6 +65,36 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         }
     }
 
+    /// Evaluate both `i32` operands left to right into scratch slots, which
+    /// the comparison ends, then initialize the `bool` result.
+    pub(super) fn i32_equality(
+        &mut self,
+        node: NodeId,
+        into: Option<Slot>,
+        next: Pc,
+        depth: usize,
+    ) -> ResultOf<Pc> {
+        let into = into.ok_or(Stop::Pending(node))?;
+        let [left, right] = *self.module.syntax.nodes[node].children.as_slice() else {
+            return Err(Stop::Pending(node));
+        };
+        let left_ty = &self.normal_value(left)?.ty;
+        let right_ty = &self.normal_value(right)?.ty;
+        let left_slot = self.slot(left, left_ty)?;
+        let right_slot = self.slot(right, right_ty)?;
+        let compare = self.emit(
+            node,
+            Action::EqualI32 {
+                left: left_slot,
+                right: right_slot,
+                into,
+            },
+            Edges::Next(next),
+        )?;
+        let right = self.expression(right, Some(right_slot), compare, depth + 1)?;
+        self.expression(left, Some(left_slot), right, depth + 1)
+    }
+
     fn arithmetic_literal(&self, node: NodeId, facts: &ExpressionFacts<'g>) -> Option<i32> {
         let (
             NodeKind::Literal,
