@@ -1,5 +1,22 @@
 use super::*;
 
+/// An operand of a checked addition: a local's own slot, or a scratch slot
+/// that holds a field read or a product until the addition has read it.
+#[derive(Clone, Copy)]
+enum Operand {
+    Local(Slot),
+    Field(Slot, NodeId, usize),
+    Product(Slot, NodeId, usize),
+}
+
+impl Operand {
+    fn slot(self) -> Slot {
+        match self {
+            Operand::Local(slot) | Operand::Field(slot, ..) | Operand::Product(slot, ..) => slot,
+        }
+    }
+}
+
 impl<'a, 'g> Build<'a, 'g, '_> {
     /// Admit `local * literal` and addition of a local or that product to a
     /// local. The reads use the actual scalar slots, not initializer values.
@@ -18,7 +35,7 @@ impl<'a, 'g> Build<'a, 'g, '_> {
             return Err(pending);
         };
         let (left, left_depth) = self.ungroup_expression_at(left, depth + 1)?;
-        let (right, _) = self.ungroup_expression_at(right, depth + 1)?;
+        let (right, right_depth) = self.ungroup_expression_at(right, depth + 1)?;
         match syntax[node].kind {
             NodeKind::Binary("*") => {
                 let left = self.arithmetic_local(left, node)?;
@@ -35,30 +52,43 @@ impl<'a, 'g> Build<'a, 'g, '_> {
                 )
             }
             NodeKind::Binary("+") => {
-                let right = self.arithmetic_local(right, node)?;
-                let product = syntax[left].kind == NodeKind::Binary("*");
-                let (lhs, next) = if product {
-                    let lhs = self.slot(left, &facts.ty)?;
-                    let end = self.emit(left, Action::End(lhs), Edges::Next(next))?;
-                    (lhs, end)
+                let right = self.arithmetic_operand(right, node, right_depth)?;
+                let left = if syntax[left].kind == NodeKind::Binary("*") {
+                    Operand::Product(self.slot(left, &facts.ty)?, left, left_depth)
                 } else {
-                    (self.arithmetic_local(left, node)?, next)
+                    self.arithmetic_operand(left, node, left_depth)?
                 };
-                let add = self.emit(
+                // The addition reads the left operand, then the right. A scratch
+                // slot ends after it, the left before the right.
+                let mut next = next;
+                for operand in [right, left] {
+                    if let Operand::Field(slot, site, _) | Operand::Product(slot, site, _) = operand
+                    {
+                        next = self.emit(site, Action::End(slot), Edges::Next(next))?;
+                    }
+                }
+                let mut pc = self.emit(
                     node,
                     Action::CheckedI32Add {
-                        left: lhs,
-                        right,
+                        left: left.slot(),
+                        right: right.slot(),
                         into,
                     },
                     Edges::Next(next),
                 )?;
-                // The multiplication can trap before the right operand is read.
-                if product {
-                    let product = self.normal_value(left)?;
-                    self.checked_i32_arithmetic(left, product, Some(lhs), add, left_depth)
-                } else {
-                    Ok(add)
+                if let Operand::Field(slot, site, site_depth) = right {
+                    pc = self.expression(site, Some(slot), pc, site_depth)?;
+                }
+                match left {
+                    // The multiplication can trap before the right operand is read.
+                    Operand::Product(slot, site, site_depth) => {
+                        let product = self.normal_value(site)?;
+                        self.checked_i32_arithmetic(site, product, Some(slot), pc, site_depth)
+                    }
+                    Operand::Field(slot, site, site_depth) => {
+                        self.expression(site, Some(slot), pc, site_depth)
+                    }
+                    Operand::Local(_) => Ok(pc),
                 }
             }
             _ => Err(pending),
@@ -122,8 +152,38 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         .then_some(path)
     }
 
+    /// A field read goes through a scratch slot. M4's facts admit only an
+    /// `i32` field of a local record here, so nothing is spent before the
+    /// slot is allocated.
+    fn arithmetic_operand(
+        &mut self,
+        operand: NodeId,
+        node: NodeId,
+        depth: usize,
+    ) -> ResultOf<Operand> {
+        let facts = self.normal_value(operand)?;
+        if projection(facts).is_some() {
+            return Ok(Operand::Field(
+                self.slot(operand, &facts.ty)?,
+                operand,
+                depth,
+            ));
+        }
+        self.arithmetic_local_of(operand, facts, node)
+            .map(Operand::Local)
+    }
+
     fn arithmetic_local(&mut self, operand: NodeId, node: NodeId) -> ResultOf<Slot> {
         let facts = self.normal_value(operand)?;
+        self.arithmetic_local_of(operand, facts, node)
+    }
+
+    fn arithmetic_local_of(
+        &mut self,
+        operand: NodeId,
+        facts: &ExpressionFacts<'g>,
+        node: NodeId,
+    ) -> ResultOf<Slot> {
         let path = self
             .arithmetic_local_path(operand, facts)
             .ok_or(Stop::Pending(node))?;
