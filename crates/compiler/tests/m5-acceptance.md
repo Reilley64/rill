@@ -1761,6 +1761,24 @@ The reason is one cause: A2 charges the reads of `first` and `second` in `first 
 
 `m5::rfc_cases::o15_pre_charge_counter_caps_now_give_resource_limit` asserts, in both installed load modes, that the old caps give `ResourceLimit`: 2,504 / 329 / 6 on the `counter` query (no MIR, no findings) and 187,485 / 4,297 / 6 on the graph. No other `rfc_cases` row and no number in `o15_arithmetic.rs` changed. No Rill program ran.
 
+## An owned guard wrapper beside a borrowed view (ri-px1.6, 2026-11-23)
+
+This is ticket D1. Since `f2e3459`, a body that owned a guard-bearing parameter stopped at any reference parameter whose referent bore a guard. At the parent `37a0a99e`, [`mixed_wrapper_exports_the_view_then_cleans_the_owned_wrapper`](m5/disposers/mixed_wrapper.rs) first returned `Incomplete` at `view: &Plain` for `mixedWrapper(owned: Plain, view: &Plain): &Plain`. The screen now admits a **shared** view of a flat guard wrapper. A borrowed guard (`&LockGuard<i32>`) and an exclusive wrapper view (`&mut Plain`) stay outside. Up to each of those rejections, the screen charges what it charged before.
+
+In both installed modes, `mixedWrapper` copies the incoming view and exports it. The view's storage ends, and then the owned wrapper is cleaned once in reverse field order: drop `plainTail`, release `plainLock` with the installed provider, drop `plainHead`. The test compares the whole ordered action list. Targeted caps, each exact and independently one short:
+
+| Function | Work / entries / depth | Ordinary graph root |
+| --- | --- | --- |
+| `mixedWrapper` | 2,630 / 266 / 3 | `Incomplete` at the body. The implicit guard release is an unverified `ProtectedRelease` edge (row D3). |
+| `mixedGrouped`, `return ((view));` | 2,636 / 266 / 5 | As `mixedWrapper`. |
+| `mixedExplicit`, which moves `plainLock` to `held` and writes `dispose(held)` | 2,959 / 425 / 3 | `Checked`, with the targeted MIR. |
+| `guardBesideView`, an owned bare guard | 2,196 / 174 / 3 | `Incomplete`, as `mixedWrapper`. |
+| `disposedWrapperForward`, a custom-disposed `Kept` beside `&Kept` | 5,744 / 639 / 3 | `Incomplete`, with an `ActiveDisposer` edge. |
+
+The source's whole receipt is 197,974 / 5,550 / 5 (`Incomplete`); each one-short cap gives `ResourceLimit`. The siblings keep the targeted caps measured at `37a0a99e`. `wrapperReferenceOnly` checks at 2,153 / 166 / 3. `exclusiveWrapper` stops at `view: &mut Plain` at 2,432 / 169 / 1. `guardForward` stops at `view: &LockGuard<i32>` at 2,421 / 169 / 1. `disposedGuardForward`, which disposes the owned wrapper with `release(owned)`, stops at the same parameter at 2,427 / 170 / 1. The `mixedWrapper` row of `protected_fields_keep_their_obligation_through_disposer_cleanup` moves from its `Incomplete` list to a reverse-cleanup assertion.
+
+The literal `mixedWrapper` graph root stays `Incomplete` until the implicit release of a guard field is a verified graph edge. Only the written-release body `mixedExplicit` has root MIR. No Rill program ran.
+
 ## Open acceptance obligations
 
 - Nested and borrowed place projections, nested mutable storage effects and callee-exit checks for retained destinations. Preserve the covered distinction between a carried reference and a borrow of its slot when extending these routes.
