@@ -534,15 +534,52 @@ live-parent-err	-	typed	test	Checked	436305	50259	12
 live-parent-err	main.rill#Function:liveParentError	body	test	Incomplete	4024	571	7
 live-parent-err	main.rill#Function:liveParentError	graph-root	test	Incomplete/Incomplete	-	-	-
 #
-# Published at 68f3788, the parent before the forwarding proof, but not reproduced on the integration branch.
-# Not replayed, not edited; both modes agree. See the 2026-11-22 H1 section of crates/compiler/tests/m5-acceptance.md.
-#	retaining-rc	-	graph	normal,test	SourceRejected	246818	14458	11
-#	retaining-rc	main.rill#Function:nestedGoodWithOwner	root	normal,test	Checked	12151	3338	6
-#	retaining-rc	main.rill#Function:nestedCaller	root	normal,test	Checked	10348	2397	6
-#	retaining-rc	main.rill#Function:nestedCaller	graph-root	normal,test	Checked/Checked	-	-	-
-#	retaining-rc	main.rill#Function:infeasibleOuter	root	normal,test	Checked	10495	2458	6
-#	safe-rc	-	graph	normal,test	Incomplete	199807	6904	11
-#	safe-rc	main.rill#Function:nestedGoodWithOwner	root	normal,test	Checked	9679	2102	6
-#	foreign-rc	-	graph	normal,test	SourceRejected	193281	5176	6
-#	foreign-rc	main.rill#Function:rejected	root	normal,test	Checked	7463	895	6
-#	foreign-rc	main.rill#Function:rejected	graph-root	normal,test	Checked/Checked	-	-	-
+# D3 (ri-px1.8) re-pinned these whole graphs under rule 11 when the implicit guard release became a verified edge; review ci-uaa1
+# (ri-px1.8 #1) asked for their manifest rows. Sources: m5::graph::closed_release::implicit_guard_release_closes_the_ordinary_root
+# and m5::disposers::mixed_wrapper (SOURCE), each after m5.rs's IMPORTS. Those tests hold the old caps (185,222 / 3,993 / 3 and
+# 197,974 / 5,550 / 5) as ResourceLimit.
+d3-implicit-guard	-	standard-modules	normal	17	-	-	-
+d3-implicit-guard	-	typed	normal	Checked	322181	47506	12
+d3-implicit-guard	-	graph	normal	Incomplete	185562	4127	5
+d3-implicit-guard	main.rill#Function:implicit	graph-root	normal	Checked/Checked	-	-	-
+d3-implicit-guard	-	standard-modules	test	17	-	-	-
+d3-implicit-guard	-	typed	test	Checked	322181	47506	12
+d3-implicit-guard	-	graph	test	Incomplete	185562	4127	5
+d3-implicit-guard	main.rill#Function:implicit	graph-root	test	Checked/Checked	-	-	-
+d1-mixed-wrapper	-	standard-modules	normal	17	-	-	-
+d1-mixed-wrapper	-	typed	normal	Checked	342614	49553	12
+d1-mixed-wrapper	-	graph	normal	Incomplete	198520	5684	5
+d1-mixed-wrapper	main.rill#Function:mixedWrapper	graph-root	normal	Checked/Checked	-	-	-
+d1-mixed-wrapper	main.rill#Function:mixedGrouped	graph-root	normal	Checked/Checked	-	-	-
+d1-mixed-wrapper	main.rill#Function:guardBesideView	graph-root	normal	Checked/Checked	-	-	-
+d1-mixed-wrapper	-	standard-modules	test	17	-	-	-
+d1-mixed-wrapper	-	typed	test	Checked	342614	49553	12
+d1-mixed-wrapper	-	graph	test	Incomplete	198520	5684	5
+d1-mixed-wrapper	main.rill#Function:mixedWrapper	graph-root	test	Checked/Checked	-	-	-
+d1-mixed-wrapper	main.rill#Function:mixedGrouped	graph-root	test	Checked/Checked	-	-	-
+d1-mixed-wrapper	main.rill#Function:guardBesideView	graph-root	test	Checked/Checked	-	-	-
+#
+# base-matrix: published at 68f3788, before the forwarding proof. Under the owner decision of 2026-11-23 (review ci-uaa1, O3) today's
+# values are the intended cost of the forwarding proof and are pinned here; m5::legacy_caps::base_matrix_caps_give_resource_limit holds
+# the 68f3788 caps; infeasibleOuter reproduces its 68f3788 cap. nestedCaller and foreign-rc rejected flip Checked -> SourceRejected with R0202 at `*slot = &flag;` (RFC 0007,
+# cancellation exits). See crates/compiler/tests/m5-acceptance/ri-px1.11.md, "Review ci-uaa1 fixes".
+retaining-rc	-	graph	normal	SourceRejected	247377	14656	11
+retaining-rc	main.rill#Function:nestedGoodWithOwner	root	normal	Checked	12838	3591	6
+retaining-rc	main.rill#Function:nestedCaller	root	normal	SourceRejected	10472	2446	6
+retaining-rc	main.rill#Function:nestedCaller	graph-root	normal	SourceRejected/Checked	-	-	-
+retaining-rc	main.rill#Function:infeasibleOuter	root	normal	Checked	10495	2458	6
+safe-rc	-	graph	normal	Incomplete	200280	7079	11
+safe-rc	main.rill#Function:nestedGoodWithOwner	root	normal	Checked	10366	2355	6
+foreign-rc	-	graph	normal	SourceRejected	193683	5333	6
+foreign-rc	main.rill#Function:rejected	root	normal	SourceRejected	7587	944	6
+foreign-rc	main.rill#Function:rejected	graph-root	normal	SourceRejected/Checked	-	-	-
+retaining-rc	-	graph	test	SourceRejected	247377	14656	11
+retaining-rc	main.rill#Function:nestedGoodWithOwner	root	test	Checked	12838	3591	6
+retaining-rc	main.rill#Function:nestedCaller	root	test	SourceRejected	10472	2446	6
+retaining-rc	main.rill#Function:nestedCaller	graph-root	test	SourceRejected/Checked	-	-	-
+retaining-rc	main.rill#Function:infeasibleOuter	root	test	Checked	10495	2458	6
+safe-rc	-	graph	test	Incomplete	200280	7079	11
+safe-rc	main.rill#Function:nestedGoodWithOwner	root	test	Checked	10366	2355	6
+foreign-rc	-	graph	test	SourceRejected	193683	5333	6
+foreign-rc	main.rill#Function:rejected	root	test	SourceRejected	7587	944	6
+foreign-rc	main.rill#Function:rejected	graph-root	test	SourceRejected/Checked	-	-	-

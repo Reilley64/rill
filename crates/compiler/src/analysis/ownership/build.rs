@@ -4633,6 +4633,17 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         node: NodeId,
         data: &ErrorConstruction<'g>,
     ) -> ResultOf<(&'a Flow, &'g Span, &'g DeclarationId)> {
+        let flow = self.wrap_failure_shape(node, data)?;
+        let (origin, display) = self.wrap_failure_premises(node, data)?;
+        Ok((flow, origin, display))
+    }
+
+    /// The shape of an error wrap, read from its paid RHS fact.
+    fn wrap_failure_shape(
+        &mut self,
+        node: NodeId,
+        data: &ErrorConstruction<'g>,
+    ) -> ResultOf<&'a Flow> {
         let role = self.typed.result_role().ok_or(Stop::Pending(node))?;
         let [left, right] = self.module.syntax.nodes[node].children[..] else {
             return Err(Stop::Pending(node));
@@ -4663,6 +4674,17 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         {
             return Err(Stop::Pending(node));
         }
+        Ok(&rhs.flow)
+    }
+
+    /// The retained operand's proved goals, its selected display and the
+    /// written `?` of an error wrap whose shape is checked.
+    fn wrap_failure_premises(
+        &mut self,
+        node: NodeId,
+        data: &ErrorConstruction<'g>,
+    ) -> ResultOf<(&'g Span, &'g DeclarationId)> {
+        let retained = data.retained.as_ref().ok_or(Stop::Pending(node))?;
         self.budget.step(4)?;
         let bodies = self.typed.bodies();
         for goal in [&retained.no_borrow, &retained.sendable, &retained.shareable] {
@@ -4691,7 +4713,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             .filter(|token| token.span == data.origin && token.span.bytes() == b"?")
             .ok_or(Stop::Pending(node))?
             .span;
-        Ok((&rhs.flow, origin, selected.implementation))
+        Ok((origin, selected.implementation))
     }
 
     fn wrap_result_failure(
@@ -4703,7 +4725,16 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         return_cleanup: Pc,
         depth: usize,
     ) -> ResultOf<Pc> {
-        let (flow, origin, cause_display) = self.checked_wrap_failure(node, data)?;
+        let flow = self.wrap_failure_shape(node, data)?;
+        let i32_error =
+            matches!(data.payload.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32");
+        // Rule 1 (review ci-uaa1, ri-vgz.5 #2): a `string` error screens its
+        // RHS before the premises charge; an `i32` error keeps its order.
+        let premises = if i32_error {
+            Some(self.wrap_failure_premises(node, data)?)
+        } else {
+            None
+        };
         let right = data.value;
         let (root, root_depth) = self.ungroup_expression_at(right, depth)?;
         let facts = self.value(root)?;
@@ -4711,10 +4742,13 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             && matches!(facts.data, Some(DataExpression::Propagation(_)));
         // A `string` error never builds a new wrapper (checked above for a
         // continuing RHS); a non-postfix RHS would stage its payload.
-        if !postfix && !matches!(data.payload.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32")
-        {
+        if !postfix && !i32_error {
             return Err(Stop::Pending(right));
         }
+        let (origin, cause_display) = match premises {
+            Some(premises) => premises,
+            None => self.wrap_failure_premises(node, data)?,
+        };
         // Other RHS forms keep their ordinary staging proof, including its
         // precise pending site and budget when a nested argument can return.
         let payload = (!postfix || flow.normal)

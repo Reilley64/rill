@@ -293,6 +293,14 @@ fn declared_shared_siblings_keep_their_parent_caps() {
             [(ResultUseBlocker::CallBoundary, "job()")].as_slice(),
             (324_009, 47_673, 12),
         ),
+        // Review ci-uaa1 (ri-785.7 #1): an owned once wrapper whose body
+        // invokes another function, not its formal.
+        (
+            "otherOwned",
+            "function other(): bool { return true; }\nfunction invokeOther<F>(job: F): bool where callableOnce(F, [], bool) { return other(); }\nfunction callerOther(flag: bool): bool { return invokeOther(() => flag); }\n".to_string(),
+            [(ResultUseBlocker::Containment, "job: F")].as_slice(),
+            (324_801, 47_618, 12),
+        ),
     ] {
         probe_report(
             "captures::declared_shared::declared_shared_siblings_keep_their_parent_caps",

@@ -507,6 +507,79 @@ fn fresh_join_checks_capture_conflicts_and_parent_cleanup() {
     );
 }
 
+/// Review ci-uaa1 R-3: `003c414` gave `conflict` a `bag: Bag` parameter with
+/// an unsupported disposer, so the conflict with no unsupported parent left the
+/// test above. Its own fixture keeps that test's caps unchanged.
+#[test]
+fn plain_conflict_reports_r0201_at_the_second_capture() {
+    probe_with_typed(
+        "scoped_join::fresh_result::plain_conflict_reports_r0201_at_the_second_capture",
+        r#"
+            import std::routine::join as scoped;
+            function conflictPlain(seed: bool): [Result<bool, i32>, bool] {
+                let mut flag = seed;
+                let held = &mut flag;
+                let pair = scoped([() => Err<bool, i32>(7i32), () => flag]);
+                let keep = *held;
+                return pair;
+            }
+        "#,
+        |_, module, receipt, _| {
+            let graph_cost = Statistics {
+                work: 194_574,
+                entries: 4_692,
+                max_depth: 7,
+            };
+            let (limit, short) = budget_caps(graph_cost);
+            let graph = analyze_ownership(receipt, limit);
+            assert_eq!(graph.statistics(), graph_cost);
+            assert_eq!(graph.completion(), GraphCompletion::SourceRejected);
+            let [conflict] = graph.findings() else {
+                panic!("second capture conflicts")
+            };
+            assert_eq!(conflict.code(), "R0201");
+            assert_eq!(conflict.site.span.bytes(), b"flag");
+            assert_eq!(conflict.related.span.bytes(), b"&mut flag");
+            for cap in short {
+                let limited = analyze_ownership(receipt, cap);
+                assert_eq!(limited.completion(), GraphCompletion::ResourceLimit);
+                // The graph keeps findings met before the meter ran out (ri-grwx).
+                assert!(limited.roots().iter().all(|r| r.mir().is_none()));
+            }
+
+            let d = &module.declarations[named(module, "conflictPlain")];
+            let stats = Statistics {
+                work: 3_916,
+                entries: 530,
+                max_depth: 7,
+            };
+            let (limit, short) = budget_caps(stats);
+            let target = lower_body(receipt, module, &d.id, limit).unwrap();
+            assert_eq!(target.statistics(), stats);
+            assert_eq!(target.completion(), Completion::SourceRejected);
+            assert!(target.mir().is_none());
+            let [finding] = target.findings() else {
+                panic!("capture conflict")
+            };
+            assert_eq!(finding.code(), "R0201");
+            assert_eq!(finding.site.span, conflict.site.span);
+            assert_eq!(finding.related.span, conflict.related.span);
+            for cap in short {
+                let limited = lower_body(receipt, module, &d.id, cap).unwrap();
+                assert_eq!(limited.completion(), Completion::ResourceLimit, "{cap:?}");
+                assert!(limited.mir().is_none() && limited.findings().is_empty());
+            }
+            let root = graph
+                .roots()
+                .iter()
+                .find(|r| r.site().module == &module.key && r.site().node == d.node)
+                .unwrap();
+            assert_eq!(root.ordinary_completion(), Completion::SourceRejected);
+            assert!(root.ordinary_mir().is_none());
+        },
+    );
+}
+
 #[test]
 fn live_parent_error_reaches_the_join_at_its_repinned_cap() {
     // Metering rule 11, D3 (b) (ri-785.4, review 0c3e2b4f): at d95ae9e this

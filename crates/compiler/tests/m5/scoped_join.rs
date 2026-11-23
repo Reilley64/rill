@@ -3724,3 +3724,45 @@ fn installed_join_keeps_unproved_capture_and_result_shapes_incomplete() {
         },
     );
 }
+
+/// Metering rule 4 (review ci-uaa1 S2-F4): a reference pair reserves each
+/// slot's goal handles before it builds the slot. The typed caps are those
+/// measured before the reorder; one short on entries publishes no receipt, so
+/// no scoped-join fact.
+#[test]
+fn reference_pair_reserves_before_it_builds_each_slot() {
+    probe_report(
+        "scoped_join::reference_pair_reserves_before_it_builds_each_slot",
+        r#"
+        import std::routine::join;
+        function joined(input: &i32, other: &i32): [&i32,&i32] { return join([() => input, () => other]); }
+    "#,
+        |request, _, _| {
+            let graph = loader::load_installed(request.clone()).unwrap();
+            let pinned = compiler::analysis::Statistics {
+                work: 427_606,
+                entries: 49_151,
+                max_depth: 12,
+            };
+            let (exact, short) = budget_caps(pinned);
+            let typed = analyze_typed(&graph, exact);
+            assert_eq!(typed.completion(), TypedCompletion::Checked);
+            assert_eq!(typed.statistics(), pinned);
+            let module = app(&graph);
+            let call = call_node(module, "join([");
+            assert!(
+                typed
+                    .receipt()
+                    .unwrap()
+                    .scoped_join(module, call)
+                    .unwrap()
+                    .is_some()
+            );
+            for cap in short {
+                let limited = analyze_typed(&graph, cap);
+                assert_eq!(limited.completion(), TypedCompletion::ResourceLimit);
+                assert!(limited.receipt().is_none());
+            }
+        },
+    );
+}
