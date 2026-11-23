@@ -18,17 +18,19 @@ function hold(again: bool, lock: LockGuard<i32>): i32 {
 
 Caps (work / entries / depth). Each new cap is exact; each independently one-short cap gives `ResourceLimit` with no MIR, and no root keeps a proof.
 
-| Query | Parent `0f595438` (no proof) | Now |
+| Query | Parent `3da1d5a3` (no proof) | Now |
 | --- | --- | --- |
 | `hold` targeted | 2,131 / 156 / 4 | 2,252 / 203 / 4 |
 | `released` targeted | 2,174 / 175 / 4 | 2,294 / 223 / 4 |
 | `moved` targeted | 2,177 / 171 / 4 | 2,311 / 223 / 4 |
-| Whole graph of this fixture | 188,198 / 4,406 / 4, `Incomplete` | 188,571 / 4,501 / 4, `Incomplete` (`moved`) |
+| Whole graph of this fixture | 188,514 / 4,540 / 5, `Incomplete` | 188,887 / 4,635 / 5, `Incomplete` (`moved`) |
 
-These are new fixtures; the parent figures are the red measurement, not re-pins.
+These are new fixtures; the parent figures are the red measurement, not re-pins. The whole-graph figures include B6's `compare.rill` i32 equality root (ri-785.9), which reached the base while this ticket was in flight; before it, at parent `0f595438`, the same fixture measured 188,198 / 4,406 / 4 and, with this change, 188,571 / 4,501 / 4. The targeted figures did not move with B6.
 
-[`guard_loops_without_a_proof_keep_their_parent_caps`](../m5/cancellation.rs) pins, at the caps measured at the parent, guard frames that must not gain a proof: an entry-only guard (1,992 / 83 / 1), a call before the loop (4,131 / 245 / 4), a loop on a local condition (2,209 / 192 / 4), a loop body with a `break` (2,162 / 166 / 6), and a shared view of the guard across the loop, which stays `Incomplete` at `&lock` (2,012 / 86 / 5). The whole graph stays `Incomplete` at 190,179 / 4,479 / 6. Each exact cap gives the parent outcome with no delivery proof, and each one-short cap gives `ResourceLimit`.
+[`guard_loops_without_a_proof_keep_their_parent_caps`](../m5/cancellation.rs) pins, at the caps measured at the parent (the targeted caps at both `0f595438` and `3da1d5a3`), guard frames that must not gain a proof: an entry-only guard (1,992 / 83 / 1), a call before the loop (4,131 / 245 / 4), a loop on a local condition (2,209 / 192 / 4), a loop body with a `break` (2,162 / 166 / 6), and a shared view of the guard across the loop, which stays `Incomplete` at `&lock` (2,012 / 86 / 5). The whole graph stays `Incomplete` at 190,495 / 4,613 / 6, measured at the parent `3da1d5a3` (190,179 / 4,479 / 6 at `0f595438`, before B6). Each exact cap gives the parent outcome with no delivery proof, and each one-short cap gives `ResourceLimit`.
 
 No existing expectation was edited and no fixed cap moved: `ordinary_only_list_loops_keep_the_pre_delivery_caps` still holds at 191,781 / 4,867 / 6, and `m5::legacy_caps`, `m5::rfc_cases` and `m5::graph::inventory` pass unchanged.
+
+Commits: `349fc031` (flow change, tests and this record), then the post-B6 whole-graph pins, merged with the base tip.
 
 Not established: a guard field of a record, a guard under a custom disposer, a guard released at a callee entry or a retaining call, and delivery with outward storage remain without a proof. The `moved` graph root waits for a verified scope-exit release of a local binding. This is compiler MIR evidence; no Rill program ran and no scheduler delivered a request.

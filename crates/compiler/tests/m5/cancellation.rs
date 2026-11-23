@@ -474,7 +474,7 @@ fn installed_guard_release_on_budget_delivery() {
                     assert!(short.mir().is_none());
                 }
             }
-            let (work, entries, depth) = (188571, 4501, 4);
+            let (work, entries, depth) = (188887, 4635, 5);
             assert_eq!(stats(graph.statistics()), (work, entries, depth));
             let exact = limits(work, entries, depth);
             let exact_graph = analyze_ownership(receipt, exact);
@@ -508,8 +508,10 @@ fn guard_loops_without_a_proof_keep_their_parent_caps() {
         function nested(again: bool, lock: LockGuard<i32>): void { { let view = &lock; while (again) { continue; } let last = view; } }
     "#,
         |_, module, receipt| {
-            // Measured at the parent 0f595438, before guard frames could
-            // carry a delivery proof. None of these shapes gains one.
+            // Measured at the parent before guard frames could carry a
+            // delivery proof: the graph at 3da1d5a3 (with B6's i32 equality
+            // root), the targeted caps at both 0f595438 and 3da1d5a3. None of
+            // these shapes gains a proof.
             let limits = |max_work, max_entries, max_depth| AnalysisLimits {
                 max_work,
                 max_entries,
@@ -531,7 +533,7 @@ fn guard_loops_without_a_proof_keep_their_parent_caps() {
                     },
                 ]
             };
-            let graph_exact = limits(190179, 4479, 6);
+            let graph_exact = limits(190495, 4613, 6);
             let graph = analyze_ownership(receipt, graph_exact);
             assert_eq!(graph.completion(), GraphCompletion::Incomplete);
             for cap in shorts(graph_exact) {
