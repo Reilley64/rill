@@ -432,10 +432,34 @@ function shifted(point: Point): Point {
 }
 expect shifted(Point { x: 2, y: 3 }).x == 3i32;
 "#,
-    outcome: Outcome::Typed {
-        completion: TypedCompletion::Incomplete,
-        signals: &[r####"pending Storage @ *value += 1i32;"####],
-        stats: (325375, 47829, 12),
+    // The parent measured typed `Incomplete` at (325375, 47829, 12) on
+    // `pending Storage @ *value += 1i32;`; `o01_old_typed_caps_give_resource_limit`
+    // pins that cap. `pre_equality_graph` is the graph cap with the expectation
+    // root's attributed work and entries removed (8913, 1139).
+    outcome: Outcome::Receipt {
+        typed_stats: (326220, 47997, 12),
+        graph: (GraphCompletion::Incomplete, (190759, 5183, 6)),
+        pre_equality_graph: (181846, 4044, 6),
+        roots: &[
+            Root {
+                name: "increment",
+                want: Want::Checked,
+                graph: None,
+                stats: (2182, 183, 3),
+            },
+            Root {
+                name: "shifted",
+                want: Want::Checked,
+                graph: None,
+                stats: (5806, 722, 6),
+            },
+            Root {
+                name: "expect",
+                want: Want::Checked,
+                graph: None,
+                stats: (8913, 1139, 6),
+            },
+        ],
     },
 }];
 
@@ -590,10 +614,40 @@ function result(): i32 {
 }
 expect result() == 3i32;
 "#,
-    outcome: Outcome::Typed {
-        completion: TypedCompletion::Incomplete,
-        signals: &[r####"pending Storage @ *value += 1i32;"####],
-        stats: (325245, 47754, 12),
+    // The parent measured typed `Incomplete` at (325245, 47754, 12) on
+    // `pending Storage @ *value += 1i32;`; `o06_old_typed_caps_give_resource_limit`
+    // pins that cap. `pre_equality_graph` is the graph cap with the expectation
+    // root's attributed work and entries removed (8642, 688).
+    outcome: Outcome::Receipt {
+        typed_stats: (326089, 47923, 12),
+        graph: (GraphCompletion::Incomplete, (189091, 4699, 6)),
+        pre_equality_graph: (180449, 4011, 6),
+        roots: &[
+            Root {
+                name: "change",
+                want: Want::Checked,
+                graph: None,
+                stats: (2190, 187, 3),
+            },
+            Root {
+                name: "twice",
+                want: Want::Checked,
+                graph: None,
+                stats: (4412, 394, 3),
+            },
+            Root {
+                name: "result",
+                want: Want::Checked,
+                graph: None,
+                stats: (6615, 587, 6),
+            },
+            Root {
+                name: "expect",
+                want: Want::Checked,
+                graph: None,
+                stats: (8642, 688, 6),
+            },
+        ],
     },
 }];
 
@@ -1537,11 +1591,300 @@ function childLocal(input: &i32): [&i32, &i32] {
     },
 }];
 
+/// Writes through an exclusive deref that no admission covers: a non-`i32`
+/// target, a shared `&i32`, a plain store, `-=`, `*=` and a record field. Their
+/// typed caps are the parent's (7002855e), measured in a `git worktree add`.
+const EXCLUSIVE_WRITES_AT_PARENT: &[Source] = &[
+    Source {
+        text: r#"
+function bump(value: &mut i64): void { *value += 1i64; }
+"#,
+        outcome: Outcome::Typed {
+            completion: TypedCompletion::Incomplete,
+            signals: &[r####"pending Storage @ *value += 1i64;"####],
+            stats: (321407, 47379, 12),
+        },
+    },
+    Source {
+        text: r#"
+function bump(value: &i32): void { *value += 1i32; }
+"#,
+        outcome: Outcome::Typed {
+            completion: TypedCompletion::Incomplete,
+            signals: &[
+                r####"finding ReadOnly @ *value += 1i32;"####,
+                r####"pending Storage @ *value += 1i32;"####,
+            ],
+            stats: (321795, 47374, 12),
+        },
+    },
+    Source {
+        text: r#"
+function bump(value: &mut i32): void { *value = 1i32; }
+"#,
+        outcome: Outcome::Typed {
+            completion: TypedCompletion::Incomplete,
+            signals: &[r####"pending Storage @ *value = 1i32;"####],
+            stats: (321406, 47379, 12),
+        },
+    },
+    Source {
+        text: r#"
+function bump(value: &mut i32): void { *value -= 1i32; }
+"#,
+        outcome: Outcome::Typed {
+            completion: TypedCompletion::Incomplete,
+            signals: &[r####"pending Storage @ *value -= 1i32;"####],
+            stats: (321405, 47379, 12),
+        },
+    },
+    Source {
+        text: r#"
+function bump(value: &mut i32): void { *value *= 2i32; }
+"#,
+        outcome: Outcome::Typed {
+            completion: TypedCompletion::Incomplete,
+            signals: &[r####"pending Storage @ *value *= 2i32;"####],
+            stats: (321405, 47379, 12),
+        },
+    },
+    Source {
+        text: r#"
+type Pair = { x: i32; y: i32 };
+function bump(value: &mut Pair): void { value.x += 1i32; }
+"#,
+        outcome: Outcome::Typed {
+            completion: TypedCompletion::Incomplete,
+            signals: &[r####"pending Storage @ value.x += 1i32;"####],
+            stats: (322826, 47449, 12),
+        },
+    },
+];
+
+/// Siblings of the admitted `*parameter += literal`. Each `Incomplete` root
+/// keeps the caps measured with only the typed admission applied, in a
+/// `git worktree add` at the parent, before the ownership lowering existed:
+/// the lowering screens from written shape and paid-for facts before any charge.
+/// The supported wrapped forms (`scoped`, `looped`, `dead`) are Checked controls.
+const EXCLUSIVE_WRITE_SIBLINGS: &[Source] = &[Source {
+    text: r#"
+function control(value: &mut i32): void { *value += 1i32; }
+function groupedTarget(value: &mut i32): void { (*value) += 1i32; }
+function groupedOperand(value: &mut i32): void { *value += (1i32); }
+function groupedDescriptor(value: &mut i32): void { *(value) += 1i32; }
+function scoped(value: &mut i32): void { { *value += 1i32; } }
+function looped(value: &mut i32, flag: bool): void { while (flag) { *value += 1i32; } }
+function dead(value: &mut i32): void { return; *value += 1i32; }
+function computed(value: &mut i32, step: i32): void { *value += step; }
+function viaLocal(value: &mut i32): void { let view = value; *view += 1i32; }
+"#,
+    outcome: Outcome::Receipt {
+        typed_stats: (335273, 48561, 12),
+        graph: (GraphCompletion::Incomplete, (192826, 4858, 5)),
+        pre_equality_graph: (190538, 4622, 5),
+        roots: &[
+            Root {
+                name: "control",
+                want: Want::Checked,
+                graph: None,
+                stats: (2288, 236, 3),
+            },
+            Root {
+                name: "groupedTarget",
+                want: Want::Incomplete {
+                    blocker: r####"(*value) += 1i32;"####,
+                },
+                graph: None,
+                stats: (1998, 92, 2),
+            },
+            Root {
+                name: "groupedOperand",
+                want: Want::Incomplete {
+                    blocker: r####"*value += (1i32);"####,
+                },
+                graph: None,
+                stats: (1998, 92, 2),
+            },
+            Root {
+                name: "groupedDescriptor",
+                want: Want::Incomplete {
+                    blocker: r####"*(value) += 1i32;"####,
+                },
+                graph: None,
+                stats: (1998, 92, 2),
+            },
+            Root {
+                name: "scoped",
+                want: Want::Checked,
+                graph: None,
+                stats: (2290, 236, 4),
+            },
+            Root {
+                name: "looped",
+                want: Want::Checked,
+                graph: None,
+                stats: (2510, 340, 5),
+            },
+            Root {
+                name: "dead",
+                want: Want::Checked,
+                graph: None,
+                stats: (2055, 118, 2),
+            },
+            Root {
+                name: "computed",
+                want: Want::Incomplete {
+                    blocker: r####"*value += step;"####,
+                },
+                graph: None,
+                stats: (2004, 96, 2),
+            },
+            Root {
+                name: "viaLocal",
+                want: Want::Incomplete {
+                    blocker: r####"*view += 1i32;"####,
+                },
+                graph: None,
+                stats: (2008, 101, 2),
+            },
+        ],
+    },
+}];
+
+/// `call().field == i32` operands. `pre_equality_graph` is the whole graph
+/// before the field-of-call operand was admitted (193367, 4510, 5), measured in a
+/// `git worktree add` at the parent with only the typed admission. `bound` and
+/// `nested` keep the parent's caps: a bound field read and a nested field are
+/// not operands the equality admits.
+const CALL_FIELD_EQUALITY: &[Source] = &[Source {
+    text: r#"
+type Point = { x: i32; y: i32 };
+type Outer = { inner: Point };
+function mk(): Point { return Point { x: 2i32, y: 3i32 }; }
+function wrap(): Outer { return Outer { inner: mk() }; }
+function bare(): bool { return mk().x == 2i32; }
+function grouped(): bool { return ((mk()).x) == (2i32); }
+function both(): bool { return mk().x == mk().y; }
+function viaLocal(n: i32): bool { return n == mk().x; }
+function bound(): i32 { let n = mk().x; return n; }
+function nested(): bool { return wrap().inner.x == 2i32; }
+function dead(): bool { return false; return mk().x == 2i32; }
+function looped(flag: bool): bool { while (flag) { return mk().x == 2i32; } return false; }
+"#,
+    outcome: Outcome::Receipt {
+        typed_stats: (340057, 48998, 12),
+        graph: (GraphCompletion::Incomplete, (197917, 5950, 6)),
+        pre_equality_graph: (193367, 4510, 5),
+        roots: &[
+            Root {
+                name: "mk",
+                want: Want::Checked,
+                graph: None,
+                stats: (2517, 231, 4),
+            },
+            Root {
+                name: "wrap",
+                want: Want::Incomplete {
+                    blocker: r####"Outer { inner: mk() }"####,
+                },
+                graph: None,
+                stats: (2366, 155, 2),
+            },
+            Root {
+                name: "bare",
+                want: Want::Checked,
+                graph: None,
+                stats: (5192, 547, 4),
+            },
+            Root {
+                name: "grouped",
+                want: Want::Checked,
+                graph: None,
+                stats: (5197, 547, 5),
+            },
+            Root {
+                name: "both",
+                want: Want::Checked,
+                graph: None,
+                stats: (5705, 687, 4),
+            },
+            Root {
+                name: "viaLocal",
+                want: Want::Checked,
+                graph: None,
+                stats: (5282, 593, 4),
+            },
+            Root {
+                name: "bound",
+                want: Want::Incomplete {
+                    blocker: r####"mk().x"####,
+                },
+                graph: None,
+                stats: (2038, 108, 3),
+            },
+            Root {
+                name: "nested",
+                want: Want::Incomplete {
+                    blocker: r####"wrap().inner.x == 2i32"####,
+                },
+                graph: None,
+                stats: (2017, 98, 3),
+            },
+            Root {
+                name: "dead",
+                want: Want::Checked,
+                graph: None,
+                stats: (2071, 127, 3),
+            },
+            Root {
+                name: "looped",
+                want: Want::Checked,
+                graph: None,
+                stats: (5493, 720, 6),
+            },
+        ],
+    },
+}];
+
+/// The parent's typed cap for a source this ticket now admits reports
+/// `ResourceLimit` with no receipt (metering rule 11, the ticket's mandated flip).
+fn old_typed_caps(test: &str, sources: &[Source], old: Triple) {
+    installed(test, |request| {
+        for source in sources {
+            fs::write(&request.entry, format!("{IMPORTS}\n{}", source.text)).unwrap();
+            for test_mode in [false, true] {
+                let request = InstalledRequest {
+                    test_mode,
+                    ..request.clone()
+                };
+                let graph = loader::load_installed(request).unwrap();
+                let (parent, _) = limits(statistics(old));
+                let typed = analyze_typed(&graph, parent);
+                assert_eq!(
+                    typed.completion(),
+                    TypedCompletion::ResourceLimit,
+                    "test_mode {test_mode}"
+                );
+                assert!(typed.receipt().is_none(), "test_mode {test_mode}");
+            }
+        }
+    });
+}
+
 #[test]
-fn o01_shifted_point_waits_on_exclusive_deref_storage() {
+fn o01_shifted_point_checks_through_exclusive_deref_storage() {
     run(
-        "rfc_cases::o01_shifted_point_waits_on_exclusive_deref_storage",
+        "rfc_cases::o01_shifted_point_checks_through_exclusive_deref_storage",
         O1,
+    );
+}
+
+#[test]
+fn o01_old_typed_caps_give_resource_limit() {
+    old_typed_caps(
+        "rfc_cases::o01_old_typed_caps_give_resource_limit",
+        O1,
+        (325375, 47829, 12),
     );
 }
 
@@ -1575,10 +1918,43 @@ fn o05_disjoint_field_loans_check_and_field_arithmetic_blocks() {
 }
 
 #[test]
-fn o06_reborrowing_calls_wait_on_exclusive_deref_storage() {
+fn o06_reborrowing_calls_check_through_exclusive_deref_storage() {
     run(
-        "rfc_cases::o06_reborrowing_calls_wait_on_exclusive_deref_storage",
+        "rfc_cases::o06_reborrowing_calls_check_through_exclusive_deref_storage",
         O6,
+    );
+}
+
+#[test]
+fn o06_old_typed_caps_give_resource_limit() {
+    old_typed_caps(
+        "rfc_cases::o06_old_typed_caps_give_resource_limit",
+        O6,
+        (325245, 47754, 12),
+    );
+}
+
+#[test]
+fn o01_unadmitted_exclusive_writes_keep_their_parent_caps() {
+    run(
+        "rfc_cases::o01_unadmitted_exclusive_writes_keep_their_parent_caps",
+        EXCLUSIVE_WRITES_AT_PARENT,
+    );
+}
+
+#[test]
+fn o01_exclusive_i32_write_siblings_keep_their_screens() {
+    run(
+        "rfc_cases::o01_exclusive_i32_write_siblings_keep_their_screens",
+        EXCLUSIVE_WRITE_SIBLINGS,
+    );
+}
+
+#[test]
+fn o01_call_field_equality_operands_check_and_siblings_keep_their_screens() {
+    run(
+        "rfc_cases::o01_call_field_equality_operands_check_and_siblings_keep_their_screens",
+        CALL_FIELD_EQUALITY,
     );
 }
 
