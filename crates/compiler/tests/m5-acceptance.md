@@ -1841,11 +1841,45 @@ For the review's ruling on `003c414`: apart from the cap above, that commit repl
 
 No other cap or expectation moved. This is LLVM-free host ownership analysis. No Rill program ran.
 
-## Open acceptance obligations
+## Final record: deferred obligations (2026-11-23, ri-px1.11)
 
-- Nested and borrowed place projections, nested mutable storage effects and callee-exit checks for retained destinations. Preserve the covered distinction between a carried reference and a borrow of its slot when extending these routes.
-- General aggregate initialization, pattern and guard commitment, partial moves, iteration and rebuilding. Extend member scheduling beyond non-observable flat tuple cycles and establish diagnostics when no schedule is valid. Extend remaining-field cleanup to custom disposers over non-primitive fields and to protected obligations.
-- Callable invocation, borrowed passing and scoped jobs, multiple or computed captures, and erased/generic evidence. A known single captured value does not prove these modes.
-- Typed propagation/wrapping exits, statement-temporary dependencies, protected actions, cancellation edge obligations, and full graph coverage of bodies, startup and expectations. Pending call and provider contracts cannot produce a program receipt.
+This section replaces "Open acceptance obligations". It lists what M5 does not deliver and the bead that owns each item. The evidence for the rows that M5 does deliver is in [`m5-acceptance/`](m5-acceptance/README.md); the three closeout audits replay the K, C and P rows in both installed load modes: [`ri-785.10.md`](m5-acceptance/ri-785.10.md) (C rows, B5), [`ri-vgz.8.md`](m5-acceptance/ri-vgz.8.md) (P rows, C6) and [`ri-px1.10.md`](m5-acceptance/ri-px1.10.md) (K rows, D5). The case-by-case status is [`m5-status.md`](m5-status.md).
 
-No Rill program ran. Runtime, native/Wasm support, backend, CLI and client acceptance remain separate. Do not merge this increment or begin M6.
+Obligations of gap-analysis §1.6 that M5 cannot deliver (one bead each):
+
+| Obligation | Bead | Note |
+| --- | --- | --- |
+| C3 value `12`, any `expect` outcome | `ri-qlh.1` | Needs execution (M6). M5 publishes MIR for the O15 root only. |
+| C9 erased callable invocation | `ri-9ja` | Owner decision D4 (a). |
+| K6 cleanup-cycle rejection | `ri-1jk` | Owner decision D9: needs a diagnostic code and rule. |
+| K9 native completion | `ri-qlh.2` | M6: providers and a scheduler. |
+| P7 cancellation at a `for` with a live cursor | `ri-xat` | Owner decision D7. |
+| U6 complete graph ownership receipt | `ri-un6` | Successor work under D1 (b); related `ri-55r`. |
+| Hosted "Test: Native acceptance" jobs | `ri-yih` (closed) | Resolved by `ri-2q7` on rill `main` (`58befb9d`): the native workflow asserts the `test:runtime` stub and the job reports neutral. |
+
+Other deferrals recorded in the ticket index (`tickets/INDEX.md` of the planner's notes):
+
+| Deferred item | Bead | Decision |
+| --- | --- | --- |
+| Heterogeneous error wrap with canonical display (gated C7) | `ri-ink` | D7 |
+| Borrowed `Result` payloads (gated C8) | `ri-ijq` | D7 |
+| Borrowed iteration, M4 `Storage` handoff and M5 exit (gated C9, C10) | `ri-9z0` | D7 |
+| Explicit `dispose(Option<string>)` (gated D7) | `ri-082` | D8 |
+| Rigid generic `chooseOne<T>` root | `ri-55r` | D2, stays parked |
+| `replay:installed` task | `ri-fu8` | none |
+| Base-versus-candidate differential for M5 caps | `ri-jp5` | none |
+| `tools/check_metering.py` lint for uncharged keyed lookups | `ri-30q` | none |
+
+Found beads still open, each pinned at its current outcome in the audits (state checked 2026-11-23):
+
+| Bead | State | Gap |
+| --- | --- | --- |
+| `ri-ce4` | open | A grouped actual, call or receiver loses the M4 private `callableOnce` receipt (C8). |
+| `ri-e9t8` | needs triage | O16 `joinedOrder` and its expectation need `&&` lowering and index operands. |
+| `ri-o62c` | needs triage | A grouped List literal of records loses the M4 receipt (P6). |
+| `ri-4lq` | needs triage | A written `dispose(value.field)` in an active disposer is not a verified graph edge (K2 and O14 graph roots). |
+| `ri-kdi` | open | Records with reference fields are Incomplete at construction (O7, O19). |
+
+Also open and named by `m5-status.md` rows: `ri-w0g` (borrowed temporaries, `List<&T>` extraction, descriptor disposal, guard interpolation: O10, O12, O20, O22), `ri-ema` (user-declared retaining contracts: O9, O11, O13) and `ri-1up` (M4 `Storage` blocker on writes through `&mut`: O1, O2, O6, O8).
+
+M5 is not complete against the whole of RFC 0007. Whole-graph completion is not claimed: the pinned ordinary graph roots are `Incomplete` or `SourceRejected` by roots outside the delivered rows (`ri-un6`). No Rill program ran. Runtime, native/Wasm support, backend, CLI and client acceptance remain separate (M6, `ri-qlh`). Do not merge this increment or begin M6.
