@@ -537,6 +537,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             retaining_gate: None,
             retaining_gate_values: [true; 2],
             list_delivery_loop: None,
+            in_loop: false,
             scalar_copy_read: None,
             copied_origins: BTreeSet::new(),
             declared_shared_frame: false,
@@ -544,6 +545,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             return_contract,
             callable_frame: None,
             proved_variant_cleanup: Vec::new(),
+            observing_disposers: Vec::new(),
             budget,
         }
     }
@@ -1503,9 +1505,11 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         'g: 't,
     {
         let root = self.aggregate_root(node, custom_disposer, members.len())?;
+        let mut observed = false;
         for (projection, ty) in members {
             self.budget.step(1)?;
-            let reference_member = custom_disposer.is_none() && shared_primitive_reference(ty);
+            let reference_member = shared_primitive_reference(ty);
+            observed |= reference_member;
             let cleanup = if owns_text(ty) {
                 StorageCleanup::Drop
             } else if reference_member || matches!(ty.as_ref(), TypeTerm::Primitive(_)) {
@@ -1533,6 +1537,12 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 moves,
                 cleanup,
             });
+        }
+        // A custom disposer may read these references when it runs, so
+        // liveness keeps their sources until the record's cleanup.
+        if observed && custom_disposer.is_some() {
+            self.budget.reserve(1)?;
+            self.observing_disposers.push(root);
         }
         Ok(root)
     }
@@ -2743,12 +2753,15 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                         breaks: next,
                         continues: backedge,
                     });
+                    let outer = std::mem::replace(&mut self.in_loop, true);
                     let yes = self.statement(
                         children[1],
                         backedge,
                         Exits { looping, ..exits },
                         depth + 1,
-                    )?;
+                    );
+                    self.in_loop = outer;
+                    let yes = yes?;
                     self.retaining_gate_values = parent;
                     let head = self.condition(cond, yes, next, depth + 1)?;
                     self.code[backedge].edges = Edges::Next(head);
@@ -7568,6 +7581,107 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         self.closure(*argument, stage, frame, depth + 1)
     }
 
+    /// The written shape of a family call whose selected implementation the
+    /// caller reads as its declared contract (RFC 0007 line 204): one `&mut`
+    /// borrow of a named local passed to an implementation returning `&i32`.
+    /// Pure syntax and type screens; nothing here is metered, so every other
+    /// family call keeps its old blocker at its old cost.
+    fn family_view_shape(
+        &self,
+        facts: &ExpressionFacts<'g>,
+        call: &CallFacts<'g>,
+        into: Option<Slot>,
+    ) -> bool {
+        let syntax = &self.module.syntax.nodes;
+        let [argument] = call.arguments.as_slice() else {
+            return false;
+        };
+        into.is_some()
+            && !self.in_loop
+            && call.selection.is_some()
+            && call.callee.kind == DeclarationKind::Family
+            && call.callee.module.origin == Origin::Application
+            && call.pipe_input.is_none()
+            && call.defaults.is_empty()
+            && call.scoped_join.is_none()
+            && call.list_arrows.is_none()
+            && syntax[*argument].kind == NodeKind::Prefix("&mut")
+            && matches!(syntax[*argument].children.as_slice(), [operand]
+                if syntax[*operand].kind == NodeKind::ValueReference)
+            && matches!(facts.ty.as_ref(), TypeTerm::Reference { mutable: false, referent }
+                if scalar::scalar(referent) == Some(Primitive::I32))
+    }
+
+    /// A family call resolved to an `implement` in this module, checked
+    /// against that implementation's declared signature: `&mut List<i32>` in,
+    /// `&i32` out. The caller never reads the implementation's body.
+    fn call_family_selected(
+        &mut self,
+        node: NodeId,
+        facts: &ExpressionFacts<'g>,
+        call: &CallFacts<'g>,
+        into: Option<Slot>,
+        next: Pc,
+        depth: usize,
+    ) -> ResultOf<Pc> {
+        let pending = || Stop::Pending(node);
+        let (Some(into), Some(selection), [argument]) =
+            (into, call.selection.as_ref(), call.arguments.as_slice())
+        else {
+            return Err(pending());
+        };
+        let implementation = selection.implementation;
+        self.budget.step(1 + self.module.key.path.len())?;
+        if implementation.module != self.module.key
+            || implementation.kind != DeclarationKind::Implementation
+            || !selection.substitution.is_empty()
+        {
+            return Err(pending());
+        }
+        // The family's captured facts hold each implementation's declared
+        // signature. The map is keyed by a declaration identity holding the
+        // module path, so charge the probe like the header lookups.
+        let ordinary = self.typed.inventory();
+        graph::charge_key(&call.callee.module, ordinary.family_probes(), self.budget)?;
+        let family = ordinary.captured_family(call.callee).ok_or_else(pending)?;
+        self.budget.step(family.implementations.len())?;
+        let header = &family
+            .implementations
+            .iter()
+            .find(|body| body.source.declaration == *implementation)
+            .ok_or_else(pending)?
+            .header;
+        let DeclarationShape::Function { parameters, result } = &header.shape else {
+            return Err(pending());
+        };
+        let [formal] = parameters.as_slice() else {
+            return Err(pending());
+        };
+        let actual = self.normal_value(*argument)?;
+        if !header.binders.is_empty()
+            || *result != facts.ty
+            || formal.ty != actual.ty
+            || !matches!(formal.ty.as_ref(), TypeTerm::Reference { mutable: true, referent }
+                if self.is_list_i32(referent))
+        {
+            return Err(pending());
+        }
+        let actual_ty = actual.ty.clone();
+        let stage = self.slot(*argument, &actual_ty)?;
+        self.budget.reserve(2)?;
+        let index = self.calls.len();
+        self.calls.push(Call {
+            callee: implementation,
+            forwarding_prefix: None,
+            args: vec![stage],
+            into: Some(into),
+            result: CallResult::RetainsExclusiveInput,
+            destination: None,
+        });
+        let call_pc = self.emit(node, Action::Call(index), Edges::Next(next))?;
+        self.expression(*argument, Some(stage), call_pc, depth + 1)
+    }
+
     fn call(
         &mut self,
         node: NodeId,
@@ -7712,6 +7826,9 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             }
         }
         if checked_carrier.is_none() && !call.substitution.is_empty() {
+            if self.family_view_shape(facts, call, into) {
+                return self.call_family_selected(node, facts, call, into, next, depth);
+            }
             return self.call_declared_once(node, facts, call, into, next, depth);
         }
         if !Self::direct_application_call(call)

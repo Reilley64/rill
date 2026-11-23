@@ -138,7 +138,12 @@ type Alternatives<'g> = Vec<Residence<'g>>;
 enum ValueUse {
     Used,
     Statement,
-    Binding { pattern: NodeId, depth: usize },
+    /// The scrutinee of a Boolean match that has no typed source place.
+    Scrutinee,
+    Binding {
+        pattern: NodeId,
+        depth: usize,
+    },
 }
 
 #[derive(Clone, Copy)]
