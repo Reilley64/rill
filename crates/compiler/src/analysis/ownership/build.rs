@@ -123,6 +123,8 @@ struct CheckedPropagation<'a, 'g> {
     operand: &'a Type<'g>,
     wrapper: Option<&'g DeclarationId>,
     option_take: Option<(&'a Type<'g>, OptionTakeSource<'a, 'g>)>,
+    /// The owning `string` success payload of a `Result<string, i32>` carrier.
+    result_text: Option<&'a Type<'g>>,
 }
 
 // The caller has already proved the canonical parent and i32 error type.
@@ -941,6 +943,14 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                     (true, StorageCleanup::Unlowered)
                 }
             }
+            TypeTerm::Nominal { .. } | TypeTerm::Variant { .. }
+                if let Some((role, _)) = self.text_result_role(ty) =>
+            {
+                self.prove_no_variant_disposer(node, ty, [role.ok, role.err])?;
+                // Postfix consumes the carrier. Cleanup of a live carrier
+                // would need variant-aware disposal.
+                (true, StorageCleanup::Unlowered)
+            }
             TypeTerm::Nominal { .. } => {
                 let fields = self.record_fields(ty)?.ok_or(Stop::Pending(node))?;
                 let disposer = self.outer_disposer(node, ty)?;
@@ -1351,6 +1361,36 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             && matches!(success.as_ref(), TypeTerm::Primitive(p) if matches!(p.name(), "bool" | "i32"))
             && matches!(error.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32"))
             .then_some((role, variant))
+    }
+
+    /// `Result<string, i32>` or one of its variants, with its success payload type.
+    fn text_result_role<'t>(
+        &self,
+        ty: &'t TypeTerm<'g>,
+    ) -> Option<(&'a ResultRole<'g>, &'t Type<'g>)> {
+        let role = self.typed.result_role()?;
+        role.representation?;
+        let parent = match ty {
+            TypeTerm::Variant {
+                parent,
+                declaration,
+            } if *declaration == &role.ok.id || *declaration == &role.err.id => parent.as_ref(),
+            other => other,
+        };
+        let TypeTerm::Nominal {
+            declaration,
+            arguments,
+        } = parent
+        else {
+            return None;
+        };
+        let [success, error] = arguments.as_slice() else {
+            return None;
+        };
+        (*declaration == &role.declaration.id
+            && owns_text(success)
+            && matches!(error.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32"))
+        .then_some((role, success))
     }
 
     fn prove_no_variant_disposer(
@@ -2301,6 +2341,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                         next,
                         exits.returning.ok_or(Stop::Pending(initializer))?,
                         initializer_depth,
+                        true,
                     );
                 }
                 if let Some(call) = self.check_value_call_propagation(
@@ -2433,7 +2474,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                     self.ungroup_expression_at(value, depth + 1)?;
                 if self.propagates_directly(expression)? {
                     let returning = exits.returning.ok_or(Stop::Pending(expression))?;
-                    self.propagate(expression, None, next, returning, expression_depth)
+                    self.propagate(expression, None, next, returning, expression_depth, true)
                 } else if let Some(call) = self.check_value_call_propagation(
                     expression,
                     true,
@@ -3670,6 +3711,18 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         facts: &'a ExpressionFacts<'g>,
         depth: usize,
     ) -> ResultOf<CheckedPropagation<'a, 'g>> {
+        self.checked_propagation_at(node, facts, depth, false)
+    }
+
+    /// `statement` admits an owning `Result<string, i32>` operand: a postfix
+    /// that is the whole initializer of a binding or an expression statement.
+    fn checked_propagation_at(
+        &mut self,
+        node: NodeId,
+        facts: &'a ExpressionFacts<'g>,
+        depth: usize,
+        statement: bool,
+    ) -> ResultOf<CheckedPropagation<'a, 'g>> {
         let syntax = &self.module.syntax.nodes[node];
         let (id, result) = self.return_contract.ok_or(Stop::Pending(node))?;
         let (exit, wrap, fresh) = match &facts.data {
@@ -3702,10 +3755,29 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             }
             (source, &operand.ty, Some(operand))
         };
+        let mut result_text = None;
         let (wrapper, option_take) = if let Some(error) = &exit.error {
-            let (role, _) = self
-                .scalar_result_role(operand)
-                .ok_or(Stop::Pending(node))?;
+            let role = if let Some((role, _)) = self.scalar_result_role(operand) {
+                role
+            } else if statement
+                && syntax.kind == NodeKind::Propagate
+                && let Some((role, payload)) = self.text_result_role(operand)
+                // Screen on paid facts: only a whole named owner moves.
+                && source_facts
+                    .and_then(|facts| facts.path.as_ref())
+                    .is_some_and(|path| {
+                        path.projections.is_empty()
+                            && matches!(
+                                path.root.kind,
+                                DeclarationKind::Binding | DeclarationKind::Parameter
+                            )
+                    })
+            {
+                result_text = Some(payload);
+                role
+            } else {
+                return Err(Stop::Pending(node));
+            };
             if !matches!(self.scalar_result_role(result), Some((_, None)))
                 || exit.success != &role.ok.id
                 || exit.failure != &role.err.id
@@ -3784,6 +3856,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             operand,
             wrapper,
             option_take,
+            result_text,
         })
     }
 
@@ -3829,10 +3902,11 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         next: Pc,
         return_cleanup: Pc,
         depth: usize,
+        statement: bool,
     ) -> ResultOf<Pc> {
         self.depth(depth)?;
         let facts = self.value(node)?;
-        let checked = self.checked_propagation(node, facts, depth)?;
+        let checked = self.checked_propagation_at(node, facts, depth, statement)?;
         self.lower_checked_propagation(node, into, next, return_cleanup, depth, checked)
     }
 
@@ -3855,6 +3929,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             operand,
             wrapper,
             option_take,
+            result_text,
         } = checked;
         let pipe_arguments = if piped
             && fresh.is_none()
@@ -3900,19 +3975,26 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             None
         };
         let (success, failure) = if let Some(wrapper) = wrapper {
-            let success = exit
-                .can_continue
-                .then(|| {
-                    self.emit(
-                        node,
-                        Action::TakeResultSuccess {
-                            operand: scratch,
-                            into,
-                        },
-                        Edges::Next(next),
-                    )
-                })
-                .transpose()?;
+            let success = if !exit.can_continue {
+                None
+            } else {
+                let (into, next) = match (into, result_text) {
+                    (None, Some(ty)) => {
+                        // A discarded owning payload drops before the continuation.
+                        let payload = self.slot(node, ty)?;
+                        (Some(payload), self.cleanup(node, &[payload], next)?)
+                    }
+                    _ => (into, next),
+                };
+                Some(self.emit(
+                    node,
+                    Action::TakeResultSuccess {
+                        operand: scratch,
+                        into,
+                    },
+                    Edges::Next(next),
+                )?)
+            };
             let failure = return_slot
                 .map(|(output, export)| {
                     if let Some(data) = wrap {
@@ -5192,7 +5274,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 );
             }
             NodeKind::Literal => into.map_or(Action::None, Action::Init),
-            NodeKind::Binary("*" | "+") if self.admits_checked_i32_arithmetic(node, facts) => {
+            NodeKind::Binary("*" | "+") if facts.bounded_i32_arithmetic => {
                 return self.checked_i32_arithmetic(node, facts, into, next, depth);
             }
             NodeKind::Index => return self.read_list_i32(node, facts, into, next, depth),
@@ -6301,7 +6383,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
     ) -> ResultOf<Pc> {
         // The proof already read this root; lowering reads its syntax and facts again.
         self.budget.step(2)?;
-        self.propagate(argument.root, into, next, failure_cleanup, depth + 1)
+        self.propagate(argument.root, into, next, failure_cleanup, depth + 1, false)
     }
 
     fn stage_propagating_argument(
@@ -6878,6 +6960,178 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         self.expression(*argument, Some(stage), transfer, depth + 1)
     }
 
+    /// A bounded call frame for a private once wrapper, closed by this actual
+    /// call: `function f<F>(job: F): R where callableOnce(F, [], R) { return job(); }`
+    /// called with a written pair arrow. The actual is formed into one stage,
+    /// moves into the formal and is consumed by the wrapper's one invocation;
+    /// its output is this call's result. The wrapper's own root stays open.
+    fn call_declared_once(
+        &mut self,
+        node: NodeId,
+        facts: &ExpressionFacts<'g>,
+        call: &CallFacts<'g>,
+        into: Option<Slot>,
+        next: Pc,
+        depth: usize,
+    ) -> ResultOf<Pc> {
+        let pending = || Stop::Pending(node);
+        // Keep the blocker at this call, never at the arrow or the callee.
+        let at_call = |stop| match stop {
+            Stop::Pending(_) => pending(),
+            stop => stop,
+        };
+        let syntax = &self.module.syntax.nodes;
+        // Screen the written shape before any metered lookup. Every other
+        // generic call keeps its old blocker at its old cost.
+        let (Some(into), [argument], [substitution]) = (
+            into,
+            call.arguments.as_slice(),
+            call.substitution.as_slice(),
+        ) else {
+            return Err(pending());
+        };
+        if call.callee.kind != DeclarationKind::Function
+            || call.callee.module.origin != Origin::Application
+            || call.pipe_input.is_some()
+            || !call.defaults.is_empty()
+            || call.selection.is_some()
+            || call.scoped_join.is_some()
+            || !matches!(syntax[node].children.as_slice(), [_, written] if written == argument)
+            || syntax[*argument].kind != NodeKind::Arrow
+            || self.slots[into].members != 2
+            // This first witness admits only the carried shared/Bool pair.
+            || !matches!(facts.ty.as_ref(), TypeTerm::Tuple(elements)
+                if matches!(elements.as_slice(), [descriptor, bit]
+                    if matches!(descriptor.as_ref(), TypeTerm::Reference { mutable: false, referent }
+                        if scalar::scalar(referent) == Some(Primitive::Bool))
+                        && scalar::scalar(bit) == Some(Primitive::Bool)))
+        {
+            return Err(pending());
+        }
+        self.budget.step(1 + self.module.key.path.len())?;
+        if call.callee.module != self.module.key {
+            return Err(pending());
+        }
+        let headers = &self.typed.inventory().type_facts().declarations;
+        graph::charge_key(&call.callee.module, headers.len(), self.budget)?;
+        let header = headers
+            .get(call.callee)
+            .filter(|header| std::ptr::eq(call.callee, &header.declaration.id))
+            .ok_or_else(pending)?;
+        let ([binder], DeclarationShape::Function { parameters, result }) =
+            (header.binders.as_slice(), &header.shape)
+        else {
+            return Err(pending());
+        };
+        let [formal] = parameters.as_slice() else {
+            return Err(pending());
+        };
+        if header.declaration.public
+            || header.declaration.scope.is_some()
+            || binder.position != 0
+            || substitution.position != 0
+            || !std::ptr::eq(substitution.binder, &binder.declaration.id)
+            || !matches!(formal.ty.as_ref(), TypeTerm::Parameter { declaration, position: 0 }
+                if std::ptr::eq(*declaration, &binder.declaration.id))
+            || *result != facts.ty
+        {
+            return Err(pending());
+        }
+        let actual = self.normal_value(*argument).map_err(at_call)?;
+        if actual.access != Access::Owned
+            || actual.ty != substitution.argument
+            || !matches!(actual.ty.as_ref(), TypeTerm::Callable { parameters, result: output, .. }
+                if parameters.is_empty() && *output == *result)
+        {
+            return Err(pending());
+        }
+        // The wrapper's body is exactly `return job();`: one owned once
+        // invocation of the unprojected formal under its own requirement.
+        let [_, body] = syntax[header.declaration.node].children.as_slice() else {
+            return Err(pending());
+        };
+        let [returned] = syntax[*body].children.as_slice() else {
+            return Err(pending());
+        };
+        let [invocation] = syntax[*returned].children.as_slice() else {
+            return Err(pending());
+        };
+        if syntax[*body].kind != NodeKind::Block
+            || syntax[*returned].kind != NodeKind::Return
+            || syntax[*invocation].kind != NodeKind::Call
+        {
+            return Err(pending());
+        }
+        // Four node-fact probes below, then the indexed goal.
+        self.budget
+            .step(4 * (self.facts.nodes().len().checked_ilog2().unwrap_or(0) as usize + 1) + 1)?;
+        if !matches!(self.fact(returned).map(|fact| &fact.kind),
+            Some(NodeFactKind::Return { target }) if std::ptr::eq(*target, call.callee))
+        {
+            return Err(pending());
+        }
+        let invoked = self
+            .fact(invocation)
+            .and_then(|fact| fact.callable.as_ref()?.invocation.as_deref())
+            .ok_or_else(pending)?;
+        let path = invoked.path.as_ref().ok_or_else(pending)?;
+        let receiver = self.value(invoked.receiver).map_err(at_call)?;
+        if syntax[*invocation].children.as_slice() != [invoked.receiver]
+            || syntax[invoked.receiver].kind != NodeKind::ValueReference
+            || invoked.mode != InvocationMode::Once
+            || invoked.access != Access::Owned
+            || !std::ptr::eq(path.root, &formal.declaration.id)
+            || !path.projections.is_empty()
+            || receiver.access != Access::Owned
+            || receiver.ty != formal.ty
+            || self.value(*invocation).map_err(at_call)?.ty != *result
+        {
+            return Err(pending());
+        }
+        let goal = invoked
+            .assumption
+            .as_ref()
+            .and_then(|id| self.typed.bodies().goal(id).ok())
+            .ok_or_else(pending)?;
+        let metadata = self.typed.inventory().headers();
+        graph::charge_key(&call.callee.module, metadata.len(), self.budget)?;
+        let metadata = metadata.get(call.callee).ok_or_else(pending)?;
+        let [requirement] = metadata.requirements.as_slice() else {
+            return Err(pending());
+        };
+        if !metadata.defaults.is_empty()
+            || goal.state != GoalState::Assumption
+            || goal.premise.is_some()
+            || goal.hypothetical.is_some()
+            || !std::ptr::eq(goal.source.module, &self.module.key)
+            || goal.source.node != requirement.node
+            || !matches!(&goal.judgment, GoalJudgment::Requirement {
+                target: ordinary::RequirementTarget::Predicate(id),
+                arguments,
+            } if id.name() == "callableOnce"
+                && matches!(arguments.as_slice(), [job, inputs, output]
+                    if *job == formal.ty && output == result
+                        && matches!(inputs.as_ref(), TypeTerm::Tuple(inputs) if inputs.is_empty())))
+        {
+            return Err(pending());
+        }
+        let stage = self.slot(*argument, &actual.ty)?;
+        let frame = self.emit(
+            node,
+            Action::InvokeClosurePair {
+                receiver: stage,
+                into,
+                call: PairCall::DeclaredOnce {
+                    callee: &header.declaration.id,
+                    formal: formal.declaration.node,
+                    invocation: *invocation,
+                },
+            },
+            Edges::Next(next),
+        )?;
+        self.closure(*argument, stage, frame, depth + 1)
+    }
+
     fn call(
         &mut self,
         node: NodeId,
@@ -7005,6 +7259,9 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             if let Some(route) = route {
                 return self.call_two_list_arrows(node, route, into, next, depth);
             }
+        }
+        if checked_carrier.is_none() && !call.substitution.is_empty() {
+            return self.call_declared_once(node, facts, call, into, next, depth);
         }
         if !Self::direct_application_call(call)
             || into.is_some_and(|slot| self.slots[slot].contains_guard())

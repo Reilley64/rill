@@ -2,6 +2,8 @@
 
 M5 ri-2s0 is open. This is a scoped compiler increment. It does not satisfy the whole [M5 exit gate](../../../docs/implementation-plan.md#ordered-milestones).
 
+Each M5 ticket records its evidence in its own file in [`m5-acceptance/`](m5-acceptance/README.md), named after its ticket. Those records are part of this ledger. Sections below were added before 2026-11-23, when tickets still wrote them here.
+
 ## Verified input and authority
 
 The input is the M4 merge `b6af60a0a6cc175e386593769fbfd97087d8f04e`. Its tree `3211ffdb3a2ae42ddfb2129f9beb978b3fe249a4` matches [M4 PR #58](https://github.com/Reilley64/rill/pull/58) head `0a924afe92b7077ba2b0e89c9598a667b77d1bc5`. The [installed command](../../../docs/development.md#future-installed-toolchain) returned `Checked` with no core blockers and issued receipts in both modes on macOS AArch64 at the input commit. The [M4 record](m4-8-acceptance.md#verified-closeout-revision) names the original checked revisions and negative cases. This evidence does not extend to other installed profiles, execution, or native ABI acceptance.
@@ -1663,6 +1665,101 @@ At `db944e6`, all three wildcard repros are `SourceRejected` with `R0103` in bot
 The historical caps of review `a3839064` were already pinned by `bd10617`: `call14` 331,637/49,402/12, `split14` 331,989/49,850/12 and `known14` 333,400/50,513/12 check, and twelve equivalent arm-local copy classes check within 54,002 entries. At `5ab195a`, `call14` is `ResourceLimit` at its cap (it needs 331,945 work and 49,472 entries).
 
 No compiler source changed and no cap moved. This is M4 Result use, not an ownership proof, and it does not clear the review state of the Boolean lane recorded above. No Rill program ran.
+
+## Invoking a declared once formal at its actual caller (2026-11-23)
+
+For ri-785.6, the caller in `return invoke(() => [flag, seed]);` now checks when `invoke` is the private wrapper `function invoke<F>(job: F): [&bool, bool] where callableOnce(F, [], [&bool, bool]) { return job(); }`. The [installed capture tests](m5/captures.rs) check that the wrapper's body is exactly one owned once invocation of its unprojected formal under the wrapper's own requirement, and that the written actual is the read-only `&bool`/`bool` pair arrow. MIR forms the pair into one stage, then `InvokeDeclaredOnce` moves that stage into the formal `job: F` and consumes it at `job()`. It ends that one owner and drops nothing. The returned reference keeps the closure's carried backing. The caller's ordinary graph root records a closed `DeclaredOnceInvocation` edge to `invoke`.
+
+| Caller | Targeted lowering and ordinary graph root | Target cap (work / entries / depth) |
+| --- | --- | --- |
+| `flag: &bool` parameter | `Checked`, the frame above | 5,631 / 299 / 6 |
+| `flag = &local` | `R0202` at the `return`, related to `local`. No MIR. | 5,911 / 408 / 6 |
+| `flag = &local`, then `local = seed;` | `R0203` at the write, related to `&local`. No MIR. | 5,886 / 396 / 6 |
+| `dispose(seed);` before the call | `R0200` at the captured `seed`, related to `dispose(seed)`. No MIR. | 5,904 / 356 / 6 |
+| A finished sibling read of `flag` before the call | `Checked`, the same frame | 6,142 / 525 / 6 |
+
+The positive graph checks at 190,668 / 4,266 / 6; the graph of the four contrasts checks at 207,024 / 5,391 / 6. Independently one-short limits give `ResourceLimit` with no finding and no MIR. Both installed load modes agree. The standalone `invoke` root still stops at `job: F` with no MIR. Grouping the actual, the call or the wrapper's receiver, nesting the `return` in a block or a `while`, or binding the result before returning still leaves M4 `Incomplete` at `CallBoundary`, with no receipt and the typed caps measured at `5882113b`. No ownership query reaches the frame for those shapes. The M4 receipt stays at 326,305 / 47,955 / 12. The erased `job: once () => [&bool, bool]` wrapper still has no receipt (324,473 / 47,678 / 12), and the local shared descriptor still checks at 2,838 / 384 / 5. This is one bounded witness, not a proof for every `F`, a public or erased callable contract, or Rill execution. ri-785 remains open.
+
+## Moving the string out of an owned `Result<string, i32>` (2026-11-23, ri-vgz.4)
+
+At `5882113` every body with a `Result<string, i32>` parameter stopped at that parameter. [`result_text.rs`](m5/propagation/result_text.rs) now checks `let value = input?;` in a function returning `Result<bool, i32>`, in both installed load modes, for the targeted query and the graph root:
+
+| Edge | Ownership MIR |
+| --- | --- |
+| `Ok` | `TakeResultSuccess` moves the string into `value`. The return value is exported, then `value` drops once, then the other lexical owners. |
+| `Err` | `ForwardResultFailure` exports the same wrapper before lexical cleanup. There is no payload to drop. |
+| Discard (`let _ = input?;`, `input?;`) | The taken string drops once before the continuation. |
+
+The grouped operand `((input))?`, the grouped postfix `(input?)`, an alias `held?`, both known variants, an `if`/`else` scope and a `while (true)` loop also check. A second read of the payload gives `R0200` at the second `value`, related to the first; a second postfix on the carrier gives `R0200` at `input`; a move under a live `&input` gives `R0203`. The bound form checks at 4,605 work / 715 entries / depth 4, its graph at 188,540 / 4,676 / 4; the test pins every case at exact caps, and one short in each dimension gives `ResourceLimit`.
+
+Only a whole named owner in a binding initializer or expression statement qualifies; the screen reads facts already paid for. Wrapping (`input ? 7i32`), a nested argument (`take(input?)`) and a `Result<string, i32>` return stay `Incomplete`, now at their own sites rather than the parameter. A constructor source and a call source keep their targeted caps from `5882113` (2,979 / 231 / 4 and 2,993 / 238 / 4). A function returning `Result<string, i32>` now allocates its return slot before its existing blocker, so a graph holding one costs more: the call-source module rises from 187,498 / 4,211 / 4 to 188,600 / 4,408 / 4. A live carrier at lexical exit still has no cleanup (`Incomplete`); M4 issues no receipt for a body that can leave the carrier unconsumed. Scalar `Result` tests in `m5/propagation.rs` are unchanged. No Rill program ran.
+
+## Graph root inventory at the integration tip
+
+Recorded 2026-11-22 for `ri-2s0.2` (U1). [`graph/inventory.rs`](m5/graph/inventory.rs) reproduces every count below through the installed compiler in both load modes; no count comes from a probe outside the repository. It asserts each application root by name and each standard module's checked and incomplete roots, so a later ticket that flips one root changes one row. No production code changed. The full graph receipt is successor work under owner decision D1 (a): the finite matrix is the M5 exit gate, and `ri-un6` holds the complete receipt.
+
+The 17-source capture is [`tests/installed/typed`](../../../tests/installed/typed/main.rill) with `checks.rill`: 17 standard modules. The 18-source capture adds `import std::routine::join`, `joined`, `joinedOrder` and `expect joinedOrder()`, which loads `routine.rill`. Both captures give typed receipts at the fixed M4 caps, 372,246 work, 54,059 entries and depth 12 and 495,879, 56,822 and 12. `analyze_ownership` returns `Incomplete` with a complete inventory, no finding and no active disposer in both captures and both modes. Its own meter reads 202,698 work, 4,871 entries and depth 3 for the 17-source capture and 243,206, 25,960 and 10 for the 18-source one. Each is exact at its caps, and one short on any single axis gives `ResourceLimit` with no root MIR.
+
+| | 17 sources | 18 sources |
+| --- | --- | --- |
+| Roots | 184 | 189 |
+| Checked | 49 | 51 |
+| Incomplete | 135 | 138 |
+| Application roots, checked of total | 4 of 19 | 5 of 22 |
+| Standard roots, checked of total | 45 of 165 | 46 of 167 |
+
+**Checked roots.** Application: the startup, `ready` and `expect ready()` in `checks.rill`, and `expect ready()` in `main.rill`; the 18-source capture adds `joined`. Standard: every loaded module's startup (17, or 18 with `routine.rill`) and 28 `core.rill` implementations, the 14 primitive copies and 14 primitive disposals. A checked root has MIR and no blocker; an incomplete root has a blocker and no MIR. No root is `SourceRejected` or `ResourceLimit` at the default caps.
+
+**Incomplete application roots.** Fifteen in the 17-source capture: `main.rill`'s startup, the `chooseOne` implementation, `usesOrdinary`, `convertAndShow`, `visit`, `listLifecycle`, `retain`, `releaseNative`, `inspectMapped`, `mapSuccess`, `parse`, `wrap`, `render`, and the expectations `usesOrdinary(1i32)` and `isOk(&Result.Ok(true))`. The 18-source capture adds `joinedOrder` and `expect joinedOrder()`. The local join in `joined` is a checked root, but the standard `join` wrapper beneath it is not.
+
+**Incomplete standard roots by family.** 120 in both captures; the 18-source capture adds one more, the generic `join` wrapper in `routine.rill`.
+
+| Family | Modules (incomplete roots) | Roots | Successor |
+| --- | --- | ---: | --- |
+| Core text and comparison | `char` 2, `compare` 14, `core` 2, `number` 4 | 22 | `ri-v1s` |
+| Bytes, conversions and string | `bytes` 7, `convert` 14, `string` 1 | 22 | `ri-nuq` |
+| List and iterator | `collection` 4, `iter` 9 | 13 | `ri-2y4` |
+| Native and protected wrappers | `channel` 3, `mutex` 1, `shared` 2 | 6 | `ri-nf7` |
+| Generic Option/Result | `option` 5, `result` 13 | 18 | `ri-2ov` |
+| Diagnostics text and formatting | `error` 22, `format` 17 | 39 | `ri-3dy` |
+| Scoped join (18-source capture only) | `routine` 1 | 1 | `ri-a3j` |
+
+**Open graph obligations.** `analyze_ownership` returns the same three in every run, by constant, and `GraphCompletion` has no success variant: `IntrinsicCancellation`, `MaskingAndJoin` and `EmbeddedAndUnreachedSource`. `inventory_complete` promises the source-root inventory only, not every embedded or reached contract.
+
+This is compiler and MIR evidence. No Rill program ran, and the inventory does not discharge any obligation.
+
+## 2026-11-23: M4 Result use for a borrowed declared callable (ri-785.5)
+
+`function run<F>(job: &F): bool where callable(F, [], bool) { return job(); }` closed by `return run(&f);`, where `f` is a local read-only `() => bool` arrow, now issues an M4 receipt (`declared-shared-actual`, 325,244 work / 47,828 entries / depth 12). The [callable-once test](m4_8_callable_once.rs) covers it in both installed load modes, with exact caps and each limit independently one short. The wrapper's deferred `CallBoundary` at `job()` resolves only when every reference to the private wrapper is such a closed call. Each call reads the referent residence of `&f` in place: the caller keeps the descriptor and every capture occurrence. It never consumes through the borrow.
+
+Unchanged from the parent revision: the uncalled wrapper `declared-shared-only` stays `Incomplete` at 321,706 / 47,419 / 12, `declared-shared-output-discard` keeps `R0103` at `run(&f);` at 325,584 / 47,950 / 12, and `borrowed-once` stays M4 `SourceRejected` at 324,058 / 47,748 / 12. The dead-only, exported, grouped-argument (`run((&f))`), block-scoped and loop-wrapped controls keep their parent caps. A formal actual costs one more step (323,599 → 323,600) and an arrow borrowing a caller's `Result` 16 more (325,321 → 325,337); both stay `Incomplete`, and the latter keeps its `R0103` at the caller's exit. The 17-source baseline still checks at exactly 372,246 / 54,059 / 12 in both modes.
+
+This is Result use only. M5 still stops `caller` at `Incomplete` in the target (1,891 / 42 / 3) and the ordinary graph root, with no MIR; the borrowed invocation's ownership proof is ri-785 B3. No Rill program ran.
+
+## O15 arithmetic on a charged M4 fact (2026-11-22, ri-785.1)
+
+This answers Standards blocker `c61a0a14`. M4's flow pass now classifies each normal `i32` expression from its children's classes and publishes one fact, `bounded_i32_arithmetic`, for `local * literal` and for a local or that product plus a local. M5 admits `*` and `+` on that fact and no longer probes nodes or locals to decide admission. Each arithmetic read of a local charges its key with `charge_key`, once per probe.
+
+The tests run in both installed load modes:
+
+- `arithmetic_local_reads_charge_their_module_path` reproduces the finding. The same body in a module whose path is 48 bytes longer costs 192 more work than a control body that reads the same locals without arithmetic. Before the fix the difference was 0.
+- `rfc_counter_caps_include_the_charged_local_reads`: `counter` is `Checked` at 2,562/329/6 and `ResourceLimit` one short on each axis. The graph is `Incomplete` at 187,543/4,297/6, with `ResourceLimit` one short on each axis. The reads of `first` and `second` add 2 × (10 × 3 − 1) = 58 work to each; the 2026-11-21 replay before this change recorded 2,504 and 187,485.
+- `counter_expectation_keeps_its_incomplete_cap`: on the 17-source baseline plus the counter, `counter() == 12i32` stays `Incomplete` at 2,279/210/1, both targeted and as an ordinary graph root, with `ResourceLimit` one short on each axis.
+
+The six earlier O15 tests pass with no number changed. The M4 17-source baseline was measured before and after the change: exactly 372,246/54,059/12 in both modes, with no receipt one short on any axis. No Rill program ran.
+
+## Re-pinning the O15 counter row of `m5::rfc_cases` (2026-11-23, ri-785.1)
+
+This applies the planner's decision of 2026-11-23 on `ri-2s0` and metering rule 11 to the first `rfc_cases` row that a mandated change moves. H2 (`ri-px1.2`) pinned the O15 source after A2 was built, with the pre-A2 numbers. The merge of A2 blocked on that one expectation.
+
+| Meter | Old | New |
+| --- | --- | --- |
+| `counter` targeted | 2,504 / 329 / 6 | 2,562 / 329 / 6 |
+| Whole graph (`Incomplete`) | 187,485 / 4,297 / 6 | 187,543 / 4,297 / 6 |
+
+The reason is one cause: A2 charges the reads of `first` and `second` in `first * 10i32 + second` with `charge_key`, so each read charges the 10-byte key `"main.rill"` three times in place of one step. That is 2 × (10 × 3 − 1) = 58 work, in `counter`'s targeted query and again in the whole graph. Entries and depth are unchanged, and the targeted query sets the graph's depth as before. This is the effect of review `c61a0a14`; no other cause moves either meter. The `expect` root (1,893 / 32 / 1) and the typed receipt (323,681 / 47,925 / 12) are unchanged. The numbers of the new row equal those that `m5/o15_arithmetic.rs::rfc_counter_caps_include_the_charged_local_reads` already pins.
+
+`m5::rfc_cases::o15_pre_charge_counter_caps_now_give_resource_limit` asserts, in both installed load modes, that the old caps give `ResourceLimit`: 2,504 / 329 / 6 on the `counter` query (no MIR, no findings) and 187,485 / 4,297 / 6 on the graph. No other `rfc_cases` row and no number in `o15_arithmetic.rs` changed. No Rill program ran.
 
 ## Open acceptance obligations
 
