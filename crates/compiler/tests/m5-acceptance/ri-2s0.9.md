@@ -1,6 +1,6 @@
 # ri-2s0.9 (ci-o11j): O22 `dispose(view)` of a `&string` ends only that descriptor, 2026-11-24
 
-Status: built; closed `blocked` on one rule-4 question (O21 siblings moved, below).
+Status: built; the chief of staff accepted the O21 sibling flip (ruling below); the replacement witness is added (ci-bwnu).
 
 ## Reading
 
@@ -38,16 +38,26 @@ Whole results (each root and the whole graph also replayed at the exact cap and 
 - O22 source 0 typed: old `Incomplete` 325,919 / 47,848 / 12 became `Checked` 325,422 / 47,912 / 12. The old cap gives `ResourceLimit` (`O22_PRE_DESCRIPTOR_END`, asserted in both modes, no receipt, no findings). It trips on entries (47,912 > 47,848); work fell.
 - No change: `m5::legacy_caps`, `m5::graph::inventory`, `m4_8_scoped_join_caps`, `m4_8_match_boolean_snapshots`.
 
-## Blocked on: O21 siblings moved (commit `ri-2s0.9 ... O21 siblings flip`, separate)
+## Rule 4: O21 siblings flip, accepted (chief ruling 2026-11-24 06:50 AEDT, ci-bwnu)
 
-The O21 siblings write `dispose as release` and call `release(view)` on a `&string`. That is the same call, so it now ends the descriptor and the `FamilySelection` obligation that kept them `Incomplete` is gone. Both become `SourceRejected` (R0500 only):
+Ruling: `notes/m5-ownership-cleanup/review/chief-rulings-4.md`, item 1 (city repository), accepted under rule 11's authority line. The O21 siblings write `dispose as release` and call `release(view)` on a `&string`. O22 admits `dispose` of a `&string` as a descriptor end, so the second obligation (`FamilySelection` at `release(view)`) resolves and O21's R0500 alone remains, which is the outcome RFC 0007 demands for O21. Both siblings become `SourceRejected` (R0500 only); the flip comes directly from O22's mandated admission.
 
-| Sibling | Old (`Incomplete`) | New (`SourceRejected`) |
+| Sibling | Old (`Incomplete`) | New (`SourceRejected`) | Reason |
+|---|---|---|---|
+| 1 (`release(view)` in the replacement body) | 324,633 / 47,683 / 12 (parent 325,035 / 47,684 / 12) | 324,760 / 47,779 / 12 | O22 admits `dispose` of a `&string`; the second obligation resolves, R0500 alone remains |
+| 2 (`release(view)` in `ended`) | 325,896 / 47,704 / 12 (parent 326,297 / 47,705 / 12) | 326,030 / 47,803 / 12 | same |
+
+The parents (`O21_SIBLINGS_PARENT`) now give `ResourceLimit`; the test asserts it.
+
+## Replacement witness for R-O21's rule-2 point (chief's condition)
+
+O21 source 3 keeps a witness that a second obligation still leaves the module `Incomplete`. The replacement's body disposes a `&mut string`: `let mut text = "a"; let view = &mut text; release(view);`. O22 admits only a shared `&string`, so `release(view)` here still records `obligation FamilySelection` and `pending TypedInput` at `release(view)`, plus the R0500.
+
+| Source | Result | Typed cap (exact; one short on each axis gives `ResourceLimit`) |
 |---|---|---|
-| 1 (`release(view)` in the replacement body) | 324,633 / 47,683 / 12 (parent 325,035 / 47,684 / 12) | 324,760 / 47,779 / 12 |
-| 2 (`release(view)` in `ended`) | 325,896 / 47,704 / 12 (parent 326,297 / 47,705 / 12) | 326,030 / 47,803 / 12 |
+| 3 | `Incomplete` | 324,633 / 47,683 / 12 |
 
-The parents now give `ResourceLimit`. Rule 4 of the ticket says any other `rfc_cases` row movement is a stop, so this commit is proposed, not decided. Without it the branch's `o21_*` test fails. Question for the chief: may the O21 siblings flip (take that commit), or must they stay `Incomplete` (then the siblings' second obligation needs another source, or the descriptor end must exclude them)?
+The test (`rfc_cases::o21_guard_release_replacement_reports_r0500`) pins it in both installed load modes at the exact cap and one short on work, entries and depth, as it does for every `Outcome::Typed` row. Source 3 has no parent: it is new, not a moved sibling.
 
 ## Not established
 

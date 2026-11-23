@@ -1444,8 +1444,10 @@ implement release(value: LockGuard<Payload>): void { }
             stats: (324267, 47658, 12),
         },
     },
-    // Siblings that stay `Incomplete`: the replacement's own body leaves a second
-    // obligation, and an unrelated root of the same module does.
+    // Siblings with a second obligation: since ri-2s0.9 both are `SourceRejected`
+    // (R0500 only); the replacement's own body and an unrelated root of the same
+    // module both call `release(view)` on a `&string`, which O22 admits. The
+    // `Incomplete` witness is the last source.
     Source {
         text: r#"
 import std::core::dispose as release;
@@ -1478,6 +1480,26 @@ function ended(owner: string): void {
                 r####"overlap R0500 @ implement release(value: LockGuard<Payload>): void { } (related: mutex.rill implement<T> dispose(value: LockGuard<T>): void { releaseGuard(value); })"####,
             ],
             stats: (326030, 47803, 12),
+        },
+    },
+    // Witness that a second obligation still keeps the module `Incomplete` after
+    // O22 (ri-2s0.9, chief ruling): `release(view)` of a `&mut string` is not a
+    // shared descriptor end, so its `FamilySelection` obligation stays unresolved.
+    Source {
+        text: r#"
+import std::core::dispose as release;
+import std::mutex::LockGuard;
+type Payload = { id: i32; }
+implement release(value: LockGuard<Payload>): void { let mut text = "a"; let view = &mut text; release(view); }
+"#,
+        outcome: Outcome::Typed {
+            completion: TypedCompletion::Incomplete,
+            signals: &[
+                r####"obligation FamilySelection @ release(view)"####,
+                r####"pending TypedInput @ release(view)"####,
+                r####"overlap R0500 @ implement release(value: LockGuard<Payload>): void { let mut text = \"a\"; let view = &mut text; release(view); } (related: mutex.rill implement<T> dispose(value: LockGuard<T>): void { releaseGuard(value); })"####,
+            ],
+            stats: (324633, 47683, 12),
         },
     },
 ];
@@ -2594,6 +2616,9 @@ fn o21_guard_release_replacement_reports_r0500() {
         "rfc_cases::o21_guard_release_replacement_reports_r0500",
         O21,
         |index, graph, context| {
+            if index == 3 {
+                return;
+            }
             if index != 0 {
                 let (parent, _) = limits(statistics(O21_SIBLINGS_PARENT[index - 1]));
                 let sibling = analyze_typed(graph, parent);
