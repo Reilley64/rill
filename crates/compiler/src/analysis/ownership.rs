@@ -2607,7 +2607,7 @@ enum CallResult<'a, 'g> {
     ScalarCopy,
     RetainsInputs,
     RetainsRecordInput,
-    RetainsSharedOption(&'a DeclarationFacts<'g>),
+    RetainsOptionCarrier(&'a DeclarationFacts<'g>),
     TransfersCallable(&'a DeclarationFacts<'g>),
 }
 

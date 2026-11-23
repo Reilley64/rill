@@ -3205,7 +3205,7 @@ pub(super) fn run<'a, 'g>(
                     }
                 }
                 Action::Call(index)
-                    if let CallResult::RetainsSharedOption(header) = calls[index].result =>
+                    if let CallResult::RetainsOptionCarrier(header) = calls[index].result =>
                 {
                     let call = &calls[index];
                     let ([argument], Some(into)) = (call.args.as_slice(), call.into) else {
