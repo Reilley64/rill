@@ -1219,12 +1219,16 @@ struct CalleeEntry<'g> {
 fn flat_action(action: Action<'_>, slots: &[Local<'_>]) -> bool {
     match action {
         Action::Displace { target, .. } => slots[target].cleanup == StorageCleanup::End,
-        // A checked List<i32> index and its backing release are leaf actions
-        // in this static frame. Neither introduces a call-entry checkpoint.
+        // A checked List<i32> index, its backing release and a protected
+        // guard release are leaf actions in this static frame. None
+        // introduces a call-entry checkpoint.
         Action::Dispose {
             operand,
             target: WrittenDisposal::Ordinary,
-        } => matches!(slots[operand].cleanup, StorageCleanup::DisposeListI32(_)),
+        } => matches!(
+            slots[operand].cleanup,
+            StorageCleanup::DisposeListI32(_) | StorageCleanup::ReleaseGuard(_)
+        ),
         Action::ConstructVariant {
             fresh_result_ok: true,
             ..
@@ -1343,7 +1347,7 @@ pub(super) struct CancellationTrace<'a, 'g> {
     flat: bool,
     loop_delivery: bool,
     forwarding_backedge: bool,
-    list_backing: bool,
+    loop_owner: bool,
     branching: bool,
     calls_reached: usize,
     call_block: Option<usize>,
@@ -1781,7 +1785,7 @@ impl<'g> CancellationTrace<'_, 'g> {
                 Terminator::FinishStartup | Terminator::FinishExpectation => return Ok(None),
             }
         }
-        if !complete || (self.list_backing && !feasible_backedge) {
+        if !complete || (self.loop_owner && !feasible_backedge) {
             return Ok(None);
         }
 
@@ -2281,7 +2285,7 @@ pub(super) fn run<'a, 'g>(
             Some(RetainedContents::TwoHop(_))
         );
     let mut flat = true;
-    let mut list_backing = false;
+    let mut loop_owner = false;
     let mut fresh_result = false;
     let mut loop_delivery = false;
     let mut forwarding_backedge = false;
@@ -2347,7 +2351,12 @@ pub(super) fn run<'a, 'g>(
                 candidate = false;
                 replacement_candidate = false;
             }
-            list_backing |= matches!(slot.cleanup, StorageCleanup::DisposeListI32(_));
+            // An owned List<i32> backing or LockGuard<i32> is released on
+            // delivery only from the leaf frame of the simple loop below.
+            loop_owner |= matches!(
+                slot.cleanup,
+                StorageCleanup::DisposeListI32(_) | StorageCleanup::ReleaseGuard(_)
+            );
             fresh_result |= matches!(slot.cleanup, StorageCleanup::FreshBoolResult(_));
             candidate = candidate
                 && slot.projection.is_none()
@@ -2358,14 +2367,15 @@ pub(super) fn run<'a, 'g>(
                     StorageCleanup::End
                         | StorageCleanup::Drop
                         | StorageCleanup::DisposeListI32(_)
+                        | StorageCleanup::ReleaseGuard(_)
                         | StorageCleanup::FreshBoolResult(_)
                 );
             State::Vacant
         })
         .collect();
-    // This admits the installed backing in a leaf frame only; in particular
+    // This admits the installed owner in a leaf frame only; in particular
     // it adds no contract for outward storage or for transferred call frames.
-    candidate &= !list_backing || (list_delivery_loop.is_some() && retained.is_empty());
+    candidate &= !loop_owner || (list_delivery_loop.is_some() && retained.is_empty());
     for &slot in &params {
         let region = slots[slot].storage(slot);
         budget.step(region.len())?;
@@ -2505,7 +2515,7 @@ pub(super) fn run<'a, 'g>(
         if active.is_some() && matches!(action, Action::BudgetBackedge { .. }) {
             single_active_call = false;
         }
-        if list_backing
+        if loop_owner
             && candidate
             && let Some((loop_node, test)) = list_delivery_loop
         {
@@ -4721,12 +4731,12 @@ pub(super) fn run<'a, 'g>(
     if callable_frame.is_some() && !callable_exported {
         return Err(Stop::Pending(body));
     }
-    // Add the List-backed delivery judgment only for frames with a reached
-    // loop check. Entry-only List readers keep their ordinary-only contract.
+    // Add the List- or guard-backed delivery judgment only for frames with a
+    // reached loop check. Entry-only owners keep their ordinary-only contract.
     // A fresh Result export needs ordinary construction evidence. Do not add
     // an entry-only delivery proof just because this frame can now retire it.
     let (trace, replacement) = if candidate
-        && (!list_backing || (flat && loop_delivery))
+        && (!loop_owner || (flat && loop_delivery))
         && (!fresh_result || loop_delivery || calls_reached != 0)
     {
         (
@@ -4747,7 +4757,7 @@ pub(super) fn run<'a, 'g>(
                 flat,
                 loop_delivery,
                 forwarding_backedge,
-                list_backing,
+                loop_owner,
                 branching,
                 calls_reached,
                 call_block,

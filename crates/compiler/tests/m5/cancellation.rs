@@ -277,6 +277,316 @@ fn installed_list_backing_on_budget_delivery() {
     );
 }
 
+// ri-px1.9 (D4): a frame that owns a LockGuard<i32> across the proved
+// feasible backedge. Delivery releases the guard once, through its protected
+// provider, before the frame's remaining parameter storage ends; it exports
+// nothing. Without delivery the ordinary suffix exports, then releases.
+#[test]
+fn installed_guard_release_on_budget_delivery() {
+    use compiler::analysis::Statistics;
+    use compiler::analysis::ownership::{
+        Delivery, GraphCompletion, GraphReport, analyze_ownership,
+    };
+    use compiler::analysis::typed::{NativeOwnershipAction, OwnershipCoverage, OwnershipRule};
+
+    probe_with_typed(
+        "cancellation::installed_guard_release_on_budget_delivery",
+        r#"
+        function hold(again: bool, lock: LockGuard<i32>): i32 {
+            while (again) { continue; }
+            return 7;
+        }
+        function released(again: bool, lock: LockGuard<i32>): void {
+            dispose(lock);
+            while (again) { continue; }
+        }
+        function moved(again: bool, lock: LockGuard<i32>): void {
+            let held = lock;
+            while (again) { continue; }
+        }
+        "#,
+        |request, module, receipt, typed| {
+            let limits = |max_work, max_entries, max_depth| AnalysisLimits {
+                max_work,
+                max_entries,
+                max_depth,
+            };
+            let decl = |name| {
+                module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+            };
+            let lower = |name, limits| lower_body(receipt, module, &decl(name).id, limits).unwrap();
+            let root_at = |graph: &GraphReport<'_>, name| {
+                graph
+                    .roots()
+                    .iter()
+                    .position(|r| {
+                        r.site().module == &module.key && r.site().node == decl(name).node
+                    })
+                    .unwrap()
+            };
+            let provider = typed
+                .ownership_protection()
+                .iter()
+                .find(|scope| {
+                    scope.rule == OwnershipRule::Required(NativeOwnershipAction::GuardRelease)
+                        && scope.coverage == OwnershipCoverage::Clear
+                })
+                .unwrap()
+                .provider
+                .as_ref()
+                .unwrap();
+            // One protected release of `name`, then the bool parameter ends.
+            let assert_delivery = |cleanup: &[Obligation<'_>], name: &[u8]| {
+                let [
+                    Obligation::ReleaseGuard {
+                        operand,
+                        implementation,
+                        entry,
+                    },
+                    Obligation::EndStorage(flag),
+                ] = cleanup
+                else {
+                    panic!("expected one guard release before the flag ends: {cleanup:?}");
+                };
+                assert_eq!(operand.root.span.bytes(), name);
+                assert!(operand.projection.is_none());
+                assert!(std::ptr::eq(*implementation, &provider.implementation.id));
+                assert!(std::ptr::eq(*entry, &provider.entry.id));
+                assert_eq!(flag.root.span.bytes(), b"again: bool");
+            };
+            // Targeted query and ordinary graph root of the witness.
+            let graph = analyze_ownership(receipt, AnalysisLimits::default());
+            let local = lower("hold", AnalysisLimits::default());
+            assert_eq!(local.completion(), Completion::Checked, "{local:?}");
+            let root = &graph.roots()[root_at(&graph, "hold")];
+            assert_eq!(root.completion(), Completion::Checked);
+            let local_mir = local.mir().unwrap();
+            let local_proof = local_mir.cancellation().unwrap_or_else(|| {
+                panic!(
+                    "no enabled guard-frame proof in test_mode={}",
+                    request.test_mode
+                )
+            });
+            let Delivery::Proved(graph_proof) = root.enabled_frame() else {
+                panic!("no enabled guard-frame proof in graph");
+            };
+            for (mir, proof) in [(local_mir, local_proof), (root.mir().unwrap(), graph_proof)] {
+                assert!(proof.on_entry_delivery.retained.is_none());
+                assert_delivery(&proof.on_entry_delivery.cleanup, b"lock: LockGuard<i32>");
+                assert_delivery(&loop_delivery_cleanup(mir, proof), b"lock: LockGuard<i32>");
+                // Without delivery the loop exits to the ordinary suffix:
+                // export the result, then release the guard once.
+                let (_, ordinary_exit) = branch_targets(mir);
+                let suffix = linear(mir, ordinary_exit);
+                let export = suffix
+                    .iter()
+                    .position(|op| matches!(op, Operation::Export(_)))
+                    .expect("ordinary suffix exports the result");
+                let release = suffix
+                    .iter()
+                    .position(|op| {
+                        matches!(op, Operation::Cleanup(actions)
+                        if actions.iter().any(|a| matches!(a, Obligation::ReleaseGuard { .. })))
+                    })
+                    .expect("ordinary suffix releases the guard");
+                assert!(export < release, "{suffix:?}");
+                let drops = path_drops(mir, ordinary_exit);
+                let [Obligation::ReleaseGuard { operand, .. }] = drops.as_slice() else {
+                    panic!("ordinary suffix: {drops:?}");
+                };
+                assert_eq!(operand.root.span.bytes(), b"lock: LockGuard<i32>");
+            }
+
+            // A guard released before the loop is not released again on delivery.
+            let released = lower("released", AnalysisLimits::default());
+            let released_mir = released.mir().unwrap();
+            let released_root = &graph.roots()[root_at(&graph, "released")];
+            assert_eq!(released_root.completion(), Completion::Checked);
+            let Delivery::Proved(released_graph) = released_root.enabled_frame() else {
+                panic!("no enabled proof for the released guard in graph");
+            };
+            for (mir, proof) in [
+                (released_mir, released_mir.cancellation().unwrap()),
+                (released_root.mir().unwrap(), released_graph),
+            ] {
+                assert_delivery(&proof.on_entry_delivery.cleanup, b"lock: LockGuard<i32>");
+                let cleanup = loop_delivery_cleanup(mir, proof);
+                assert!(
+                    matches!(cleanup.as_slice(), [Obligation::EndStorage(flag)]
+                        if flag.root.span.bytes() == b"again: bool"),
+                    "{cleanup:?}"
+                );
+            }
+
+            // A guard moved into a local is released before the flag ends in
+            // the targeted proof. Its graph root stays open at the body, as
+            // D3 left it, and publishes no delivery proof.
+            let moved = lower("moved", AnalysisLimits::default());
+            let moved_mir = moved.mir().unwrap();
+            let moved_proof = moved_mir.cancellation().unwrap();
+            assert_delivery(
+                &moved_proof.on_entry_delivery.cleanup,
+                b"lock: LockGuard<i32>",
+            );
+            assert_delivery(&loop_delivery_cleanup(moved_mir, moved_proof), b"held");
+            let moved_root = &graph.roots()[root_at(&graph, "moved")];
+            assert_eq!(moved_root.completion(), Completion::Incomplete);
+            assert!(moved_root.mir().is_none());
+            assert!(matches!(moved_root.enabled_frame(), Delivery::Unresolved));
+
+            // Exact caps, each independently one short.
+            let shorts = |exact: AnalysisLimits| {
+                [
+                    AnalysisLimits {
+                        max_work: exact.max_work - 1,
+                        ..exact
+                    },
+                    AnalysisLimits {
+                        max_entries: exact.max_entries - 1,
+                        ..exact
+                    },
+                    AnalysisLimits {
+                        max_depth: exact.max_depth - 1,
+                        ..exact
+                    },
+                ]
+            };
+            let stats = |s: Statistics| (s.work, s.entries, s.max_depth);
+            for (name, (work, entries, depth)) in [
+                ("hold", (2252, 203, 4)),
+                ("released", (2294, 223, 4)),
+                ("moved", (2311, 223, 4)),
+            ] {
+                let measured = lower(name, AnalysisLimits::default()).statistics();
+                assert_eq!(stats(measured), (work, entries, depth), "{name}");
+                let exact = limits(work, entries, depth);
+                assert!(
+                    lower(name, exact).mir().unwrap().cancellation().is_some(),
+                    "{name}"
+                );
+                for cap in shorts(exact) {
+                    let short = lower(name, cap);
+                    assert_eq!(short.completion(), Completion::ResourceLimit, "{name}");
+                    assert!(short.mir().is_none());
+                }
+            }
+            let (work, entries, depth) = (188887, 4635, 5);
+            assert_eq!(stats(graph.statistics()), (work, entries, depth));
+            let exact = limits(work, entries, depth);
+            let exact_graph = analyze_ownership(receipt, exact);
+            for name in ["hold", "released"] {
+                assert!(matches!(
+                    exact_graph.roots()[root_at(&exact_graph, name)].enabled_frame(),
+                    Delivery::Proved(_)
+                ));
+            }
+            for cap in shorts(exact) {
+                let short = analyze_ownership(receipt, cap);
+                assert_eq!(short.completion(), GraphCompletion::ResourceLimit);
+                assert!(short.roots().iter().all(|root| root.mir().is_none()
+                    && matches!(root.enabled_frame(), Delivery::Unresolved)));
+            }
+        },
+    );
+}
+
+#[test]
+fn guard_loops_without_a_proof_keep_their_parent_caps() {
+    use compiler::analysis::ownership::{Delivery, GraphCompletion, analyze_ownership};
+    probe(
+        "cancellation::guard_loops_without_a_proof_keep_their_parent_caps",
+        r#"
+        function entryOnly(lock: LockGuard<i32>): void {}
+        function noop(): void {}
+        function across(again: bool, lock: LockGuard<i32>): void { noop(); while (again) { continue; } }
+        function veto(again: bool, lock: LockGuard<i32>): void { let gate = again; while (gate) { continue; } }
+        function impossible(again: bool, lock: LockGuard<i32>): void { while (again) { if (again) { break; } } }
+        function nested(again: bool, lock: LockGuard<i32>): void { { let view = &lock; while (again) { continue; } let last = view; } }
+    "#,
+        |_, module, receipt| {
+            // Measured at the parent before guard frames could carry a
+            // delivery proof: the graph at 3da1d5a3 (with B6's i32 equality
+            // root), the targeted caps at both 0f595438 and 3da1d5a3. None of
+            // these shapes gains a proof.
+            let limits = |max_work, max_entries, max_depth| AnalysisLimits {
+                max_work,
+                max_entries,
+                max_depth,
+            };
+            let shorts = |exact: AnalysisLimits| {
+                [
+                    AnalysisLimits {
+                        max_work: exact.max_work - 1,
+                        ..exact
+                    },
+                    AnalysisLimits {
+                        max_entries: exact.max_entries - 1,
+                        ..exact
+                    },
+                    AnalysisLimits {
+                        max_depth: exact.max_depth - 1,
+                        ..exact
+                    },
+                ]
+            };
+            let graph_exact = limits(190495, 4613, 6);
+            let graph = analyze_ownership(receipt, graph_exact);
+            assert_eq!(graph.completion(), GraphCompletion::Incomplete);
+            for cap in shorts(graph_exact) {
+                assert_eq!(
+                    analyze_ownership(receipt, cap).completion(),
+                    GraphCompletion::ResourceLimit
+                );
+            }
+            for (name, work, entries, depth, completion) in [
+                ("entryOnly", 1992, 83, 1, Completion::Checked),
+                ("across", 4131, 245, 4, Completion::Checked),
+                ("veto", 2209, 192, 4, Completion::Checked),
+                ("impossible", 2162, 166, 6, Completion::Checked),
+                ("nested", 2012, 86, 5, Completion::Incomplete),
+            ] {
+                let d = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                let exact = limits(work, entries, depth);
+                let local = lower_body(receipt, module, &d.id, exact).unwrap();
+                assert_eq!(local.completion(), completion, "{name}");
+                assert!(
+                    local.mir().is_none_or(|mir| mir.cancellation().is_none()),
+                    "{name}"
+                );
+                for cap in shorts(exact) {
+                    let short = lower_body(receipt, module, &d.id, cap).unwrap();
+                    assert_eq!(short.completion(), Completion::ResourceLimit, "{name}");
+                }
+                let root = graph
+                    .roots()
+                    .iter()
+                    .find(|r| r.site().module == &module.key && r.site().node == d.node)
+                    .unwrap();
+                assert_eq!(root.completion(), completion, "{name}");
+                assert!(
+                    matches!(root.enabled_frame(), Delivery::Unresolved),
+                    "{name}"
+                );
+                let unconstrained = lower_body(receipt, module, &d.id, Default::default()).unwrap();
+                assert!(
+                    unconstrained
+                        .mir()
+                        .is_none_or(|mir| mir.cancellation().is_none()),
+                    "{name} must not publish a guard delivery proof"
+                );
+            }
+        },
+    );
+}
+
 #[test]
 fn installed_loop_backedge_cancellation_rejects_unrepaired_store() {
     check_pair(
@@ -1230,6 +1540,26 @@ function diamonds8(b0: bool, b1: bool, b2: bool, b3: bool, b4: bool, b5: bool, b
 
 #[path = "cancellation/replacement.rs"]
 mod replacement;
+
+/// The cleanup of the one loop-backedge delivery successor in `proof`.
+fn loop_delivery_cleanup<'g>(
+    mir: &Mir<'g>,
+    proof: &compiler::analysis::ownership::Cancellation<'g>,
+) -> Vec<MirCleanup<'g>> {
+    let successors = (0..mir.blocks.len())
+        .filter_map(|block| proof.successor(block).map(|edge| (block, edge)))
+        .collect::<Vec<_>>();
+    let [(block, CancellationSuccessor::LoopBackedge { on_delivery })] = successors.as_slice()
+    else {
+        panic!("expected only the budget backedge: {successors:?}")
+    };
+    assert_eq!(
+        mir.blocks[*block].site.span.bytes(),
+        b"while (again) { continue; }"
+    );
+    assert!(on_delivery.retained.is_none());
+    on_delivery.cleanup.clone()
+}
 
 fn declaration<'g>(module: &'g loader::Module, name: &str) -> &'g loader::Declaration {
     module
