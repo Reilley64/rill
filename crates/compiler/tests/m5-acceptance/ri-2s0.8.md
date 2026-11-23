@@ -53,6 +53,8 @@ Unsupported siblings at their parent caps (targeted; all `Incomplete` at the blo
 
 A call result that is a record with a `string` field stays `Incomplete` at the same blocker as before, but it now costs 3 more work: the screen has to read the record's fields (one charge of 1 and one of the field count) to see that it is not a flat record of scalars, and no paid fact carries the field list. `textRead` was 1,873 / 26 / 3 at `4f7a8032` and is 1,876 / 26 / 3; `textBind` was 1,889 / 33 / 4 and is 1,892 / 33 / 4; their whole graph was 187,421 / 4,277 / 5 and is 187,427 / 4,277 / 5. No published or pinned cap contains such a shape: every fixed cap held (below). `text_record_results_stay_incomplete` pins the candidate's numbers, not the parent's.
 
+Open question for the chief of staff (this ticket closed `blocked` on it): grant a rule-1 exception for these two siblings (+3 work per targeted root, +6 work for the graph; entries and depth unchanged), or name the alternative. Short-circuiting to the same `Pending` blocker was tried and cannot match the parent exactly: it gave 1,873 / 26 / 2 and 1,888 / 33 / 4 (graph 187,420), and adding the depth charge back gave 1,874 / 26 / 3. No paid fact carries the record's field list, so an earlier screen needs a new M4 fact.
+
 Fixed caps unchanged, checked locally after merging the base tip `1fb84233`: `m5::legacy_caps`, `m5::graph::inventory`, every other `rfc_cases` row, `field_routes`, `m4_8_scoped_join_caps` and `m4_8_match_boolean_snapshots`. Typed statistics are unchanged for every source (no M4 change), so the M4 17-source baseline holds.
 
 ## Not established
