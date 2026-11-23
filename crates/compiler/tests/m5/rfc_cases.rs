@@ -751,12 +751,16 @@ function extract(users: List<&User>): Option<&User> {
   return Option.None;
 }
 "#,
-        outcome: Outcome::Typed {
-            completion: TypedCompletion::Incomplete,
-            signals: &[
-                r####"pending Storage @ for (let user of users) { return Option.Some(user); }"####,
-            ],
-            stats: (323289, 47677, 12),
+        outcome: Outcome::Receipt {
+            typed_stats: (324131, 47845, 12),
+            graph: (GraphCompletion::Incomplete, (188037, 4612, 6)),
+            pre_equality_graph: (187721, 4478, 3),
+            roots: &[Root {
+                name: "extract",
+                want: Want::Checked,
+                graph: None,
+                stats: (3539, 513, 6),
+            }],
         },
     },
     Source {
@@ -773,6 +777,41 @@ function slot(users: List<&User>): Option<&&User> { return get(&users, 0u64); }
                 r####"pending TypedInput @ return get(&users, 0u64);"####,
             ],
             stats: (325319, 47875, 12),
+        },
+    },
+];
+
+/// Rules 1 and 2: unsupported siblings of the extraction keep their parent caps.
+const O10_SIBLINGS: &[Source] = &[
+    Source {
+        text: r#"
+type User = { id: i32 };
+function exclusive(users: List<&mut User>): Option<&mut User> {
+  for (let user of users) { return Option.Some(user); }
+  return Option.None;
+}
+"#,
+        outcome: Outcome::Typed {
+            completion: TypedCompletion::Incomplete,
+            signals: &[
+                r####"pending Storage @ for (let user of users) { return Option.Some(user); }"####,
+            ],
+            stats: (323289, 47677, 12),
+        },
+    },
+    Source {
+        text: r#"
+function scalar(users: List<&i32>): Option<&i32> {
+  for (let number of users) { return Option.Some(number); }
+  return Option.None;
+}
+"#,
+        outcome: Outcome::Typed {
+            completion: TypedCompletion::Incomplete,
+            signals: &[
+                r####"pending Storage @ for (let number of users) { return Option.Some(number); }"####,
+            ],
+            stats: (322461, 47631, 12),
         },
     },
 ];
@@ -1983,10 +2022,41 @@ fn o09_retained_list_source_contract_is_incomplete_at_its_calls() {
 }
 
 #[test]
-fn o10_owned_list_reference_extraction_has_no_receipt() {
+fn o10_extracted_reference_checks_and_slot_get_stays_incomplete() {
     run(
-        "rfc_cases::o10_owned_list_reference_extraction_has_no_receipt",
+        "rfc_cases::o10_extracted_reference_checks_and_slot_get_stays_incomplete",
         O10,
+    );
+}
+
+#[test]
+fn o10_extraction_siblings_keep_their_parent_caps() {
+    run(
+        "rfc_cases::o10_extraction_siblings_keep_their_parent_caps",
+        O10_SIBLINGS,
+    );
+}
+
+/// Metering rule 11: admitting the extraction moved its typed cap, so the
+/// cap before ri-2s0.7, 323,289/47,677/12, now gives `ResourceLimit`.
+#[test]
+fn o10_pre_extraction_typed_cap_now_gives_resource_limit() {
+    installed(
+        "rfc_cases::o10_pre_extraction_typed_cap_now_gives_resource_limit",
+        |request| {
+            fs::write(&request.entry, format!("{IMPORTS}\n{}", O10[0].text)).unwrap();
+            for test_mode in [false, true] {
+                let request = InstalledRequest {
+                    test_mode,
+                    ..request.clone()
+                };
+                let graph = loader::load_installed(request).unwrap();
+                let (old, _) = limits(statistics((323289, 47677, 12)));
+                let typed = analyze_typed(&graph, old);
+                assert_eq!(typed.completion(), TypedCompletion::ResourceLimit);
+                assert!(typed.receipt().is_none());
+            }
+        },
     );
 }
 
