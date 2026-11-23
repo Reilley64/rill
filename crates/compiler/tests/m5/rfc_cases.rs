@@ -1239,16 +1239,16 @@ function gated(flag: bool, left: string, seed: &string): void {
 }
 "#,
         outcome: Outcome::Receipt {
-            typed_stats: (0, 0, 0),
-            graph: (GraphCompletion::Incomplete, (0, 0, 0)),
-            pre_equality_graph: (0, 0, 0),
+            typed_stats: (328486, 48489, 12),
+            graph: (GraphCompletion::Incomplete, (188672, 4174, 5)),
+            pre_equality_graph: (188671, 4174, 5),
             roots: &[Root {
                 name: "gated",
                 want: Want::Incomplete {
                     blocker: r####"remember(&mut slot, &left, flag)"####,
                 },
                 graph: None,
-                stats: (0, 0, 0),
+                stats: (1969, 73, 3),
             }],
         },
     },
@@ -1264,16 +1264,16 @@ function triple(left: string, middle: string, right: string, seed: &string): voi
 }
 "#,
         outcome: Outcome::Receipt {
-            typed_stats: (0, 0, 0),
-            graph: (GraphCompletion::Incomplete, (0, 0, 0)),
-            pre_equality_graph: (0, 0, 0),
+            typed_stats: (331252, 49199, 12),
+            graph: (GraphCompletion::Incomplete, (189179, 4186, 5)),
+            pre_equality_graph: (189178, 4186, 5),
             roots: &[Root {
                 name: "triple",
                 want: Want::Incomplete {
                     blocker: r####"remember(&mut slot, &left, &middle, &right)"####,
                 },
                 graph: None,
-                stats: (0, 0, 0),
+                stats: (1992, 85, 3),
             }],
         },
     },
@@ -1289,16 +1289,16 @@ function grouped(left: string, seed: &string): void {
 }
 "#,
         outcome: Outcome::Receipt {
-            typed_stats: (0, 0, 0),
-            graph: (GraphCompletion::Incomplete, (0, 0, 0)),
-            pre_equality_graph: (0, 0, 0),
+            typed_stats: (328296, 48419, 12),
+            graph: (GraphCompletion::Incomplete, (188476, 4167, 5)),
+            pre_equality_graph: (188475, 4167, 5),
             roots: &[Root {
                 name: "grouped",
                 want: Want::Incomplete {
                     blocker: r####"remember((&mut slot), &left)"####,
                 },
                 graph: None,
-                stats: (0, 0, 0),
+                stats: (1957, 66, 3),
             }],
         },
     },
