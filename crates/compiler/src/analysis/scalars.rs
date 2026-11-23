@@ -2852,7 +2852,8 @@ impl<'r, 'g> Checker<'r, 'g> {
                             inference.slots.get(&operand).is_some_and(|slot| {
                                 slot.ty.as_ref().and_then(primitive_name) == Some("i32")
                                     && (module.syntax.nodes[operand].kind == NodeKind::Call
-                                        || !matches!(slot.i32_operand, I32Operand::Other))
+                                        || !matches!(slot.i32_operand, I32Operand::Other)
+                                        || field_of_call(&module.syntax.nodes, operand))
                             })
                         })
                 };
@@ -3796,4 +3797,17 @@ fn check<'r, 'g>(
             statistics,
         })
     }
+}
+
+/// A field written directly on a call result, through groups: `call().field`.
+fn field_of_call(nodes: &[crate::parser::Node], node: NodeId) -> bool {
+    let syntax = &nodes[node];
+    if syntax.kind != NodeKind::Field {
+        return false;
+    }
+    let mut base = syntax.children[0];
+    while nodes[base].kind == NodeKind::Group {
+        base = nodes[base].children[0];
+    }
+    nodes[base].kind == NodeKind::Call
 }
