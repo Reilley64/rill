@@ -246,6 +246,7 @@ fn liveness(
             Action::CheckedI32Multiply { left, into, .. } => use_one(Some(left), Some(into)),
             Action::CheckedI32Add { left, right, into } => ([Some(left), Some(right)], Some(into)),
             Action::EqualI32 { left, right, into } => ([Some(left), Some(right)], Some(into)),
+            Action::FormatI32Template { into, .. } => use_one(None, Some(into)),
             Action::Reborrow { parent, into, .. } => {
                 use_one(Some(slots[parent].carried_loan_root(parent)), Some(into))
             }
@@ -362,6 +363,7 @@ fn liveness(
             Action::CommitList { first, count, .. } => {
                 first..first + count * slots[first].storage(first).len()
             }
+            Action::FormatI32Template { first, count, .. } => first..first + count,
             _ => 0..0,
         };
         // Caller storage can still expose its installed value until a write
@@ -4461,6 +4463,27 @@ pub(super) fn run<'a, 'g>(
                     Operation::EqualI32 {
                         left: local(left),
                         right: local(right),
+                        into: local(into),
+                    }
+                }
+                Action::FormatI32Template { first, count, into } => {
+                    budget.step(count)?;
+                    budget.reserve(count)?;
+                    let mut holes = Vec::with_capacity(count);
+                    for scratch in first..first + count {
+                        require_initialized(&slots, &state, scratch, node, budget)?;
+                        holes.push(local(scratch));
+                    }
+                    if !matches!(state[into], State::Vacant) {
+                        return Err(Stop::Pending(node));
+                    }
+                    // The interpolation supplies fresh loan-free i32 scratch slots.
+                    for scratch in &mut state[first..first + count] {
+                        *scratch = State::Vacant;
+                    }
+                    state[into] = State::Initialized(empty.clone());
+                    Operation::FormatI32Template {
+                        holes,
                         into: local(into),
                     }
                 }
