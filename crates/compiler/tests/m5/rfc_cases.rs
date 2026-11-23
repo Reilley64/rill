@@ -1206,6 +1206,12 @@ const O21_PRE_REJECTION: Triple = (323823, 47493, 12);
 /// `Incomplete` there; it loses only the replacement body's obligation.
 const O21_SIBLINGS_PARENT: [Triple; 2] = [(325035, 47684, 12), (326297, 47705, 12)];
 
+/// O22 source 0's exact typed cap before `dispose(view)` of a `&string` ended
+/// that descriptor (ri-2s0.9, metering rule 11): the old `Incomplete` result
+/// stopped at each `dispose(view)` `FamilySelection` obligation. The new
+/// `Checked` result needs 64 more entries, so the old cap gives `ResourceLimit`.
+const O22_PRE_DESCRIPTOR_END: Triple = (325919, 47848, 12);
+
 const O22: &[Source] = &[
     Source {
         text: r#"
@@ -1223,15 +1229,28 @@ function ended(owner: string): void {
   let last = other;
 }
 "#,
-        outcome: Outcome::Typed {
-            completion: TypedCompletion::Incomplete,
-            signals: &[
-                r####"obligation FamilySelection @ dispose(view)"####,
-                r####"obligation FamilySelection @ dispose(view)"####,
-                r####"pending TypedInput @ dispose(view)"####,
-                r####"pending TypedInput @ dispose(view)"####,
+        outcome: Outcome::Receipt {
+            typed_stats: (325422, 47912, 12),
+            graph: (GraphCompletion::SourceRejected, (188285, 4569, 5)),
+            pre_equality_graph: (187969, 4435, 5),
+            roots: &[
+                Root {
+                    name: "aliased",
+                    want: Want::Rejected {
+                        code: "R0203",
+                        site: r####"dispose(owner)"####,
+                        related: r####"&owner"####,
+                    },
+                    graph: None,
+                    stats: (2303, 237, 4),
+                },
+                Root {
+                    name: "ended",
+                    want: Want::Checked,
+                    graph: None,
+                    stats: (2383, 264, 4),
+                },
             ],
-            stats: (325919, 47848, 12),
         },
     },
     Source {
@@ -1257,6 +1276,43 @@ function aliased(owner: string): void {
                 graph: None,
                 stats: (2105, 144, 4),
             }],
+        },
+    },
+    Source {
+        text: r#"
+function reused(owner: string): void {
+  let view = &owner;
+  dispose(view);
+  let again = view;
+}
+function released(owner: string): void {
+  let view = &owner;
+  dispose(view);
+  dispose(owner);
+}
+"#,
+        outcome: Outcome::Receipt {
+            typed_stats: (325124, 47814, 12),
+            graph: (GraphCompletion::SourceRejected, (188456, 4447, 5)),
+            pre_equality_graph: (188140, 4313, 5),
+            roots: &[
+                Root {
+                    name: "released",
+                    want: Want::Checked,
+                    graph: None,
+                    stats: (2244, 217, 4),
+                },
+                Root {
+                    name: "reused",
+                    want: Want::Rejected {
+                        code: "R0200",
+                        site: r####"view"####,
+                        related: r####"dispose(view)"####,
+                    },
+                    graph: None,
+                    stats: (2116, 155, 4),
+                },
+            ],
         },
     },
 ];
@@ -1652,10 +1708,24 @@ fn o21_guard_release_replacement_reports_r0500() {
 }
 
 #[test]
-fn o22_descriptor_disposal_has_no_family_and_owner_disposal_rejects() {
-    run(
-        "rfc_cases::o22_descriptor_disposal_has_no_family_and_owner_disposal_rejects",
+fn o22_descriptor_disposal_ends_only_that_descriptor_and_owner_disposal_rejects() {
+    run_with(
+        "rfc_cases::o22_descriptor_disposal_ends_only_that_descriptor_and_owner_disposal_rejects",
         O22,
+        |index, graph, context| {
+            if index != 0 {
+                return;
+            }
+            let (old, _) = limits(statistics(O22_PRE_DESCRIPTOR_END));
+            let limited = analyze_typed(graph, old);
+            assert_eq!(
+                limited.completion(),
+                TypedCompletion::ResourceLimit,
+                "{context}"
+            );
+            assert!(limited.receipt().is_none(), "{context}");
+            assert!(limited.bodies().findings().is_empty(), "{context}");
+        },
     );
 }
 

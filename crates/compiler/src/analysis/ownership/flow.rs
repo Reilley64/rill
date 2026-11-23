@@ -1225,6 +1225,10 @@ fn flat_action(action: Action<'_>, slots: &[Local<'_>]) -> bool {
         // guard release are leaf actions in this static frame. None
         // introduces a call-entry checkpoint.
         Action::Dispose {
+            target: WrittenDisposal::Descriptor,
+            ..
+        } => true,
+        Action::Dispose {
             operand,
             target: WrittenDisposal::Ordinary,
         } => matches!(
@@ -4231,6 +4235,10 @@ pub(super) fn run<'a, 'g>(
                     } else if let WrittenDisposal::Scalar(implementation) = target {
                         Operation::CallScalarDispose {
                             implementation,
+                            operand: local(slot),
+                        }
+                    } else if let WrittenDisposal::Descriptor = target {
+                        Operation::EndDescriptor {
                             operand: local(slot),
                         }
                     } else {

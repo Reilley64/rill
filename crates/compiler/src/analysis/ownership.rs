@@ -849,6 +849,11 @@ pub enum Operation<'g> {
         callee: &'g DeclarationId,
         operand: Place<'g>,
     },
+    /// `dispose` of a shared descriptor ends that named value. It releases no
+    /// owner, and copies of the descriptor keep their own loans.
+    EndDescriptor {
+        operand: Place<'g>,
+    },
     Install {
         target: Place<'g>,
         incoming: Place<'g>,
@@ -2293,6 +2298,8 @@ enum WrittenDisposal<'g> {
     Ordinary,
     Scalar(&'g DeclarationId),
     Text(TextElementDisposal<'g>),
+    /// A shared `string` descriptor: ends that value only (RFC 0007 O22).
+    Descriptor,
 }
 
 #[derive(Clone, Copy)]
