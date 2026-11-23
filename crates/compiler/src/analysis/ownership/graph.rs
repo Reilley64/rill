@@ -1117,13 +1117,20 @@ pub(super) fn visit_dependencies<'g>(
         match block.operation {
             Operation::Call(callee)
             | Operation::CallBorrowingRecord { callee, .. }
-            | Operation::CallIntoTemporary { callee, .. }
-            | Operation::CallRetaining { callee, .. }
+            | Operation::CallIntoTemporary { callee, .. } => emit(callee, OrdinaryCall, budget)?,
+            Operation::CallRetaining { callee, .. }
             | Operation::CallRetainingNoInput { callee, .. }
             | Operation::CallRetainingPair { callee, .. }
             | Operation::CallRetainingWithBool { callee, .. }
             | Operation::CallRetainingWithOptionBool { callee, .. } => {
-                emit(callee, OrdinaryCall, budget)?
+                // A family call names its selected implementation, whose
+                // declared signature closes the edge; its body stays open.
+                let contract = if callee.kind == DeclarationKind::Implementation {
+                    DeclaredSignature
+                } else {
+                    OrdinaryCall
+                };
+                emit(callee, contract, budget)?
             }
             Operation::OpenOwnedListI32 { provider, .. }
             | Operation::AdvanceOwnedListI32 { provider, .. } => emit(

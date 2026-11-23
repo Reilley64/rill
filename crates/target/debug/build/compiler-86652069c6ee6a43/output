@@ -1,0 +1,3 @@
+cargo:rerun-if-changed=../../runtime/ownership
+cargo:rustc-env=RILL_OWNERSHIP_ARCHIVE=/Users/reilley/.t3/projects/rill/worktrees/ci-2ed6/crates/target/debug/build/compiler-86652069c6ee6a43/out/librill_ownership.rlib
+cargo:rustc-env=RILL_OWNERSHIP_RUSTC=/Users/reilley/.rustup/toolchains/1.98.0-aarch64-apple-darwin/bin/rustc

@@ -6442,7 +6442,11 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
     ) -> ResultOf<RetainedContract<'a, 'g>> {
         // The declaration determines the possible inputs. Do not use the
         // callee body to narrow them.
-        let (formals, declared_result) = self.direct_application_signature(node, call)?;
+        let (formals, declared_result) = if call.callee.kind == DeclarationKind::Family {
+            self.selected_signature(node, call)?
+        } else {
+            self.direct_application_signature(node, call)?
+        };
         if declared_result != result {
             return Err(Stop::Pending(node));
         }
@@ -7612,6 +7616,72 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 if scalar::scalar(referent) == Some(Primitive::I32))
     }
 
+    /// The declared signature of the `implement` a family call resolved to,
+    /// in this module, with no binders and as many formals as arguments. The
+    /// caller reads this contract, never the implementation's body.
+    fn selected_signature(
+        &mut self,
+        node: NodeId,
+        call: &CallFacts<'g>,
+    ) -> ResultOf<(&'a [MemberType<'g>], &'a Type<'g>)> {
+        let pending = || Stop::Pending(node);
+        let selection = call.selection.as_ref().ok_or_else(pending)?;
+        let implementation = selection.implementation;
+        self.budget.step(1 + self.module.key.path.len())?;
+        if implementation.module != self.module.key
+            || implementation.kind != DeclarationKind::Implementation
+            || !selection.substitution.is_empty()
+        {
+            return Err(pending());
+        }
+        // The family's captured facts hold each implementation's declared
+        // signature. The map is keyed by a declaration identity holding the
+        // module path, so charge the probe like the header lookups.
+        let typed = self.typed;
+        let ordinary = typed.inventory();
+        graph::charge_key(&call.callee.module, ordinary.family_probes(), self.budget)?;
+        let family = ordinary.captured_family(call.callee).ok_or_else(pending)?;
+        self.budget.step(family.implementations.len())?;
+        let header = &family
+            .implementations
+            .iter()
+            .find(|body| body.source.declaration == *implementation)
+            .ok_or_else(pending)?
+            .header;
+        let DeclarationShape::Function { parameters, result } = &header.shape else {
+            return Err(pending());
+        };
+        if !header.binders.is_empty() || parameters.len() != call.arguments.len() {
+            return Err(pending());
+        }
+        Ok((parameters, result))
+    }
+
+    /// A family call to a void implementation whose first argument is a
+    /// written `&mut name` of a retained descriptor (`&mut &bool`, `&mut
+    /// &string`): the retained-store contract, read from the selected
+    /// implementation's declared signature. Unmetered syntax and type screen.
+    fn family_retaining_shape(&self, facts: &ExpressionFacts<'g>, call: &CallFacts<'g>) -> bool {
+        let syntax = &self.module.syntax.nodes;
+        let Some(&destination) = call.arguments.first() else {
+            return false;
+        };
+        call.selection.is_some()
+            && call.callee.kind == DeclarationKind::Family
+            && call.callee.module.origin == Origin::Application
+            && call.pipe_input.is_none()
+            && call.defaults.is_empty()
+            && call.scoped_join.is_none()
+            && call.list_arrows.is_none()
+            && matches!(facts.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "void")
+            && syntax[destination].kind == NodeKind::Prefix("&mut")
+            && matches!(syntax[destination].children.as_slice(), [operand]
+                if syntax[*operand].kind == NodeKind::ValueReference)
+            && self
+                .value(destination)
+                .is_ok_and(|value| retained_contents_type(&value.ty).is_some())
+    }
+
     /// A family call resolved to an `implement` in this module, checked
     /// against that implementation's declared signature: `&mut List<i32>` in,
     /// `&i32` out. The caller never reads the implementation's body.
@@ -7631,35 +7701,12 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             return Err(pending());
         };
         let implementation = selection.implementation;
-        self.budget.step(1 + self.module.key.path.len())?;
-        if implementation.module != self.module.key
-            || implementation.kind != DeclarationKind::Implementation
-            || !selection.substitution.is_empty()
-        {
-            return Err(pending());
-        }
-        // The family's captured facts hold each implementation's declared
-        // signature. The map is keyed by a declaration identity holding the
-        // module path, so charge the probe like the header lookups.
-        let ordinary = self.typed.inventory();
-        graph::charge_key(&call.callee.module, ordinary.family_probes(), self.budget)?;
-        let family = ordinary.captured_family(call.callee).ok_or_else(pending)?;
-        self.budget.step(family.implementations.len())?;
-        let header = &family
-            .implementations
-            .iter()
-            .find(|body| body.source.declaration == *implementation)
-            .ok_or_else(pending)?
-            .header;
-        let DeclarationShape::Function { parameters, result } = &header.shape else {
-            return Err(pending());
-        };
-        let [formal] = parameters.as_slice() else {
+        let (parameters, result) = self.selected_signature(node, call)?;
+        let [formal] = parameters else {
             return Err(pending());
         };
         let actual = self.normal_value(*argument)?;
-        if !header.binders.is_empty()
-            || *result != facts.ty
+        if *result != facts.ty
             || formal.ty != actual.ty
             || !matches!(formal.ty.as_ref(), TypeTerm::Reference { mutable: true, referent }
                 if self.is_list_i32(referent))
@@ -7822,9 +7869,12 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             if self.family_view_shape(facts, call, into) {
                 return self.call_family_selected(node, facts, call, into, next, depth);
             }
-            return self.call_declared_once(node, facts, call, into, next, depth);
+            if !self.family_retaining_shape(facts, call) {
+                return self.call_declared_once(node, facts, call, into, next, depth);
+            }
         }
-        if !Self::direct_application_call(call)
+        let family_store = checked_carrier.is_none() && !call.substitution.is_empty();
+        if !(family_store || Self::direct_application_call(call))
             || into.is_some_and(|slot| self.slots[slot].contains_guard())
         {
             return Err(Stop::Pending(node));
@@ -7973,8 +8023,14 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 })
                 .transpose()?
         };
+        // A family call is closed by the selected implementation's declared
+        // signature, so the call names the implementation.
+        let callee = match &call.selection {
+            Some(selection) if family_store => selection.implementation,
+            _ => call.callee,
+        };
         self.calls.push(Call {
-            callee: call.callee,
+            callee,
             forwarding_prefix,
             args,
             into,
