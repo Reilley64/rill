@@ -498,6 +498,124 @@ fn assert_two_releases(
     });
 }
 
+/// Rule 2 (review ci-uaa1, ri-px1.8 #3b): a non-`i32` guard and a guard field
+/// of a generic record stop at their parameter, so no scope-exit release is
+/// verified and nothing is charged for one. Caps measured at the parent
+/// 36f1cf15; the graph was 185,689 / 3,979 / 3 there and the i32 equality
+/// source root (ri-785.9) adds 316 work and 134 entries and sets depth 5.
+#[test]
+fn implicit_guard_siblings_keep_their_parent_caps() {
+    probe(
+        "graph::closed_release::implicit_guard_siblings_keep_their_parent_caps",
+        "type Holder<T> = { lock: LockGuard<T>; }\nfunction wide(lock: LockGuard<i64>): void {}\nfunction generic(value: Holder<i32>): void {}",
+        |_, module, receipt| {
+            let short = |exact: AnalysisLimits| {
+                [
+                    AnalysisLimits {
+                        max_work: exact.max_work - 1,
+                        ..exact
+                    },
+                    AnalysisLimits {
+                        max_entries: exact.max_entries - 1,
+                        ..exact
+                    },
+                    AnalysisLimits {
+                        max_depth: exact.max_depth - 1,
+                        ..exact
+                    },
+                ]
+            };
+            let old = AnalysisLimits {
+                max_work: 185_689,
+                max_entries: 3_979,
+                max_depth: 3,
+            };
+            assert_eq!(
+                analyze_ownership(receipt, old).completion(),
+                GraphCompletion::ResourceLimit
+            );
+            let exact = AnalysisLimits {
+                max_work: 186_005,
+                max_entries: 4_113,
+                max_depth: 5,
+            };
+            let report = analyze_ownership(receipt, exact);
+            assert_eq!(
+                report.statistics(),
+                Statistics {
+                    work: 186_005,
+                    entries: 4_113,
+                    max_depth: 5
+                }
+            );
+            assert_eq!(report.completion(), GraphCompletion::Incomplete);
+            assert!(report.findings().is_empty());
+            for cap in short(exact) {
+                let limited = analyze_ownership(receipt, cap);
+                assert_eq!(limited.completion(), GraphCompletion::ResourceLimit);
+                assert!(
+                    limited
+                        .roots()
+                        .iter()
+                        .all(|root| root.ordinary_mir().is_none())
+                );
+            }
+            for (name, (work, entries), site) in [
+                (
+                    &b"function wide"[..],
+                    (1_841, 12),
+                    &b"lock: LockGuard<i64>"[..],
+                ),
+                (b"function generic", (1_849, 12), b"value: Holder<i32>"),
+            ] {
+                let root = root(&report, name);
+                assert_eq!(root.ordinary_completion(), Completion::Incomplete);
+                assert!(root.ordinary_mir().is_none());
+                assert_eq!(root.blocked_at().unwrap().span.bytes(), site);
+                let BodyOwner::Declaration(id) = root.owner() else {
+                    panic!("a function root")
+                };
+                // Depth 0: no one-short depth cap.
+                let exact = AnalysisLimits {
+                    max_work: work,
+                    max_entries: entries,
+                    max_depth: 0,
+                };
+                let target = lower_body(receipt, module, id, exact).unwrap();
+                assert_eq!(target.completion(), Completion::Incomplete);
+                assert_eq!(
+                    target.statistics(),
+                    Statistics {
+                        work,
+                        entries,
+                        max_depth: 0
+                    }
+                );
+                assert_eq!(target.blocked_at().unwrap().span.bytes(), site);
+                assert!(target.mir().is_none() && target.findings().is_empty());
+                for cap in &short(AnalysisLimits {
+                    max_depth: 1,
+                    ..exact
+                })[..2]
+                {
+                    let limited = lower_body(
+                        receipt,
+                        module,
+                        id,
+                        AnalysisLimits {
+                            max_depth: 0,
+                            ..*cap
+                        },
+                    )
+                    .unwrap();
+                    assert_eq!(limited.completion(), Completion::ResourceLimit);
+                    assert!(limited.mir().is_none() && limited.findings().is_empty());
+                }
+            }
+        },
+    );
+}
+
 /// Rule 2: the nearest unsupported sibling, a guard moved into a local
 /// binding and released at scope exit, keeps the caps measured at the parent
 /// (36f1cf15 with D1's branch), not re-measured on the candidate.
