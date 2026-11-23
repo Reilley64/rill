@@ -646,6 +646,15 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         {
             return self.narrow_variant_parameter(parameter);
         }
+        if self.is_list_shared_record_reference(ty) {
+            // The elements are shared references; the whole List frees only its backing.
+            let disposal = self.list_disposal(node)?;
+            let slot =
+                self.allocate_slot(node, true, StorageCleanup::DisposeListI32(disposal), None)?;
+            self.budget.reserve(1)?;
+            self.locals.insert(&parameter.declaration.id, slot);
+            return Ok(slot);
+        }
         if let Some(slot) = self.nested_record_region(node, ty)? {
             self.budget.reserve(1)?;
             self.nested_record_values
@@ -1022,6 +1031,20 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 && matches!(arguments.as_slice(), [element] if scalar::scalar(element) == Some(Primitive::I32)))
     }
 
+    pub(super) fn is_shared_record_reference(&self, ty: &Type<'g>) -> bool {
+        matches!(ty.as_ref(), TypeTerm::Reference { mutable: false, referent }
+            if matches!(referent.as_ref(), TypeTerm::Nominal { declaration, arguments }
+                if declaration.kind == DeclarationKind::Record
+                    && declaration.module.origin == Origin::Application
+                    && arguments.is_empty()))
+    }
+
+    pub(super) fn is_list_shared_record_reference(&self, ty: &Type<'g>) -> bool {
+        matches!(ty.as_ref(), TypeTerm::Nominal { declaration, arguments }
+            if self.typed.list_role().is_some_and(|list| std::ptr::eq(*declaration, &list.declaration.id))
+                && matches!(arguments.as_slice(), [element] if self.is_shared_record_reference(element)))
+    }
+
     fn is_list_text(&self, ty: &Type<'g>) -> bool {
         matches!(ty.as_ref(), TypeTerm::Nominal { declaration, arguments }
             if self.typed.list_role().is_some_and(|list| std::ptr::eq(*declaration, &list.declaration.id))
@@ -1320,10 +1343,12 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             TypeTerm::Reference {
                 mutable: false,
                 referent,
-            } if owns_text(referent) => OptionPayload::Reference {
-                ty: payload,
-                exclusive: false,
-            },
+            } if owns_text(referent) || self.is_shared_record_reference(payload) => {
+                OptionPayload::Reference {
+                    ty: payload,
+                    exclusive: false,
+                }
+            }
             TypeTerm::Reference {
                 mutable: true,
                 referent,
