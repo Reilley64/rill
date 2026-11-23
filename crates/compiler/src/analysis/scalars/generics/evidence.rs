@@ -606,7 +606,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         depth: usize,
     ) -> Work<()> {
         let assumptions = std::mem::take(&mut self.evidence.assumptions);
-        let result = self.check_named_body(module, typed, false, Some((context, depth)));
+        let result = self.check_named_body(module, typed, false, false, Some((context, depth)));
         self.evidence.assumptions = assumptions;
         result
     }
