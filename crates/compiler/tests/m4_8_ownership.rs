@@ -1568,13 +1568,13 @@ fn installed_pair_evidence(request: &InstalledRequest) {
         // Same input values; only a requirement tied to a written input occurrence
         // may use its origin. In particular R can equal W without denoting W.
         let caller = "function checkJobs(left: List<i32>, right: List<i32>): void { let _ = keepPair(([() => (&left)[0u64], () => (&right)[0u64]])); }";
-        for (header, property, expected, origins) in [
-            (PAIR.to_owned(), "sendable(F)", TypedCompletion::Checked, vec!["() => (&left)[0u64]"]),
-            ("function keepPair<W,R>(jobs: W): R; implement<F> keepPair<[F,() => i32],[F,() => i32]>(jobs: [F,() => i32]): [F,() => i32] where callableOnce(F, [], i32), sendable(F) { return jobs; }".to_owned(), "sendable(F)", TypedCompletion::Checked, vec!["() => (&left)[0u64]"]),
-            (PAIR.replace("(jobs: W): R;", "(jobs: W): R where sendable(W);"), "sendable(W)", TypedCompletion::Checked, vec!["() => (&left)[0u64]", "() => (&right)[0u64]"]),
-            (PAIR.replace("(jobs: W): R;", "(jobs: W): R where sendable(R);"), "sendable(R)", TypedCompletion::Incomplete, vec![]),
-            (PAIR.replace("(jobs: W): R;", "(jobs: W): R where noBorrow(W);"), "noBorrow(W)", TypedCompletion::SourceRejected, vec!["() => (&left)[0u64]", "() => (&right)[0u64]"]),
-            ("function keepPair<W,R>(jobs: W): R; implement<F> keepPair<[F,F],[F,F]>(jobs: [F,F]): [F,F] where callableOnce(F, [], i32), sendable(F) { return jobs; }".to_owned(), "sendable(F)", TypedCompletion::Incomplete, vec![]),
+        for (header, property, expected, origins, state) in [
+            (PAIR.to_owned(), "sendable(F)", TypedCompletion::Checked, vec!["() => (&left)[0u64]"], GoalState::Proved),
+            ("function keepPair<W,R>(jobs: W): R; implement<F> keepPair<[F,() => i32],[F,() => i32]>(jobs: [F,() => i32]): [F,() => i32] where callableOnce(F, [], i32), sendable(F) { return jobs; }".to_owned(), "sendable(F)", TypedCompletion::Checked, vec!["() => (&left)[0u64]"], GoalState::Proved),
+            (PAIR.replace("(jobs: W): R;", "(jobs: W): R where sendable(W);"), "sendable(W)", TypedCompletion::Checked, vec!["() => (&left)[0u64]", "() => (&right)[0u64]"], GoalState::Proved),
+            (PAIR.replace("(jobs: W): R;", "(jobs: W): R where sendable(R);"), "sendable(R)", TypedCompletion::Incomplete, vec![], GoalState::Unresolved(GoalBlocker::CallableEnvironment)),
+            (PAIR.replace("(jobs: W): R;", "(jobs: W): R where noBorrow(W);"), "noBorrow(W)", TypedCompletion::SourceRejected, vec!["() => (&left)[0u64]", "() => (&right)[0u64]"], GoalState::Disproved),
+            ("function keepPair<W,R>(jobs: W): R; implement<F> keepPair<[F,F],[F,F]>(jobs: [F,F]): [F,F] where callableOnce(F, [], i32), sendable(F) { return jobs; }".to_owned(), "sendable(F)", TypedCompletion::Incomplete, vec![], GoalState::Unresolved(GoalBlocker::CallableEnvironment)),
         ] {
             let graph = capture(&header, caller);
             let report = analyze_typed(&graph, AnalysisLimits::default());
@@ -1588,11 +1588,8 @@ fn installed_pair_evidence(request: &InstalledRequest) {
                 goal.dependencies.iter().filter_map(|id| bodies.goal(id).unwrap().arrow_origin.as_ref().map(|a|a.site.span.bytes())).collect()
             };
             assert_eq!(observed, origins.iter().map(|s| s.as_bytes()).collect::<Vec<_>>());
-            match expected {
-                TypedCompletion::Checked => assert_eq!(goal.state, GoalState::Proved),
-                TypedCompletion::SourceRejected => assert_eq!(goal.state, GoalState::Disproved),
-                _ => assert_ne!(goal.state, GoalState::Proved),
-            }
+            // Review ci-uaa1 S2-F7: the exact state, not "not Proved".
+            assert_eq!(goal.state, state, "{header}");
         }
 
         // Both erased parameters have exactly the other slot's signature.
