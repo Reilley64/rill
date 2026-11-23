@@ -587,6 +587,12 @@ pub enum Operation<'g> {
         holes: Vec<Place<'g>>,
         into: Place<'g>,
     },
+    /// Initialize a descriptor over a direct, uninterpolated string literal's
+    /// program-lifetime static backing (RFC 0006). The backing has no owner:
+    /// nothing ends with the holder, and the descriptor carries no loan.
+    BorrowStatic {
+        holder: Place<'g>,
+    },
     /// Copy a scalar through a checked descriptor into its destination.
     CopyReferent {
         from: Place<'g>,
@@ -2293,6 +2299,8 @@ enum Action<'g> {
         forwarding_possible: bool,
     },
     Init(Slot),
+    /// Initialize a descriptor over a string literal's static backing.
+    BorrowStatic(Slot),
     /// `count` equal-width stage regions starting at `first`: string leaves
     /// or whole records of string fields.
     CommitList {

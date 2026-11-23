@@ -20,6 +20,8 @@ use compiler::analysis::scalars::{BodyOwner, Site};
 use compiler::analysis::typed::TypedCompletion;
 use compiler::loader::DeclarationKind;
 
+#[path = "rfc_cases/o12.rs"]
+mod o12;
 #[path = "rfc_cases/o20.rs"]
 mod o20;
 

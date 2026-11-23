@@ -202,7 +202,9 @@ fn liveness(
             | Action::EndScope(_)
             | Action::CheckRetained => use_one(None, None),
             Action::CheckScopedReferenceResults { entries, .. } => (entries.map(Some), None),
-            Action::Init(slot) | Action::End(slot) => use_one(None, Some(slot)),
+            Action::Init(slot) | Action::BorrowStatic(slot) | Action::End(slot) => {
+                use_one(None, Some(slot))
+            }
             Action::CommitList { into, .. } => use_one(None, Some(into)),
             Action::OpenOwnedList { source, cursor, .. } => use_one(Some(source), Some(cursor)),
             Action::AdvanceOwnedList { cursor, into, .. } => use_one(Some(cursor), into),
@@ -2607,6 +2609,13 @@ pub(super) fn run<'a, 'g>(
                     }
                     state[slot] = State::Initialized(empty.clone());
                     Operation::Initialize(local(slot))
+                }
+                Action::BorrowStatic(slot) => {
+                    // The backing is static: no owner, no loan, nothing to end.
+                    state[slot] = State::Initialized(empty.clone());
+                    Operation::BorrowStatic {
+                        holder: local(slot),
+                    }
                 }
                 Action::CommitList {
                     first,

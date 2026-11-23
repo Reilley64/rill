@@ -2678,6 +2678,11 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                         );
                     }
                     let projected = self.ungroup(value)?;
+                    if let Some(entry) =
+                        self.borrowed_temporary_field(node, projected, output, export, depth + 1)?
+                    {
+                        return Ok(entry);
+                    }
                     let temporary = self.temporary_projection(projected, true)?;
                     let finish = if let Some(temp) = temporary {
                         self.cleanup(node, &[temp.scratch], export)?
@@ -2764,6 +2769,95 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         }
     }
 
+    /// `(&call(..)).field` over a flat record of scalars (RFC 0007 O12): the
+    /// call result lives in its statement's temporary backing, the borrow
+    /// reads one scalar field through the descriptor, and the statement ends
+    /// the descriptor and then the backing. A written screen of syntax and
+    /// paid facts comes first; anything else stays where it was.
+    fn borrowed_temporary_field(
+        &mut self,
+        statement: NodeId,
+        value: NodeId,
+        output: Slot,
+        next: Pc,
+        depth: usize,
+    ) -> ResultOf<Option<Pc>> {
+        let facts = self.value(value)?;
+        let Some((base, Projection::Field(field))) = projection(facts) else {
+            return Ok(None);
+        };
+        if facts.path.is_some()
+            || facts.access != Access::ReadOnly
+            || !matches!(facts.ty.as_ref(), TypeTerm::Primitive(_))
+            || owns_text(&facts.ty)
+        {
+            return Ok(None);
+        }
+        let (borrow, depth) = self.ungroup_expression_at(base, depth + 1)?;
+        let syntax = &self.module.syntax.nodes[borrow];
+        if syntax.kind != NodeKind::Prefix("&") {
+            return Ok(None);
+        }
+        let (call_node, _) = self.ungroup_expression_at(syntax.children[0], depth + 1)?;
+        if self.module.syntax.nodes[call_node].kind != NodeKind::Call {
+            return Ok(None);
+        }
+        self.budget.step(1)?;
+        let produced = self.value(call_node)?;
+        let Some(call) = produced.call.as_deref() else {
+            return Ok(None);
+        };
+        let descriptor = self.normal_value(borrow)?;
+        if produced.path.is_some()
+            || produced.access != Access::Owned
+            || !matches!(descriptor.ty.as_ref(), TypeTerm::Reference { mutable: false, referent } if *referent == produced.ty)
+            || !self.scalar_record(&produced.ty)?
+        {
+            return Err(Stop::Pending(value));
+        }
+        let (_, result) = self.direct_application_signature(call_node, call)?;
+        if result != &produced.ty {
+            return Err(Stop::Pending(value));
+        }
+        let backing = self.slot(call_node, &produced.ty)?;
+        if self.slots[backing].custom_disposer.is_some()
+            || self.slots[backing].moves
+            || self.slots[backing].contains_guard()
+        {
+            return Err(Stop::Pending(value));
+        }
+        self.slots[backing].scalar_borrow_temporary = true;
+        let member = self.field(value, backing, &field.id)?;
+        let Some(projection) = self.slots[member].projection else {
+            return Err(Stop::Pending(value));
+        };
+        let holder = self.slot(borrow, &descriptor.ty)?;
+        self.slots[holder].scalar_borrow_temporary = true;
+        let finish = self.cleanup(statement, &[backing, holder], next)?;
+        let read = self.emit(
+            value,
+            Action::BindBorrowedMember {
+                descriptor: holder,
+                projection,
+                into: output,
+                binding: BorrowedMemberBinding::CopyScalar,
+            },
+            Edges::Next(finish),
+        )?;
+        let take = self.emit(
+            borrow,
+            Action::Borrow {
+                from: backing,
+                into: holder,
+                exclusive: false,
+                retained_target: false,
+            },
+            Edges::Next(read),
+        )?;
+        self.expression(call_node, Some(backing), take, depth + 1)
+            .map(Some)
+    }
+
     fn binding_temporary_borrow(
         &mut self,
         statement: NodeId,
@@ -2795,34 +2889,50 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             return Ok(None);
         };
         let descriptor = self.normal_value(borrow)?;
-        if !matches!(produced.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "bool")
-            || produced.path.is_some()
-            || produced.access != Access::Owned
-            || !matches!(descriptor.ty.as_ref(), TypeTerm::Reference { mutable: false, referent } if *referent == produced.ty)
-        {
+        let shared_view = matches!(descriptor.ty.as_ref(), TypeTerm::Reference { mutable: false, referent } if *referent == produced.ty);
+        if produced.path.is_some() || produced.access != Access::Owned || !shared_view {
             return Ok(None);
         }
-        if let Some(read) = read
-            && self.normal_value(read)?.ty != produced.ty
-        {
-            return Ok(None);
-        }
-        self.check_exact_primitive_call(call_node, call, &produced.ty)?;
-        // The pinned Bool disposer has no effect. Do not silently replace a
-        // selected user disposer, or assume default cleanup when coverage is pending.
-        let cleanup = self.typed.primitive_protection();
-        self.budget.step(cleanup.len())?;
-        if !cleanup.iter().any(|scope| {
-            Some(scope.family) == self.dispose
-                && scope.role == PrimitiveRole::Dispose
-                && scope.primitive.name() == "bool"
-                && scope.coverage == PrimitiveCoverage::Clear
-                && scope.required_winner.is_some()
-        }) {
-            return Err(Stop::Pending(call_node));
+        let boolean = matches!(produced.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "bool");
+        if !boolean {
+            // A flat record of scalars: O12's borrowed temporary (RFC 0007).
+            if read.is_some() || !self.scalar_record(&produced.ty)? {
+                return Ok(None);
+            }
+            let (_, result) = self.direct_application_signature(call_node, call)?;
+            if result != &produced.ty {
+                return Err(Stop::Pending(call_node));
+            }
+        } else {
+            if let Some(read) = read
+                && self.normal_value(read)?.ty != produced.ty
+            {
+                return Ok(None);
+            }
+            self.check_exact_primitive_call(call_node, call, &produced.ty)?;
+            // The pinned Bool disposer has no effect. Do not silently replace a
+            // selected user disposer, or assume default cleanup when coverage is pending.
+            let cleanup = self.typed.primitive_protection();
+            self.budget.step(cleanup.len())?;
+            if !cleanup.iter().any(|scope| {
+                Some(scope.family) == self.dispose
+                    && scope.role == PrimitiveRole::Dispose
+                    && scope.primitive.name() == "bool"
+                    && scope.coverage == PrimitiveCoverage::Clear
+                    && scope.required_winner.is_some()
+            }) {
+                return Err(Stop::Pending(call_node));
+            }
         }
 
         let backing = self.slot(call_node, &produced.ty)?;
+        if !boolean
+            && (self.slots[backing].custom_disposer.is_some()
+                || self.slots[backing].moves
+                || self.slots[backing].contains_guard())
+        {
+            return Err(Stop::Pending(call_node));
+        }
         self.slots[backing].scalar_borrow_temporary = true;
         let (holder, after_borrow) = if let Some(read) = read {
             let holder = self.slot(borrow, &descriptor.ty)?;
@@ -5499,6 +5609,11 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                         exclusive,
                         suspends,
                     }
+                } else if !exclusive
+                    && matches!(source.kind, NodeKind::Literal | NodeKind::Template)
+                    && self.static_string_view(facts, operand)?
+                {
+                    Action::BorrowStatic(into)
                 } else {
                     let operand_facts = self.value(operand)?;
                     if !exclusive
@@ -5639,6 +5754,48 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             _ => return Err(Stop::Pending(node)),
         };
         self.emit(node, action, Edges::Next(next))
+    }
+
+    /// An application record whose fields are all scalars, so that ending its
+    /// storage is its whole cleanup. A different shape stays where it was.
+    fn scalar_record(&mut self, ty: &Type<'g>) -> ResultOf<bool> {
+        let Some(fields) = self.record_fields(ty)? else {
+            return Ok(false);
+        };
+        self.budget.step(fields.len())?;
+        Ok(fields
+            .iter()
+            .all(|field| matches!(field.ty.as_ref(), TypeTerm::Primitive(_)) && !owns_text(&field.ty)))
+    }
+
+    /// RFC 0006's explicit exception: a direct borrow of an uninterpolated
+    /// string literal has program-lifetime static backing. Read from facts
+    /// already paid for, with no charge. A named owner never reaches here.
+    fn static_string_view(
+        &mut self,
+        borrow: &ExpressionFacts<'g>,
+        literal: NodeId,
+    ) -> ResultOf<bool> {
+        let TypeTerm::Reference {
+            mutable: false,
+            referent,
+        } = borrow.ty.as_ref()
+        else {
+            return Ok(false);
+        };
+        let operand = self.value(literal)?;
+        if !matches!(referent.as_ref(), TypeTerm::Primitive(p) if p.name() == "string")
+            || operand.ty != *referent
+            || matches!(operand.data, Some(DataExpression::Interpolation(_)))
+        {
+            return Ok(false);
+        }
+        // A template is static only when every piece is text, with no hole.
+        let pieces = &self.module.syntax.nodes[literal].children;
+        self.budget.step(pieces.len())?;
+        Ok(pieces
+            .iter()
+            .all(|&piece| self.module.syntax.nodes[piece].kind == NodeKind::TemplateText))
     }
 
     fn rebuild_record(
