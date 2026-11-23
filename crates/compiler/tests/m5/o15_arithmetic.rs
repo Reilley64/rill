@@ -149,7 +149,15 @@ fn rfc_counter_caps_include_the_charged_local_reads() {
                 assert_eq!(limited.completion(), Completion::ResourceLimit);
                 assert!(limited.mir().is_none() && limited.findings().is_empty());
             }
-            let graph_stats = statistics(187543, 4297, 6);
+            // Metering rule 11 (ri-785.9): the A2 graph cap 187,543/4,297/6
+            // gives ResourceLimit now that the i32 equality source root
+            // (+316/+134, depth 5) and the counter expectation root
+            // (+184/+65) are checked.
+            assert_eq!(
+                analyze_ownership(receipt, caps(statistics(187543, 4297, 6)).0).completion(),
+                GraphCompletion::ResourceLimit
+            );
+            let graph_stats = statistics(188043, 4496, 6);
             let (exact, short) = caps(graph_stats);
             let graph = analyze_ownership(receipt, exact);
             assert_eq!(graph.completion(), GraphCompletion::Incomplete);
@@ -736,7 +744,13 @@ function screened(xs: List<i32>, left: i32, right: i32): i32 {
 "#,
         |_, module, receipt| {
             // Exact results measured at a2d8e05, before arithmetic lowering.
-            let graph_stats = statistics(191033, 4151, 5);
+            // Metering rule 11 (ri-785.9): the graph was 191,033/4,151/5; the
+            // i32 equality source root adds 316 work and 134 entries.
+            assert_eq!(
+                analyze_ownership(receipt, caps(statistics(191033, 4151, 5)).0).completion(),
+                GraphCompletion::ResourceLimit
+            );
+            let graph_stats = statistics(191349, 4285, 5);
             let (exact, short) = caps(graph_stats);
             let graph = analyze_ownership(receipt, exact);
             assert_eq!(graph.completion(), GraphCompletion::Incomplete);

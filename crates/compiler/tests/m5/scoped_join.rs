@@ -1583,13 +1583,17 @@ function joined(numbers: List<i32>, otherInput: List<i32>): [i32, i32] {{
                     }
                     let graph_stats = owned.statistics();
                     if live {
+                        // Metering rule 11 (ri-785.9): this exact SourceRejected
+                        // graph cap became 213,499/5,736/10 with the i32 equality
+                        // source root. The old cap runs out after the finding is
+                        // recorded, so it keeps the R0201 but is not definitive.
                         let old = AnalysisLimits {
                             max_work: 213183,
                             max_entries: 5602,
                             max_depth: 10,
                         };
                         let stopped = analyze_ownership(&receipt, old);
-                        assert_eq!(stopped.completion(), GraphCompletion::SourceRejected);
+                        assert_eq!(stopped.completion(), GraphCompletion::ResourceLimit);
                         assert_eq!(stopped.findings()[0].code(), "R0201");
                     }
                     let (exact, short) = budget_caps(graph_stats);
@@ -3073,9 +3077,10 @@ fn installed_join_fresh_results_keep_the_written_occurrence() {
             }
         "#,
         |request, module, receipt, typed| {
+            assert_pre_equality_graph_cap(receipt, (282_035, 49_331, 8));
             let graph_cost = Statistics {
-                work: 282_035,
-                entries: 49_331,
+                work: 282_351,
+                entries: 49_465,
                 max_depth: 8,
             };
             let (exact, graph_short) = budget_caps(graph_cost);

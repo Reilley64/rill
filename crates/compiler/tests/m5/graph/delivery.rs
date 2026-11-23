@@ -411,14 +411,18 @@ function middle(enter: bool): void {
 function unsafeBody(slot: &mut &bool, input: &bool, enter: bool): void {
     let flag = true; *slot = &flag; while (enter) { continue; } *slot = input;
 }"#;
-    for (source, target_cap, graph_cap, expected_graph) in [
-        (retaining.replace("ARG", "false"), (7419,935,6), (190151,4842,6), GraphCompletion::SourceRejected),
-        (retaining.replace("ARG", "((false))"), (7439,941,7), (190283,4844,7), GraphCompletion::SourceRejected),
-        (retaining.replace("middle(ARG);", "if (true) { middle(enter); }"), (7499,975,7), (190399,4876,7), GraphCompletion::SourceRejected),
-        ("function outer(enter: bool): void { middle(enter); }\nfunction middle(enter: bool): void { let _ = enter; }".to_owned(), (3954,162,5), (186093,4126,5), GraphCompletion::Incomplete),
+    // Metering rule 11 (ri-785.9): each graph cap is the original one plus the
+    // i32 equality source root (316 work, 134 entries, depth 5); the original
+    // (last column) now gives ResourceLimit. Target caps are unchanged.
+    for (source, target_cap, graph_cap, expected_graph, pre_equality_graph) in [
+        (retaining.replace("ARG", "false"), (7419,935,6), (190467,4976,6), GraphCompletion::SourceRejected, (190151,4842,6)),
+        (retaining.replace("ARG", "((false))"), (7439,941,7), (190599,4978,7), GraphCompletion::SourceRejected, (190283,4844,7)),
+        (retaining.replace("middle(ARG);", "if (true) { middle(enter); }"), (7499,975,7), (190715,5010,7), GraphCompletion::SourceRejected, (190399,4876,7)),
+        ("function outer(enter: bool): void { middle(enter); }\nfunction middle(enter: bool): void { let _ = enter; }".to_owned(), (3954,162,5), (186409,4260,5), GraphCompletion::Incomplete, (186093,4126,5)),
     ] {
         probe("graph::delivery::unsupported_forwarders_keep_the_original_frame_budgets", &source, |_, module, receipt| {
             let cap = |(max_work,max_entries,max_depth)| AnalysisLimits {max_work,max_entries,max_depth};
+            assert_eq!(analyze_ownership(receipt, cap(pre_equality_graph)).completion(), GraphCompletion::ResourceLimit);
             let graph = analyze_ownership(receipt, cap(graph_cap));
             assert_eq!(graph.completion(), expected_graph);
             let outer = root(&graph, b"function outer");
@@ -485,19 +489,29 @@ fn infeasible_chain() -> String {
 #[test]
 fn infeasible_forwarded_checkpoint_keeps_the_original_frame_budgets() {
     let source = infeasible_chain();
-    for (source, target_cap, graph_cap) in [
-        (source.clone(), (7597, 1009, 6), (190882, 5008, 6)),
+    // Metering rule 11 (ri-785.9): each graph cap is the original one (last
+    // column, now ResourceLimit) plus the i32 equality source root: 316 work,
+    // 134 entries, depth 5. Target caps are unchanged.
+    for (source, target_cap, graph_cap, pre_equality_graph) in [
+        (
+            source.clone(),
+            (7597, 1009, 6),
+            (191198, 5142, 6),
+            (190882, 5008, 6),
+        ),
         (
             source.replace(
                 "if (enter) {} else { while (enter)",
                 "if ((enter)) {} else { while (((enter)))",
             ),
             (7621, 1018, 8),
+            (191393, 5145, 8),
             (191077, 5011, 8),
         ),
         (
             format!("{source}function unrelated(): void {{ let x = true; }}\n"),
             (7621, 1021, 6),
+            (191678, 5198, 6),
             (191362, 5064, 6),
         ),
         (
@@ -506,6 +520,7 @@ fn infeasible_forwarded_checkpoint_keeps_the_original_frame_budgets() {
                 "infeasibleMiddle(enter); return; let _ = false; }",
             ),
             (7611, 1015, 6),
+            (191324, 5144, 6),
             (191008, 5010, 6),
         ),
     ] {
@@ -545,6 +560,10 @@ fn infeasible_forwarded_checkpoint_keeps_the_original_frame_budgets() {
                     caps(target_cap),
                 );
 
+                assert_eq!(
+                    analyze_ownership(receipt, caps(pre_equality_graph)).completion(),
+                    GraphCompletion::ResourceLimit
+                );
                 let graph = analyze_ownership(receipt, caps(graph_cap));
                 assert_eq!(
                     graph.completion(),
@@ -596,9 +615,20 @@ function backedgeOuter(enter: bool): void {{ while (enter) {{ continue; }} bad(e
             assert!(target.findings().is_empty() && target.rejected_forwarding_calls().is_none());
             assert_target_one_short(receipt, module, owner, cap);
 
-            let graph_cap = AnalysisLimits {
+            // Metering rule 11 (ri-785.9): 247,061 / 14,522 / 11 plus the i32
+            // equality source root (316 work, 134 entries).
+            let pre_equality = AnalysisLimits {
                 max_work: 247061,
                 max_entries: 14522,
+                max_depth: 11,
+            };
+            assert_eq!(
+                analyze_ownership(receipt, pre_equality).completion(),
+                GraphCompletion::ResourceLimit
+            );
+            let graph_cap = AnalysisLimits {
+                max_work: 247377,
+                max_entries: 14656,
                 max_depth: 11,
             };
             let graph = analyze_ownership(receipt, graph_cap);
@@ -606,7 +636,7 @@ function backedgeOuter(enter: bool): void {{ while (enter) {{ continue; }} bad(e
             let stats = graph.statistics();
             assert_eq!(
                 (stats.work, stats.entries, stats.max_depth),
-                (247061, 14522, 11)
+                (247377, 14656, 11)
             );
             assert_graph_one_short(receipt, graph_cap);
             let outer = root(&graph, b"function infeasibleOuter");
@@ -628,9 +658,20 @@ fn feasible_nested_checkpoint_still_rejects_the_forwarding_call() {
         "graph::delivery::feasible_nested_checkpoint_still_rejects_the_forwarding_call",
         &source,
         |_, module, receipt| {
-            let graph_cap = AnalysisLimits {
+            // Metering rule 11 (ri-785.9): 190,831 / 4,937 / 8 plus the i32
+            // equality source root (316 work, 134 entries).
+            let pre_equality = AnalysisLimits {
                 max_work: 190831,
                 max_entries: 4937,
+                max_depth: 8,
+            };
+            assert_eq!(
+                analyze_ownership(receipt, pre_equality).completion(),
+                GraphCompletion::ResourceLimit
+            );
+            let graph_cap = AnalysisLimits {
+                max_work: 191147,
+                max_entries: 5071,
                 max_depth: 8,
             };
             let graph = analyze_ownership(receipt, graph_cap);
@@ -638,7 +679,7 @@ fn feasible_nested_checkpoint_still_rejects_the_forwarding_call() {
             let stats = graph.statistics();
             assert_eq!(
                 (stats.work, stats.entries, stats.max_depth),
-                (190831, 4937, 8)
+                (191147, 5071, 8)
             );
             assert_graph_one_short(receipt, graph_cap);
             let outer = root(&graph, b"function reachedOuter");
@@ -757,11 +798,25 @@ function ordinaryOuter(enter: bool): void { onlyScalar(enter); return; let _ = f
                     },
                 );
             }
+            // Metering rule 11 (ri-785.9): 197,442 / 5,101 / 6 plus the i32
+            // equality source root (316 work, 134 entries).
+            assert_eq!(
+                analyze_ownership(
+                    receipt,
+                    AnalysisLimits {
+                        max_work: 197442,
+                        max_entries: 5101,
+                        max_depth: 6,
+                    },
+                )
+                .completion(),
+                GraphCompletion::ResourceLimit
+            );
             let graph = analyze_ownership(
                 receipt,
                 AnalysisLimits {
-                    max_work: 197442,
-                    max_entries: 5101,
+                    max_work: 197758,
+                    max_entries: 5235,
                     max_depth: 6,
                 },
             );
@@ -769,13 +824,13 @@ function ordinaryOuter(enter: bool): void { onlyScalar(enter); return; let _ = f
             let stats = graph.statistics();
             assert_eq!(
                 (stats.work, stats.entries, stats.max_depth),
-                (197442, 5101, 6)
+                (197758, 5235, 6)
             );
             assert_graph_one_short(
                 receipt,
                 AnalysisLimits {
-                    max_work: 197442,
-                    max_entries: 5101,
+                    max_work: 197758,
+                    max_entries: 5235,
                     max_depth: 6,
                 },
             );

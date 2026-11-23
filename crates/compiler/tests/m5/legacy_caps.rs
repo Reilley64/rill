@@ -8,7 +8,7 @@
 //!
 //! This is LLVM-free host static analysis of ownership; no Rill program runs.
 use super::*;
-use compiler::analysis::ownership::{analyze_ownership, lower_body, lower_root};
+use compiler::analysis::ownership::{GraphCompletion, analyze_ownership, lower_body, lower_root};
 use compiler::analysis::scalars::BodyOwner;
 use compiler::analysis::{AnalysisLimits, Statistics};
 use std::collections::BTreeMap;
@@ -65,6 +65,72 @@ fn replays_every_published_cap_triple() {
                 failures.len(),
                 failures.join("\n")
             );
+        },
+    );
+}
+
+/// Metering rule 11, D2 (b) (ri-785.9): each graph cap the manifest published
+/// before the i32 equality source root. Every one now gives `ResourceLimit`;
+/// the manifest rows hold the re-pinned caps.
+const PRE_EQUALITY_GRAPH: [(&str, (usize, usize, usize)); 17] = [
+    ("shared", (243206, 25960, 10)),
+    ("alias", (243206, 25960, 10)),
+    ("competing", (214223, 5571, 10)),
+    ("escape", (210417, 5194, 10)),
+    ("slot-escape-good", (233659, 20423, 7)),
+    ("grouped", (234037, 20429, 11)),
+    ("release-live", (236457, 20915, 7)),
+    ("release-after", (237290, 21197, 7)),
+    ("disjoint-live", (213183, 5602, 10)),
+    ("disjoint-dead", (249472, 32880, 10)),
+    ("result-order", (241154, 25850, 11)),
+    ("fixed-list", (191781, 4867, 6)),
+    ("fixed-replacement", (203358, 8126, 3)),
+    ("fwcap-literal", (190151, 4842, 6)),
+    ("fwcap-grouped", (190283, 4844, 7)),
+    ("fwcap-unrelated", (186093, 4126, 5)),
+    ("fwcap-outer-guard", (190399, 4876, 7)),
+];
+
+#[test]
+fn pre_equality_graph_caps_give_resource_limit() {
+    installed(
+        "legacy_caps::pre_equality_graph_caps_give_resource_limit",
+        |request| {
+            let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/m5/legacy-caps");
+            let app = request.entry.parent().unwrap();
+            let mut failures = Vec::new();
+            for (fixture, (max_work, max_entries, max_depth)) in PRE_EQUALITY_GRAPH {
+                for stale in fs::read_dir(app).unwrap() {
+                    fs::remove_file(stale.unwrap().path()).unwrap();
+                }
+                for file in fs::read_dir(fixtures.join(fixture)).unwrap() {
+                    let file = file.unwrap();
+                    fs::copy(file.path(), app.join(file.file_name())).unwrap();
+                }
+                for test_mode in [false, true] {
+                    let graph = loader::load_installed(InstalledRequest {
+                        test_mode,
+                        ..request.clone()
+                    })
+                    .unwrap();
+                    let typed = analyze_typed(&graph, AnalysisLimits::default());
+                    let receipt = typed.receipt().unwrap();
+                    let old = AnalysisLimits {
+                        max_work,
+                        max_entries,
+                        max_depth,
+                    };
+                    let report = analyze_ownership(&receipt, old);
+                    if report.completion() != GraphCompletion::ResourceLimit {
+                        failures.push(format!(
+                            "{fixture} test_mode={test_mode}: {:?} at {old:?}",
+                            report.completion()
+                        ));
+                    }
+                }
+            }
+            assert!(failures.is_empty(), "{failures:#?}");
         },
     );
 }

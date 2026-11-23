@@ -292,7 +292,8 @@ fn mixed_wrapper_exports_the_view_then_cleans_the_owned_wrapper() {
             // The scope-exit release verification adds 102 work for each of
             // mixedWrapper and mixedGrouped and 26 for guardBesideView: +230,
             // entries unchanged, depth still mixedGrouped's 5.
-            let pinned = stats(198_204, 5_550, 5);
+            assert_pre_equality_graph_cap(receipt, (198_204, 5_550, 5));
+            let pinned = stats(198_520, 5_684, 5);
             assert_eq!(graph.statistics(), pinned);
             assert_eq!(graph.completion(), GraphCompletion::Incomplete);
             let (exact, short) = caps(pinned);
@@ -301,7 +302,8 @@ fn mixed_wrapper_exports_the_view_then_cleans_the_owned_wrapper() {
             assert_eq!(replay.completion(), GraphCompletion::Incomplete);
             let old = AnalysisLimits {
                 max_work: 197_974,
-                ..exact
+                max_entries: 5_550,
+                max_depth: 5,
             };
             for short in std::iter::once(old).chain(short) {
                 assert_eq!(
