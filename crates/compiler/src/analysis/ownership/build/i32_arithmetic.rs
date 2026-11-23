@@ -95,6 +95,35 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         self.expression(left, Some(left_slot), right, depth + 1)
     }
 
+    /// `left && right` on two i32 equalities (ri-e9t8). Evaluate `left` into a
+    /// scratch `bool`, end it on both edges, then either evaluate `right`
+    /// into `into` or, when `left` is false, initialize `into` without
+    /// evaluating `right`. Both edges reach `next` with `into` initialized.
+    pub(super) fn i32_equality_conjunction(
+        &mut self,
+        node: NodeId,
+        into: Option<Slot>,
+        next: Pc,
+        depth: usize,
+    ) -> ResultOf<Pc> {
+        let into = into.ok_or(Stop::Pending(node))?;
+        let [left, right] = *self.module.syntax.nodes[node].children.as_slice() else {
+            return Err(Stop::Pending(node));
+        };
+        let left_facts = self.normal_value(left)?;
+        // A statically decided left operand has a dead edge, which grants nothing.
+        if Self::outcomes(left_facts) != (true, true) {
+            return Err(Stop::Pending(node));
+        }
+        let scratch = self.slot(left, &left_facts.ty)?;
+        let skipped = self.emit(node, Action::Init(into), Edges::Next(next))?;
+        let no = self.emit(node, Action::End(scratch), Edges::Next(skipped))?;
+        let evaluated = self.expression(right, Some(into), next, depth + 1)?;
+        let yes = self.emit(node, Action::End(scratch), Edges::Next(evaluated))?;
+        let branch = self.branch(left, yes, no)?;
+        self.expression(left, Some(scratch), branch, depth + 1)
+    }
+
     fn arithmetic_literal(&self, node: NodeId, facts: &ExpressionFacts<'g>) -> Option<i32> {
         let (
             NodeKind::Literal,

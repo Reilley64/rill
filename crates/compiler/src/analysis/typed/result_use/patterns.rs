@@ -258,6 +258,8 @@ impl<'a, 'g> Check<'a, 'g> {
         }
         let usage = if unobserved {
             ValueUse::Statement
+        } else if source.is_none() {
+            ValueUse::Scrutinee
         } else {
             ValueUse::Used
         };
