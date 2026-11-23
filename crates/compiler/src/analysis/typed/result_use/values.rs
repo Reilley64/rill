@@ -58,13 +58,30 @@ impl<'a, 'g> Check<'a, 'g> {
             if p.name() == "bool" {
                 if let Some(value) = state.boolean_value(from, &component, self.budget)? {
                     self.install_boolean(state, root, value)?;
+                } else if matches!(usage, ValueUse::Scrutinee) {
+                    // A computed Boolean scrutinee reads its source through an alias. Guards
+                    // that read the source must see the same value.
+                    let copy = state.new_boolean_copy(from, &component, self.budget)?;
+                    self.install_boolean(state, root, BooleanValue::Copy(copy))?;
                 } else if !self.wildcard_sources.is_empty() && !self.discarded_value(usage)? {
+                    let mut copied = false;
                     for (source, path) in self.wildcard_sources.iter().rev() {
                         self.budget.step(1 + component.len())?;
                         if from == *source && component == *path {
                             let copy = state.new_boolean_copy(from, &component, self.budget)?;
                             self.install_boolean(state, root, BooleanValue::Copy(copy))?;
+                            copied = true;
                             break;
+                        }
+                    }
+                    if !copied && let Some(source) = self.parameter_copy_source(from, &component)? {
+                        match state.boolean_value(source.0, &source.1, self.budget)? {
+                            Some(value) => self.install_boolean(state, root, value)?,
+                            None => {
+                                let copy =
+                                    state.new_boolean_copy(source.0, &source.1, self.budget)?;
+                                self.install_boolean(state, root, BooleanValue::Copy(copy))?;
+                            }
                         }
                     }
                 }
@@ -77,9 +94,119 @@ impl<'a, 'g> Check<'a, 'g> {
         Ok(())
     }
 
+    /// The wildcard source that the immutable local `from` copies, found on demand.
+    /// `let name = parameter;` binds an immutable name to an immutable parameter, so the
+    /// two hold one value wherever the name is in scope. Reading the written binding costs
+    /// nothing until a copy of an unknown Boolean is read inside a wildcard match whose
+    /// source is a parameter, and no eager tracking moves the other programs' caps.
+    fn parameter_copy_source(
+        &mut self,
+        from: Root<'g>,
+        component: &[ResultComponent<'g>],
+    ) -> Work<Option<Address<'g>>> {
+        let Root::Local(id) = from else {
+            return Ok(None);
+        };
+        if !component.is_empty()
+            || id.kind != DeclarationKind::Binding
+            || !self.wildcard_sources.iter().any(|(root, path)| {
+                path.is_empty()
+                    && matches!(root, Root::Local(p) if p.kind == DeclarationKind::Parameter)
+            })
+        {
+            return Ok(None);
+        }
+        let nodes = &self.module.syntax.nodes;
+        let declarations = &self.module.declarations;
+        self.budget
+            .step(1 + declarations.len().checked_ilog2().unwrap_or(0) as usize)?;
+        let mut name = None;
+        for declaration in &declarations[declarations.partition_point(|d| d.id.start < id.start)..]
+        {
+            self.budget.step(1)?;
+            if declaration.id.start != id.start {
+                break;
+            }
+            if declaration.id.kind == DeclarationKind::Binding {
+                name = Some(declaration.node);
+                break;
+            }
+        }
+        let Some(name) = name else {
+            return Ok(None);
+        };
+        // Nodes follow their children, so the first later node that spans the name and is
+        // not part of its pattern is the binding.
+        let span = &nodes[name].span;
+        let mut parent = name + 1;
+        loop {
+            self.budget.step(1)?;
+            let Some(node) = nodes.get(parent) else {
+                return Ok(None);
+            };
+            if node.span.start() <= span.start()
+                && span.end() <= node.span.end()
+                && !matches!(
+                    node.kind,
+                    NodeKind::QualifiedName
+                        | NodeKind::PatternPath
+                        | NodeKind::NamePattern
+                        | NodeKind::GroupPattern
+                )
+            {
+                break;
+            }
+            parent += 1;
+        }
+        let NodeKind::Binding { mutable: false } = nodes[parent].kind else {
+            return Ok(None);
+        };
+        let (pattern, init) = (
+            nodes[parent].children[0],
+            *nodes[parent].children.last().unwrap(),
+        );
+        let mut pattern = pattern;
+        while nodes[pattern].kind == NodeKind::GroupPattern {
+            self.budget.step(1)?;
+            pattern = nodes[pattern].children[0];
+        }
+        if !matches!(
+            nodes[pattern].kind,
+            NodeKind::PatternPath | NodeKind::NamePattern
+        ) || nodes[pattern].span != *span
+        {
+            return Ok(None);
+        }
+        let init = self.ungroup_value(init)?;
+        if nodes[init].kind != NodeKind::ValueReference {
+            return Ok(None);
+        }
+        let Some(read) = self.expression_facts(init)? else {
+            return Ok(None);
+        };
+        let Some(path) = read
+            .path
+            .as_ref()
+            .filter(|path| path.projections.is_empty())
+        else {
+            return Ok(None);
+        };
+        if !matches!(read.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "bool") {
+            return Ok(None);
+        }
+        for (source, path_at) in &self.wildcard_sources {
+            self.budget.step(1)?;
+            if path_at.is_empty() && matches!(source, Root::Local(p) if std::ptr::eq(*p, path.root))
+            {
+                return Ok(Some((*source, Vec::new())));
+            }
+        }
+        Ok(None)
+    }
+
     pub(super) fn discarded_value(&mut self, usage: ValueUse) -> Work<bool> {
         match usage {
-            ValueUse::Used => Ok(false),
+            ValueUse::Used | ValueUse::Scrutinee => Ok(false),
             ValueUse::Statement => Ok(true),
             ValueUse::Binding { pattern, depth } => match self.module.syntax.nodes[pattern].kind {
                 NodeKind::Wildcard => Ok(true),
