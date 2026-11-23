@@ -1421,9 +1421,15 @@ fn o15_pre_charge_counter_caps_now_give_resource_limit() {
                 assert_eq!(limited.completion(), Completion::ResourceLimit);
                 assert!(limited.mir().is_none() && limited.findings().is_empty());
                 let (old, _) = limits(statistics((187485, 4297, 6)));
-                assert_eq!(
-                    analyze_ownership(&receipt, old).completion(),
-                    GraphCompletion::ResourceLimit
+                let report = analyze_ownership(&receipt, old);
+                assert_eq!(report.completion(), GraphCompletion::ResourceLimit);
+                // Rule 8 (review ci-uaa1 R-5): no MIR and no finding either.
+                assert!(report.findings().is_empty());
+                assert!(
+                    report
+                        .roots()
+                        .iter()
+                        .all(|root| root.mir().is_none() && root.ordinary_mir().is_none())
                 );
             }
         },

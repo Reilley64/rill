@@ -447,7 +447,7 @@ fn relay_caller_keeps_caps(
         };
         (stats, exact, short)
     };
-    probe(test, &source, |_, module, receipt| {
+    probe_with_typed(test, &source, |_, module, receipt, typed| {
         let caller = declaration(module, name);
         let (stats, exact, short) = pinned(target);
         let report = lower_body(receipt, module, &caller.id, exact).unwrap();
@@ -455,6 +455,9 @@ fn relay_caller_keeps_caps(
         assert_eq!(report.statistics(), stats, "{name}");
         assert!(report.findings().is_empty());
         assert_eq!(report.mir().is_some(), checked, "{name}");
+        if name == "callerExclusive" {
+            exclusive_relay_moves(report.mir().unwrap(), module, typed);
+        }
         assert_eq!(
             report.blocked_at().map(|site| site.span.bytes()),
             (!checked).then_some(site.as_bytes()),
@@ -486,6 +489,9 @@ fn relay_caller_keeps_caps(
             .unwrap();
         assert_eq!(root.ordinary_completion(), expected, "{name}");
         assert_eq!(root.ordinary_mir().is_some(), checked, "{name}");
+        if name == "callerExclusive" {
+            exclusive_relay_moves(root.ordinary_mir().unwrap(), module, typed);
+        }
         assert_eq!(
             root.blocked_at().map(|site| site.span.bytes()),
             (!checked).then_some(site.as_bytes()),
@@ -510,6 +516,58 @@ fn relay_caller_keeps_caps(
             );
         }
     });
+}
+
+/// Review ci-uaa1 R-6 (rule 9): the admitted `callerExclusive` moves the
+/// exclusive carrier into the relay and takes the descriptor out of its result,
+/// with no shared copy: `Move` -> `CallIntoTemporary` -> `TestVariant`, then
+/// `TakeOptionPayload` on `Some`, `EndEmptyOption` on `None`.
+fn exclusive_relay_moves<'g>(
+    mir: &Mir<'g>,
+    module: &'g loader::Module,
+    typed: &compiler::analysis::typed::TypedReport<'g>,
+) {
+    let relay = declaration(module, "relayExclusive");
+    let option = typed.option_role().unwrap();
+    assert!(!mir.blocks.iter().any(|b| matches!(
+        b.operation,
+        Operation::Copy { .. } | Operation::CopyOptionPayload { .. }
+    )));
+    let prefix = straight_blocks(mir, mir.entry);
+    let [moved, invoke, test] = prefix.as_slice() else {
+        panic!("move, call and branch exactly once")
+    };
+    let Operation::Move {
+        from: input,
+        into: Some(argument),
+    } = moved.operation
+    else {
+        panic!("move the named carrier into the call stage");
+    };
+    assert_eq!(input.root.span.bytes(), b"input: Option<&mut bool>");
+    let Operation::CallIntoTemporary {
+        callee,
+        arguments,
+        into,
+    } = &invoke.operation
+    else {
+        panic!("publish the relay's staged result");
+    };
+    assert!(std::ptr::eq(*callee, &relay.id));
+    assert!(matches!(arguments.as_slice(), [passed] if same(*passed, argument)));
+    let Terminator::Branch { yes, no } = test.terminator else {
+        panic!("branch on the relayed variant")
+    };
+    assert!(matches!(test.operation,
+        Operation::TestVariant { operand, success } if same(operand, *into) && success == &option.some.id));
+    let success = linear(mir, yes);
+    assert!(matches!(success.as_slice(),
+        [Operation::TakeOptionPayload { operand, into: view },
+         Operation::Move { from, into: Some(_) }, ..]
+        if same(*operand, *into) && view.root.span.bytes() == b"view" && same(*from, *view)));
+    let failure = linear(mir, no);
+    assert!(matches!(failure.as_slice(),
+        [Operation::EndEmptyOption(operand), ..] if same(*operand, *into)));
 }
 
 /// Standards review 3651c5b4: unsupported siblings of the shared relay keep the
@@ -616,6 +674,13 @@ fn exclusive_relay_caller_exceeds_its_parent_caps() {
             let report = analyze_ownership(receipt, old);
             assert_eq!(report.completion(), GraphCompletion::ResourceLimit);
             assert!(report.findings().is_empty());
+            // Rule 8 (review ci-uaa1 R-7): and no root publishes MIR.
+            assert!(
+                report
+                    .roots()
+                    .iter()
+                    .all(|root| root.mir().is_none() && root.ordinary_mir().is_none())
+            );
         },
     );
 }
