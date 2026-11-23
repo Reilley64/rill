@@ -575,26 +575,202 @@ expect separate() == 6i32;
 "#,
     outcome: Outcome::Receipt {
         typed_stats: (325745, 48049, 12),
-        graph: (GraphCompletion::Incomplete, (188006, 4283, 5)),
+        graph: (GraphCompletion::Incomplete, (190039, 5288, 5)),
         pre_equality_graph: (187506, 4084, 3),
         roots: &[
             Root {
                 name: "separate",
-                want: Want::Incomplete {
-                    blocker: r####"pair.left + pair.right"####,
-                },
+                want: Want::Checked,
                 graph: None,
-                stats: (2281, 116, 3),
+                stats: (4314, 1121, 4),
             },
             Root {
                 name: "expect",
-                // Since ri-785.9 the comparison lowers, and the expectation
-                // stops at the blocker of the `separate` body it calls.
-                want: Want::Incomplete {
-                    blocker: r####"pair.left + pair.right"####,
+                want: Want::Checked,
+                graph: None,
+                stats: (6338, 1221, 4),
+            },
+        ],
+    },
+}];
+
+/// O5's prose beyond `separate` (ri-fmsk): loans of distinct fields coexist and
+/// the whole record reads after their last use; a loan of the same field, or of
+/// the whole record, live at an acquisition conflicts, R0201.
+const O5_LOANS: &[Source] = &[Source {
+    text: r#"
+type Pair = { left: i32; right: i32 };
+function onlyLeft(): i32 {
+  let mut pair = Pair { left: 1, right: 2 };
+  let left = &mut pair.left;
+  *left += 1i32;
+  return pair.left + pair.right;
+}
+function otherRead(): i32 {
+  let mut pair = Pair { left: 1, right: 2 };
+  let left = &mut pair.left;
+  let right = pair.right;
+  *left += 1i32;
+  return right;
+}
+function wholeReadAfter(): i32 {
+  let mut pair = Pair { left: 1, right: 2 };
+  let left = &mut pair.left;
+  let right = &mut pair.right;
+  *left += 1i32;
+  *right += 2i32;
+  let whole = pair;
+  return whole.left + whole.right;
+}
+function readLive(): i32 {
+  let mut pair = Pair { left: 1, right: 2 };
+  let left = &mut pair.left;
+  let sum = pair.left + pair.right;
+  *left += 1i32;
+  return sum;
+}
+function sameField(): i32 {
+  let mut pair = Pair { left: 1, right: 2 };
+  let first = &mut pair.left;
+  let second = &mut pair.left;
+  *first += 1i32;
+  *second += 1i32;
+  return pair.right;
+}
+function wholeBeforeFirst(): i32 {
+  let mut pair = Pair { left: 1, right: 2 };
+  let whole = &mut pair;
+  let left = &mut pair.left;
+  *left += 1i32;
+  let kept = whole;
+  return 1i32;
+}
+function wholeBeforeSecond(): i32 {
+  let mut pair = Pair { left: 1, right: 2 };
+  let left = &mut pair.left;
+  *left += 1i32;
+  let whole = &mut pair;
+  let right = &mut pair.right;
+  *right += 2i32;
+  let kept = whole;
+  return 1i32;
+}
+function wholeBetween(): i32 {
+  let mut pair = Pair { left: 1, right: 2 };
+  let left = &mut pair.left;
+  let whole = &mut pair;
+  *left += 1i32;
+  let kept = whole;
+  return 1i32;
+}
+function sharedWholeBeforeFirst(): i32 {
+  let mut pair = Pair { left: 1, right: 2 };
+  let whole = &pair;
+  let left = &mut pair.left;
+  *left += 1i32;
+  let kept = whole;
+  return 1i32;
+}
+function wholeReadWhileLive(): i32 {
+  let mut pair = Pair { left: 1, right: 2 };
+  let left = &mut pair.left;
+  let whole = pair;
+  *left += 1i32;
+  return 1i32;
+}
+"#,
+    outcome: Outcome::Receipt {
+        typed_stats: (347333, 51302, 12),
+        graph: (GraphCompletion::SourceRejected, (214245, 9734, 5)),
+        pre_equality_graph: (205449, 5349, 5),
+        roots: &[
+            Root {
+                name: "onlyLeft",
+                want: Want::Checked,
+                graph: None,
+                stats: (3802, 869, 4),
+            },
+            Root {
+                name: "otherRead",
+                want: Want::Checked,
+                graph: None,
+                stats: (3562, 749, 4),
+            },
+            Root {
+                name: "wholeReadAfter",
+                want: Want::Checked,
+                graph: None,
+                stats: (5493, 1596, 4),
+            },
+            Root {
+                name: "readLive",
+                want: Want::Rejected {
+                    code: "R0201",
+                    site: r####"pair.left"####,
+                    related: r####"&mut pair.left"####,
                 },
                 graph: None,
-                stats: (4305, 216, 3),
+                stats: (3248, 598, 4),
+            },
+            Root {
+                name: "sameField",
+                want: Want::Rejected {
+                    code: "R0201",
+                    site: r####"&mut pair.left"####,
+                    related: r####"&mut pair.left"####,
+                },
+                graph: None,
+                stats: (3333, 636, 4),
+            },
+            Root {
+                name: "wholeBeforeFirst",
+                want: Want::Rejected {
+                    code: "R0201",
+                    site: r####"&mut pair.left"####,
+                    related: r####"&mut pair"####,
+                },
+                graph: None,
+                stats: (3176, 561, 4),
+            },
+            Root {
+                name: "wholeBeforeSecond",
+                want: Want::Rejected {
+                    code: "R0201",
+                    site: r####"&mut pair.right"####,
+                    related: r####"&mut pair"####,
+                },
+                graph: None,
+                stats: (3849, 900, 4),
+            },
+            Root {
+                name: "wholeBetween",
+                want: Want::Rejected {
+                    code: "R0201",
+                    site: r####"&mut pair"####,
+                    related: r####"&mut pair.left"####,
+                },
+                graph: None,
+                stats: (3182, 563, 4),
+            },
+            Root {
+                name: "sharedWholeBeforeFirst",
+                want: Want::Rejected {
+                    code: "R0201",
+                    site: r####"&mut pair.left"####,
+                    related: r####"&pair"####,
+                },
+                graph: None,
+                stats: (3177, 561, 4),
+            },
+            Root {
+                name: "wholeReadWhileLive",
+                want: Want::Rejected {
+                    code: "R0201",
+                    site: r####"pair"####,
+                    related: r####"&mut pair.left"####,
+                },
+                graph: None,
+                stats: (3505, 615, 4),
             },
         ],
     },
@@ -1330,24 +1506,234 @@ function joined(flag: bool, left: string, right: string, seed: &string): void {
 "#,
         outcome: Outcome::Receipt {
             typed_stats: (332133, 48966, 12),
-            graph: (GraphCompletion::Incomplete, (190003, 4236, 5)),
+            graph: (GraphCompletion::SourceRejected, (193195, 5097, 8)),
             pre_equality_graph: (189687, 4102, 3),
             roots: &[
                 Root {
                     name: "clear",
                     want: Want::Checked,
                     graph: None,
-                    stats: (1993, 88, 1),
+                    stats: (2047, 114, 1),
                 },
                 Root {
                     name: "joined",
-                    want: Want::Incomplete {
-                        blocker: r####"&mut slot"####,
+                    want: Want::Rejected {
+                        code: "R0203",
+                        site: r####"dispose(left)"####,
+                        related: r####"&left"####,
                     },
                     graph: None,
-                    stats: (2015, 97, 3),
+                    stats: (5150, 931, 8),
                 },
             ],
+        },
+    },
+];
+
+/// Retained-store A (ri-2s0.11), stage 1: the same two sources through plain
+/// functions, so the `&string` contents contract and the one-destination `clear`
+/// call are checked without family admission. Written for this ticket.
+const O13_PLAIN: &[Source] = &[Source {
+    text: r#"
+function remember(slot: &mut &string, source: &string): void { }
+function clear(slot: &mut &string): void { }
+function joined(flag: bool, left: string, right: string, seed: &string): void {
+  let mut slot = seed;
+  if (flag) { remember(&mut slot, &left); } else { remember(&mut slot, &right); }
+  clear(&mut slot);
+  dispose(left);
+  let last = slot;
+}
+function loops(flag: bool, left: string, seed: &string): void {
+  let mut slot = seed;
+  while (flag) { remember(&mut slot, &left); continue; }
+  clear(&mut slot);
+  dispose(left);
+  let last = slot;
+}
+function released(flag: bool, left: string, right: string, seed: &string): void {
+  let mut slot = seed;
+  if (flag) { remember(&mut slot, &left); } else { remember(&mut slot, &right); }
+  clear(&mut slot);
+  let last = slot;
+  dispose(left);
+  dispose(right);
+}
+"#,
+    outcome: Outcome::Receipt {
+        typed_stats: (337065, 49293, 12),
+        graph: (GraphCompletion::SourceRejected, (203549, 7569, 8)),
+        pre_equality_graph: (203548, 7569, 8),
+        roots: &[
+            Root {
+                name: "remember",
+                want: Want::Checked,
+                graph: None,
+                stats: (2234, 202, 1),
+            },
+            Root {
+                name: "clear",
+                want: Want::Checked,
+                graph: None,
+                stats: (2183, 182, 1),
+            },
+            Root {
+                name: "joined",
+                want: Want::Rejected {
+                    code: "R0203",
+                    site: r####"dispose(left)"####,
+                    related: r####"&left"####,
+                },
+                graph: None,
+                stats: (3746, 999, 8),
+            },
+            Root {
+                name: "loops",
+                want: Want::Rejected {
+                    code: "R0203",
+                    site: r####"dispose(left)"####,
+                    related: r####"&left"####,
+                },
+                graph: None,
+                stats: (3791, 1018, 8),
+            },
+            Root {
+                name: "released",
+                want: Want::Checked,
+                graph: None,
+                stats: (9199, 1887, 8),
+            },
+        ],
+    },
+}];
+
+/// Retained-store A (ri-2s0.11), stage 2: the O13 family contract in a loop,
+/// and with the release after the slot's last use. Written for this ticket.
+const O13_FAMILY: &[Source] = &[Source {
+    text: r#"
+function remember<D, S>(slot: D, source: S): void;
+implement remember(slot: &mut &string, source: &string): void { while (true) {} }
+function clear(slot: &mut &string): void { }
+function loops(flag: bool, left: string, seed: &string): void {
+  let mut slot = seed;
+  while (flag) { remember(&mut slot, &left); continue; }
+  clear(&mut slot);
+  dispose(left);
+  let last = slot;
+}
+function released(flag: bool, left: string, right: string, seed: &string): void {
+  let mut slot = seed;
+  if (flag) { remember(&mut slot, &left); } else { remember(&mut slot, &right); }
+  clear(&mut slot);
+  let last = slot;
+  dispose(left);
+  dispose(right);
+}
+"#,
+    outcome: Outcome::Receipt {
+        typed_stats: (337785, 49820, 12),
+        graph: (GraphCompletion::SourceRejected, (202579, 6570, 8)),
+        pre_equality_graph: (202578, 6570, 8),
+        roots: &[
+            Root {
+                name: "loops",
+                want: Want::Rejected {
+                    code: "R0203",
+                    site: r####"dispose(left)"####,
+                    related: r####"&left"####,
+                },
+                graph: None,
+                stats: (4491, 983, 8),
+            },
+            Root {
+                name: "released",
+                want: Want::Checked,
+                graph: None,
+                stats: (8406, 1630, 8),
+            },
+        ],
+    },
+}];
+
+/// Rule 2 (ri-2s0.11): a family store outside the admitted retained contract
+/// keeps its parent blocker at the parent caps. A Bool beside a string
+/// destination, three sources and a grouped destination are each refused by the
+/// unmetered screen, so the call is still the blocker at the old cost. The caps
+/// were measured at `1fb84233`, before the family-store admission.
+const O13_SIBLINGS: &[Source] = &[
+    Source {
+        text: r#"
+function remember<D, S, G>(slot: D, source: S, gate: G): void;
+implement remember(slot: &mut &string, source: &string, gate: bool): void { while (true) {} }
+function gated(flag: bool, left: string, seed: &string): void {
+  let mut slot = seed;
+  remember(&mut slot, &left, flag);
+  dispose(left);
+  let last = slot;
+}
+"#,
+        outcome: Outcome::Receipt {
+            typed_stats: (328486, 48489, 12),
+            graph: (GraphCompletion::Incomplete, (188672, 4174, 5)),
+            pre_equality_graph: (188671, 4174, 5),
+            roots: &[Root {
+                name: "gated",
+                want: Want::Incomplete {
+                    blocker: r####"remember(&mut slot, &left, flag)"####,
+                },
+                graph: None,
+                stats: (1969, 73, 3),
+            }],
+        },
+    },
+    Source {
+        text: r#"
+function remember<D, A, B, C>(slot: D, first: A, second: B, third: C): void;
+implement remember(slot: &mut &string, first: &string, second: &string, third: &string): void { while (true) {} }
+function triple(left: string, middle: string, right: string, seed: &string): void {
+  let mut slot = seed;
+  remember(&mut slot, &left, &middle, &right);
+  dispose(left);
+  let last = slot;
+}
+"#,
+        outcome: Outcome::Receipt {
+            typed_stats: (331252, 49199, 12),
+            graph: (GraphCompletion::Incomplete, (189179, 4186, 5)),
+            pre_equality_graph: (189178, 4186, 5),
+            roots: &[Root {
+                name: "triple",
+                want: Want::Incomplete {
+                    blocker: r####"remember(&mut slot, &left, &middle, &right)"####,
+                },
+                graph: None,
+                stats: (1992, 85, 3),
+            }],
+        },
+    },
+    Source {
+        text: r#"
+function remember<D, S>(slot: D, source: S): void;
+implement remember(slot: &mut &string, source: &string): void { while (true) {} }
+function grouped(left: string, seed: &string): void {
+  let mut slot = seed;
+  remember((&mut slot), &left);
+  dispose(left);
+  let last = slot;
+}
+"#,
+        outcome: Outcome::Receipt {
+            typed_stats: (328296, 48419, 12),
+            graph: (GraphCompletion::Incomplete, (188476, 4167, 5)),
+            pre_equality_graph: (188475, 4167, 5),
+            roots: &[Root {
+                name: "grouped",
+                want: Want::Incomplete {
+                    blocker: r####"remember((&mut slot), &left)"####,
+                },
+                graph: None,
+                stats: (1957, 66, 3),
+            }],
         },
     },
 ];
@@ -2190,10 +2576,18 @@ fn o04_invalid_move_is_r0200() {
 }
 
 #[test]
-fn o05_disjoint_field_loans_check_and_field_arithmetic_blocks() {
+fn o05_disjoint_field_loans_check_through_local_field_descriptors() {
     run(
-        "rfc_cases::o05_disjoint_field_loans_check_and_field_arithmetic_blocks",
+        "rfc_cases::o05_disjoint_field_loans_check_through_local_field_descriptors",
         O5,
+    );
+}
+
+#[test]
+fn o05_field_loan_conflicts_reject_and_disjoint_forms_check() {
+    run(
+        "rfc_cases::o05_field_loan_conflicts_reject_and_disjoint_forms_check",
+        O5_LOANS,
     );
 }
 
@@ -2476,6 +2870,81 @@ fn o13_joined_retained_sources_reject_early_release() {
 }
 
 #[test]
+fn o13_plain_string_retained_contract_rejects_early_release() {
+    run(
+        "rfc_cases::o13_plain_string_retained_contract_rejects_early_release",
+        O13_PLAIN,
+    );
+}
+
+#[test]
+fn o13_family_store_in_a_loop_rejects_and_after_the_last_use_checks() {
+    run(
+        "rfc_cases::o13_family_store_in_a_loop_rejects_and_after_the_last_use_checks",
+        O13_FAMILY,
+    );
+}
+
+/// Metering rule 11, third case (ri-2s0.11): the second O13 source's `clear`
+/// root now holds retained `&string` contents, and `remember(&mut slot, ..)`
+/// is read from the implementation's declared contract, so the caps at which
+/// `joined` was `Incomplete` at `&mut slot` now give `ResourceLimit` per root
+/// and for the whole graph. The O13 row holds the new caps.
+#[test]
+fn o13_pre_retained_string_caps_now_give_resource_limit() {
+    installed(
+        "rfc_cases::o13_pre_retained_string_caps_now_give_resource_limit",
+        |request| {
+            fs::write(&request.entry, format!("{IMPORTS}\n{}", O13[1].text)).unwrap();
+            for test_mode in [false, true] {
+                let request = InstalledRequest {
+                    test_mode,
+                    ..request.clone()
+                };
+                let graph = loader::load_installed(request).unwrap();
+                let typed = analyze_typed(&graph, AnalysisLimits::default());
+                assert_eq!(typed.completion(), TypedCompletion::Checked);
+                let module = graph
+                    .modules()
+                    .iter()
+                    .find(|m| m.key.origin == Origin::Application && m.key.path == "main.rill")
+                    .unwrap();
+                let receipt = typed.receipt().unwrap();
+                for (name, old) in [("clear", (1993, 88, 1)), ("joined", (2015, 97, 3))] {
+                    let root = module
+                        .declarations
+                        .iter()
+                        .find(|d| {
+                            d.id.kind == DeclarationKind::Function
+                                && d.name.as_deref() == Some(name)
+                        })
+                        .unwrap();
+                    let (old, _) = limits(statistics(old));
+                    let limited = lower_body(&receipt, module, &root.id, old).unwrap();
+                    assert_eq!(limited.completion(), Completion::ResourceLimit, "{name}");
+                    assert!(limited.mir().is_none() && limited.findings().is_empty());
+                }
+                let (old, _) = limits(statistics((190003, 4236, 5)));
+                assert_eq!(
+                    analyze_ownership(&receipt, old).completion(),
+                    GraphCompletion::ResourceLimit
+                );
+            }
+        },
+    );
+}
+
+/// Rule 2: the siblings of the family store stay `Incomplete` at their calls,
+/// at the caps the parent measured.
+#[test]
+fn o13_unsupported_family_store_siblings_stay_incomplete_at_their_calls() {
+    run(
+        "rfc_cases::o13_unsupported_family_store_siblings_stay_incomplete_at_their_calls",
+        O13_SIBLINGS,
+    );
+}
+
+#[test]
 fn o14_replacement_reaches_the_old_disposer_and_a_stale_view_rejects() {
     run(
         "rfc_cases::o14_replacement_reaches_the_old_disposer_and_a_stale_view_rejects",
@@ -2612,6 +3081,57 @@ fn equality_expectations_exceed_their_incomplete_caps() {
             }
         },
     );
+}
+
+/// Metering rule 11, third case (ri-fmsk): O5's `separate` and its expectation
+/// now check, so the caps at which they were `Incomplete` at
+/// `pair.left + pair.right`, and the graph cap with them, give `ResourceLimit`.
+#[test]
+fn o05_old_caps_give_resource_limit() {
+    installed("rfc_cases::o05_old_caps_give_resource_limit", |request| {
+        fs::write(&request.entry, format!("{IMPORTS}\n{}", O5[0].text)).unwrap();
+        for test_mode in [false, true] {
+            let request = InstalledRequest {
+                test_mode,
+                ..request.clone()
+            };
+            let graph = loader::load_installed(request).unwrap();
+            let typed = analyze_typed(&graph, AnalysisLimits::default());
+            let receipt = typed.receipt().unwrap();
+            let module = graph
+                .modules()
+                .iter()
+                .find(|m| m.key.origin == Origin::Application && m.key.path == "main.rill")
+                .unwrap();
+            let (old, _) = limits(statistics((188006, 4283, 5)));
+            let whole = analyze_ownership(&receipt, old);
+            assert_eq!(whole.completion(), GraphCompletion::ResourceLimit);
+            for (kind, old) in [
+                (DeclarationKind::Function, (2281, 116, 3)),
+                (DeclarationKind::Expectation, (4305, 216, 3)),
+            ] {
+                let declaration = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.id.kind == kind)
+                    .unwrap();
+                let (old, _) = limits(statistics(old));
+                let limited = if kind == DeclarationKind::Expectation {
+                    lower_root(
+                        &receipt,
+                        module,
+                        BodyOwner::Declaration(&declaration.id),
+                        old,
+                    )
+                } else {
+                    lower_body(&receipt, module, &declaration.id, old)
+                }
+                .unwrap();
+                assert_eq!(limited.completion(), Completion::ResourceLimit, "{kind:?}");
+                assert!(limited.mir().is_none() && limited.findings().is_empty());
+            }
+        }
+    });
 }
 
 #[test]
