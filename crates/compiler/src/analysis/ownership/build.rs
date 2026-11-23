@@ -537,6 +537,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             list_delivery_loop: None,
             scalar_copy_read: None,
             copied_origins: BTreeSet::new(),
+            declared_shared_frame: false,
             dispose: typed.dispose_role().map(|d| &d.id),
             return_contract,
             callable_frame: None,
@@ -949,6 +950,14 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 self.prove_no_variant_disposer(node, ty, [role.ok, role.err])?;
                 // Postfix consumes the carrier. Cleanup of a live carrier
                 // would need variant-aware disposal.
+                (true, StorageCleanup::Unlowered)
+            }
+            TypeTerm::Nominal { .. } | TypeTerm::Variant { .. }
+                if let Some((role, _)) = self.text_error_result_role(ty) =>
+            {
+                self.prove_no_variant_disposer(node, ty, [role.ok, role.err])?;
+                // Only a postfix export or a retired wrap operand consumes the
+                // carrier; lexical cleanup of a live one is not lowered.
                 (true, StorageCleanup::Unlowered)
             }
             TypeTerm::Nominal { .. } => {
@@ -1390,6 +1399,37 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         (*declaration == &role.declaration.id
             && owns_text(success)
             && matches!(error.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32"))
+        .then_some((role, success))
+    }
+
+    /// `Result<bool, string>` or `Result<string, string>`, or one of their
+    /// variants: the error payload is an owning `string`.
+    fn text_error_result_role<'t>(
+        &self,
+        ty: &'t TypeTerm<'g>,
+    ) -> Option<(&'a ResultRole<'g>, &'t Type<'g>)> {
+        let role = self.typed.result_role()?;
+        role.representation?;
+        let parent = match ty {
+            TypeTerm::Variant {
+                parent,
+                declaration,
+            } if *declaration == &role.ok.id || *declaration == &role.err.id => parent.as_ref(),
+            other => other,
+        };
+        let TypeTerm::Nominal {
+            declaration,
+            arguments,
+        } = parent
+        else {
+            return None;
+        };
+        let [success, error] = arguments.as_slice() else {
+            return None;
+        };
+        (*declaration == &role.declaration.id
+            && (owns_text(success) || scalar::scalar(success) == Some(Primitive::Bool))
+            && owns_text(error))
         .then_some((role, success))
     }
 
@@ -2616,6 +2656,12 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                         slot
                     } else if let Some(slot) = self.scoped_result_destination(value, value, &ty)? {
                         slot
+                    } else if self.text_error_result_role(&ty).is_some()
+                        && self.fact(&value).is_none_or(|fact| fact.flow.returns)
+                    {
+                        // Screened from paid facts: a `string`-error Result whose
+                        // producer can itself return gets no return storage proof.
+                        return Err(Stop::Pending(value));
                     } else {
                         self.slot(value, &ty)?
                     };
@@ -3777,8 +3823,17 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             (source, &operand.ty, Some(operand))
         };
         let mut result_text = None;
+        let mut text_error = false;
         let (wrapper, option_take) = if let Some(error) = &exit.error {
             let role = if let Some((role, _)) = self.scalar_result_role(operand) {
+                role
+            } else if !piped
+                && fresh.is_none()
+                && let Some((role, success)) = self.text_error_result_role(operand)
+                // An owning success payload is admitted only where it cannot continue.
+                && (!owns_text(success) || !exit.can_continue)
+            {
+                text_error = true;
                 role
             } else if statement
                 && syntax.kind == NodeKind::Propagate
@@ -3799,11 +3854,21 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             } else {
                 return Err(Stop::Pending(node));
             };
-            if !matches!(self.scalar_result_role(result), Some((_, None)))
+            // A `string` error is forwarded only into the same exact error type.
+            let returns = if text_error {
+                !matches!(result.as_ref(), TypeTerm::Variant { .. })
+                    && self
+                        .text_error_result_role(result)
+                        .is_some_and(|(_, success)| !owns_text(success))
+                    && owns_text(&error.payload)
+            } else {
+                matches!(self.scalar_result_role(result), Some((_, None)))
+                    && matches!(error.payload.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32")
+            };
+            if !returns
                 || exit.success != &role.ok.id
                 || exit.failure != &role.err.id
                 || error.wrapper != &role.wrapper.id
-                || !matches!(error.payload.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32")
             {
                 return Err(Stop::Pending(node));
             }
@@ -4580,6 +4645,12 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         let NodeFactKind::Expression(value) = &rhs.kind else {
             return Err(Stop::Pending(right));
         };
+        let primitive =
+            |ty: &Type<'g>, name| matches!(ty.as_ref(), TypeTerm::Primitive(p) if p.name() == name);
+        // A `string` error is admitted only when the RHS always returns: no
+        // new wrapper is built, the RHS failure is forwarded and the held
+        // operand is retired.
+        let payloads = |name| primitive(&retained.payload, name) && primitive(&data.payload, name);
         if data.operation != ErrorOperation::Wrap
             || data.result != *result
             || data.failure != &role.err.id
@@ -4588,8 +4659,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             || retained.operand != left
             || !matches!(&*retained.wrapper, TypeTerm::Nominal { declaration, arguments }
                 if *declaration == data.wrapper && matches!(arguments.as_slice(), [payload] if *payload == retained.payload))
-            || !matches!(retained.payload.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32")
-            || !matches!(data.payload.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32")
+            || !(payloads("i32") || payloads("string") && !rhs.flow.normal)
             || value.ty != data.payload
         {
             return Err(Stop::Pending(node));
@@ -4640,6 +4710,12 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         let facts = self.value(root)?;
         let postfix = self.module.syntax.nodes[root].kind == NodeKind::Propagate
             && matches!(facts.data, Some(DataExpression::Propagation(_)));
+        // A `string` error never builds a new wrapper (checked above for a
+        // continuing RHS); a non-postfix RHS would stage its payload.
+        if !postfix && !matches!(data.payload.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32")
+        {
+            return Err(Stop::Pending(right));
+        }
         // Other RHS forms keep their ordinary staging proof, including its
         // precise pending site and budget when a nested argument can return.
         let payload = (!postfix || flow.normal)
@@ -4727,7 +4803,10 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         // The installed source is byte-pinned. Dropping the sealed wrapper
         // drops its origin and iteratively releases its retained nodes,
         // invoking their stored disposers, not their display witnesses.
+        // Its primary payload drops with it: scalar cleanup for `i32`, the
+        // ordinary owning drop for `string` (no other error type is admitted).
         let _: fn(rill_error_storage::OwnedErr<i32>) = std::mem::drop;
+        let _: fn(rill_error_storage::OwnedErr<String>) = std::mem::drop;
         self.emit(
             rhs,
             Action::DropResultFailure {
@@ -4792,7 +4871,12 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 if option.is_some_and(|role| *declaration == &role.some.id)
                     || self
                         .scalar_result_role(&data.ty)
-                        .is_some_and(|(role, _)| *declaration == &role.ok.id) =>
+                        .is_some_and(|(role, _)| *declaration == &role.ok.id)
+                    || self
+                        .text_error_result_role(&data.ty)
+                        .is_some_and(|(role, success)| {
+                            *declaration == &role.ok.id && !owns_text(success)
+                        }) =>
             {
                 Ok(Some(*value))
             }
@@ -5252,7 +5336,8 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         }
         if let Some(DataExpression::Construction(data)) = &facts.data
             && (self.admitted_option(&data.ty).is_some()
-                || self.scalar_result_role(&data.ty).is_some())
+                || self.scalar_result_role(&data.ty).is_some()
+                || self.text_error_result_role(&data.ty).is_some())
         {
             return self.construct_variant(
                 node,
@@ -7174,6 +7259,11 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
     /// called with a written pair arrow. The actual is formed into one stage,
     /// moves into the formal and is consumed by the wrapper's one invocation;
     /// its output is this call's result. The wrapper's own root stays open.
+    ///
+    /// The read-only twin: `function f<F>(job: &F): bool where callable(F, [], bool)
+    /// { return job(); }` called as `f(&local)`. The shared loan of the local
+    /// descriptor is the staged argument; the wrapper reads through it and the
+    /// descriptor stays with this caller.
     fn call_declared_once(
         &mut self,
         node: NodeId,
@@ -7199,23 +7289,64 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         ) else {
             return Err(pending());
         };
-        if call.callee.kind != DeclarationKind::Function
+        let lent = syntax[*argument].kind == NodeKind::Prefix("&");
+        let written_actual = if lent {
+            // `&name` of a read-only `() => bool` descriptor, nothing else.
+            matches!(syntax[*argument].children.as_slice(), [operand]
+                if syntax[*operand].kind == NodeKind::ValueReference)
+                && scalar::scalar(&facts.ty) == Some(Primitive::Bool)
+                && matches!(substitution.argument.as_ref(), TypeTerm::Callable {
+                    mode: InvocationMode::ReadOnly,
+                    parameters,
+                    result,
+                } if parameters.is_empty() && *result == facts.ty)
+        } else {
+            syntax[*argument].kind == NodeKind::Arrow
+                && self.slots[into].members == 2
+                // This first witness admits only the carried shared/Bool pair.
+                && matches!(facts.ty.as_ref(), TypeTerm::Tuple(elements)
+                    if matches!(elements.as_slice(), [descriptor, bit]
+                        if matches!(descriptor.as_ref(), TypeTerm::Reference { mutable: false, referent }
+                            if scalar::scalar(referent) == Some(Primitive::Bool))
+                            && scalar::scalar(bit) == Some(Primitive::Bool)))
+        };
+        if !written_actual
+            || call.callee.kind != DeclarationKind::Function
             || call.callee.module.origin != Origin::Application
             || call.pipe_input.is_some()
             || !call.defaults.is_empty()
             || call.selection.is_some()
             || call.scoped_join.is_some()
             || !matches!(syntax[node].children.as_slice(), [_, written] if written == argument)
-            || syntax[*argument].kind != NodeKind::Arrow
-            || self.slots[into].members != 2
-            // This first witness admits only the carried shared/Bool pair.
-            || !matches!(facts.ty.as_ref(), TypeTerm::Tuple(elements)
-                if matches!(elements.as_slice(), [descriptor, bit]
-                    if matches!(descriptor.as_ref(), TypeTerm::Reference { mutable: false, referent }
-                        if scalar::scalar(referent) == Some(Primitive::Bool))
-                        && scalar::scalar(bit) == Some(Primitive::Bool)))
         {
             return Err(pending());
+        }
+        if lent {
+            // Any generic `&F` call reaches here. Find the wrapper in this
+            // module by identity and screen its `return name();` body before
+            // the keyed header lookup. Declarations are ordered by (start, kind).
+            let declarations = &self.module.declarations;
+            self.budget
+                .step((usize::BITS - declarations.len().leading_zeros() + 1) as usize)?;
+            let wrapper = declarations
+                .binary_search_by_key(&(call.callee.start, call.callee.kind), |d| {
+                    (d.id.start, d.id.kind)
+                })
+                .ok()
+                .map(|index| &declarations[index])
+                .filter(|wrapper| std::ptr::eq(&wrapper.id, call.callee))
+                .ok_or_else(pending)?;
+            let returns_invocation = matches!(syntax[wrapper.node].children.as_slice(), [_, body]
+                if syntax[*body].kind == NodeKind::Block
+                    && matches!(syntax[*body].children.as_slice(), [returned]
+                        if syntax[*returned].kind == NodeKind::Return
+                            && matches!(syntax[*returned].children.as_slice(), [invocation]
+                                if syntax[*invocation].kind == NodeKind::Call
+                                    && matches!(syntax[*invocation].children.as_slice(), [receiver]
+                                        if syntax[*receiver].kind == NodeKind::ValueReference))));
+            if !returns_invocation {
+                return Err(pending());
+            }
         }
         self.budget.step(1 + self.module.key.path.len())?;
         if call.callee.module != self.module.key {
@@ -7235,27 +7366,51 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         let [formal] = parameters.as_slice() else {
             return Err(pending());
         };
+        // The requirement's subject: an owned `F`, or the `F` behind `&F`.
+        let subject = match (lent, formal.ty.as_ref()) {
+            (false, _) => &formal.ty,
+            (
+                true,
+                TypeTerm::Reference {
+                    mutable: false,
+                    referent,
+                },
+            ) => referent,
+            (true, _) => return Err(pending()),
+        };
         if header.declaration.public
             || header.declaration.scope.is_some()
             || binder.position != 0
             || substitution.position != 0
             || !std::ptr::eq(substitution.binder, &binder.declaration.id)
-            || !matches!(formal.ty.as_ref(), TypeTerm::Parameter { declaration, position: 0 }
+            || !matches!(subject.as_ref(), TypeTerm::Parameter { declaration, position: 0 }
                 if std::ptr::eq(*declaration, &binder.declaration.id))
             || *result != facts.ty
         {
             return Err(pending());
         }
-        let actual = self.normal_value(*argument).map_err(at_call)?;
+        // The moved arrow, or the unprojected local descriptor behind `&`.
+        let actual = if lent {
+            self.normal_value(syntax[*argument].children[0])
+        } else {
+            self.normal_value(*argument)
+        }
+        .map_err(at_call)?;
         if actual.access != Access::Owned
             || actual.ty != substitution.argument
-            || !matches!(actual.ty.as_ref(), TypeTerm::Callable { parameters, result: output, .. }
-                if parameters.is_empty() && *output == *result)
+            || !matches!(actual.ty.as_ref(), TypeTerm::Callable { mode, parameters, result: output }
+                if parameters.is_empty() && *output == *result
+                    && (!lent || *mode == InvocationMode::ReadOnly))
+            || lent
+                && !actual.path.as_ref().is_some_and(|path| {
+                    path.root.kind == DeclarationKind::Binding && path.projections.is_empty()
+                })
         {
             return Err(pending());
         }
         // The wrapper's body is exactly `return job();`: one owned once
-        // invocation of the unprojected formal under its own requirement.
+        // invocation of the unprojected formal, or one read-only invocation
+        // through the lent formal, under the wrapper's own requirement.
         let [_, body] = syntax[header.declaration.node].children.as_slice() else {
             return Err(pending());
         };
@@ -7285,13 +7440,28 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             .ok_or_else(pending)?;
         let path = invoked.path.as_ref().ok_or_else(pending)?;
         let receiver = self.value(invoked.receiver).map_err(at_call)?;
+        let (mode, access, projections, predicate) = if lent {
+            (
+                InvocationMode::ReadOnly,
+                Access::ReadOnly,
+                [PathProjection::Dereference].as_slice(),
+                "callable",
+            )
+        } else {
+            (
+                InvocationMode::Once,
+                Access::Owned,
+                [].as_slice(),
+                "callableOnce",
+            )
+        };
         if syntax[*invocation].children.as_slice() != [invoked.receiver]
             || syntax[invoked.receiver].kind != NodeKind::ValueReference
-            || invoked.mode != InvocationMode::Once
-            || invoked.access != Access::Owned
+            || invoked.mode != mode
+            || invoked.access != access
             || !std::ptr::eq(path.root, &formal.declaration.id)
-            || !path.projections.is_empty()
-            || receiver.access != Access::Owned
+            || path.projections.as_slice() != projections
+            || !lent && receiver.access != Access::Owned
             || receiver.ty != formal.ty
             || self.value(*invocation).map_err(at_call)?.ty != *result
         {
@@ -7317,12 +7487,28 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             || !matches!(&goal.judgment, GoalJudgment::Requirement {
                 target: ordinary::RequirementTarget::Predicate(id),
                 arguments,
-            } if id.name() == "callableOnce"
+            } if id.name() == predicate
                 && matches!(arguments.as_slice(), [job, inputs, output]
-                    if *job == formal.ty && output == result
+                    if job == subject && output == result
                         && matches!(inputs.as_ref(), TypeTerm::Tuple(inputs) if inputs.is_empty())))
         {
             return Err(pending());
+        }
+        if lent {
+            let stage = self.slot(*argument, &self.value(*argument).map_err(at_call)?.ty)?;
+            let frame = self.emit(
+                node,
+                Action::InvokeDeclaredShared {
+                    argument: stage,
+                    into,
+                    callee: &header.declaration.id,
+                    formal: formal.declaration.node,
+                    invocation: *invocation,
+                },
+                Edges::Next(next),
+            )?;
+            self.declared_shared_frame = true;
+            return self.expression(*argument, Some(stage), frame, depth + 1);
         }
         let stage = self.slot(*argument, &actual.ty)?;
         let frame = self.emit(

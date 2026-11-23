@@ -8,6 +8,8 @@ mod option_caller;
 mod result_text;
 #[path = "propagation/staging.rs"]
 mod staging;
+#[path = "propagation/text_err.rs"]
+mod text_err;
 
 #[test]
 fn owned_option_postfix_preserves_shared_text_backing() {
@@ -2025,6 +2027,13 @@ fn returning_wrap_rhs_forwards_instead_of_wrapping() {
                 }
 
                 let stats = report.statistics();
+                if name == "wrapsAfterRhs" {
+                    // Row C3 (ri-vgz.5): the scalar retirement keeps its cap.
+                    assert_eq!(
+                        (stats.work, stats.entries, stats.max_depth),
+                        (12_574, 2_472, 6)
+                    );
+                }
                 let limits = AnalysisLimits {
                     max_work: stats.work,
                     max_entries: stats.entries,

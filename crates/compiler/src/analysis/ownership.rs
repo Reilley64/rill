@@ -695,6 +695,21 @@ pub enum Operation<'g> {
         origin: Site<'g>,
         into: Place<'g>,
     },
+    /// Pass the staged shared loan of `receiver` to the private callee's sole
+    /// `&F` formal, whose one checked read-only invocation through it is the
+    /// callee's result. The receiver's one-capture body is its Bool capture,
+    /// so `into` is a copy of it and keeps no loan. The frame ends only the
+    /// loan in `argument`; `receiver` stays initialized with the caller.
+    /// `formal`, `invocation` and `origin` are as for `InvokeDeclaredOnce`.
+    InvokeDeclaredShared {
+        callee: &'g DeclarationId,
+        formal: Site<'g>,
+        invocation: Site<'g>,
+        argument: Place<'g>,
+        receiver: Place<'g>,
+        origin: Site<'g>,
+        into: Place<'g>,
+    },
     /// Copy both values from a known pair environment into a fresh result,
     /// in the order established by FormClosurePair. Descriptors retain their
     /// carried sources without borrowing the receiver's storage. The
@@ -790,8 +805,9 @@ pub enum Operation<'g> {
         wrapper: &'g DeclarationId,
     },
     /// Retire a proved failed stage on an interrupted wrapping RHS. Consume
-    /// its installed `OwnedErr<i32>` (including origin and retained chain)
-    /// using the pinned storage's drop, with no wrapper-level dispatch or rendering.
+    /// its installed `OwnedErr<i32>` or `OwnedErr<string>` (including origin,
+    /// owned payload and retained chain) using the pinned storage's drop,
+    /// with no wrapper-level dispatch or rendering.
     DropResultFailure {
         operand: Place<'g>,
         variant: &'g DeclarationId,
@@ -2363,6 +2379,14 @@ enum Action<'g> {
         into: Slot,
         call: PairCall<'g>,
     },
+    /// `argument` is the staged `&f`; nodes belong to the caller's module.
+    InvokeDeclaredShared {
+        argument: Slot,
+        into: Slot,
+        callee: &'g DeclarationId,
+        formal: NodeId,
+        invocation: NodeId,
+    },
     InvokeMutableI32Cell {
         receiver: Slot,
         into: Slot,
@@ -2585,6 +2609,9 @@ struct Build<'a, 'g, 'b> {
     list_delivery_loop: Option<(NodeId, NodeId)>,
     scalar_copy_read: Option<NodeId>,
     copied_origins: BTreeSet<NodeId>,
+    /// This body lends a local descriptor to a declared shared frame, so
+    /// one-capture formations record their origin for it.
+    declared_shared_frame: bool,
     dispose: Option<&'g DeclarationId>,
     return_contract: Option<(&'g DeclarationId, &'a Type<'g>)>,
     callable_frame: Option<(CallableLayout, Slot)>,
