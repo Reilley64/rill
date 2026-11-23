@@ -575,26 +575,202 @@ expect separate() == 6i32;
 "#,
     outcome: Outcome::Receipt {
         typed_stats: (325745, 48049, 12),
-        graph: (GraphCompletion::Incomplete, (188006, 4283, 5)),
+        graph: (GraphCompletion::Incomplete, (190039, 5288, 5)),
         pre_equality_graph: (187506, 4084, 3),
         roots: &[
             Root {
                 name: "separate",
-                want: Want::Incomplete {
-                    blocker: r####"pair.left + pair.right"####,
-                },
+                want: Want::Checked,
                 graph: None,
-                stats: (2281, 116, 3),
+                stats: (4314, 1121, 4),
             },
             Root {
                 name: "expect",
-                // Since ri-785.9 the comparison lowers, and the expectation
-                // stops at the blocker of the `separate` body it calls.
-                want: Want::Incomplete {
-                    blocker: r####"pair.left + pair.right"####,
+                want: Want::Checked,
+                graph: None,
+                stats: (6338, 1221, 4),
+            },
+        ],
+    },
+}];
+
+/// O5's prose beyond `separate` (ri-fmsk): loans of distinct fields coexist and
+/// the whole record reads after their last use; a loan of the same field, or of
+/// the whole record, live at an acquisition conflicts, R0201.
+const O5_LOANS: &[Source] = &[Source {
+    text: r#"
+type Pair = { left: i32; right: i32 };
+function onlyLeft(): i32 {
+  let mut pair = Pair { left: 1, right: 2 };
+  let left = &mut pair.left;
+  *left += 1i32;
+  return pair.left + pair.right;
+}
+function otherRead(): i32 {
+  let mut pair = Pair { left: 1, right: 2 };
+  let left = &mut pair.left;
+  let right = pair.right;
+  *left += 1i32;
+  return right;
+}
+function wholeReadAfter(): i32 {
+  let mut pair = Pair { left: 1, right: 2 };
+  let left = &mut pair.left;
+  let right = &mut pair.right;
+  *left += 1i32;
+  *right += 2i32;
+  let whole = pair;
+  return whole.left + whole.right;
+}
+function readLive(): i32 {
+  let mut pair = Pair { left: 1, right: 2 };
+  let left = &mut pair.left;
+  let sum = pair.left + pair.right;
+  *left += 1i32;
+  return sum;
+}
+function sameField(): i32 {
+  let mut pair = Pair { left: 1, right: 2 };
+  let first = &mut pair.left;
+  let second = &mut pair.left;
+  *first += 1i32;
+  *second += 1i32;
+  return pair.right;
+}
+function wholeBeforeFirst(): i32 {
+  let mut pair = Pair { left: 1, right: 2 };
+  let whole = &mut pair;
+  let left = &mut pair.left;
+  *left += 1i32;
+  let kept = whole;
+  return 1i32;
+}
+function wholeBeforeSecond(): i32 {
+  let mut pair = Pair { left: 1, right: 2 };
+  let left = &mut pair.left;
+  *left += 1i32;
+  let whole = &mut pair;
+  let right = &mut pair.right;
+  *right += 2i32;
+  let kept = whole;
+  return 1i32;
+}
+function wholeBetween(): i32 {
+  let mut pair = Pair { left: 1, right: 2 };
+  let left = &mut pair.left;
+  let whole = &mut pair;
+  *left += 1i32;
+  let kept = whole;
+  return 1i32;
+}
+function sharedWholeBeforeFirst(): i32 {
+  let mut pair = Pair { left: 1, right: 2 };
+  let whole = &pair;
+  let left = &mut pair.left;
+  *left += 1i32;
+  let kept = whole;
+  return 1i32;
+}
+function wholeReadWhileLive(): i32 {
+  let mut pair = Pair { left: 1, right: 2 };
+  let left = &mut pair.left;
+  let whole = pair;
+  *left += 1i32;
+  return 1i32;
+}
+"#,
+    outcome: Outcome::Receipt {
+        typed_stats: (347333, 51302, 12),
+        graph: (GraphCompletion::SourceRejected, (214245, 9734, 5)),
+        pre_equality_graph: (205449, 5349, 5),
+        roots: &[
+            Root {
+                name: "onlyLeft",
+                want: Want::Checked,
+                graph: None,
+                stats: (3802, 869, 4),
+            },
+            Root {
+                name: "otherRead",
+                want: Want::Checked,
+                graph: None,
+                stats: (3562, 749, 4),
+            },
+            Root {
+                name: "wholeReadAfter",
+                want: Want::Checked,
+                graph: None,
+                stats: (5493, 1596, 4),
+            },
+            Root {
+                name: "readLive",
+                want: Want::Rejected {
+                    code: "R0201",
+                    site: r####"pair.left"####,
+                    related: r####"&mut pair.left"####,
                 },
                 graph: None,
-                stats: (4305, 216, 3),
+                stats: (3248, 598, 4),
+            },
+            Root {
+                name: "sameField",
+                want: Want::Rejected {
+                    code: "R0201",
+                    site: r####"&mut pair.left"####,
+                    related: r####"&mut pair.left"####,
+                },
+                graph: None,
+                stats: (3333, 636, 4),
+            },
+            Root {
+                name: "wholeBeforeFirst",
+                want: Want::Rejected {
+                    code: "R0201",
+                    site: r####"&mut pair.left"####,
+                    related: r####"&mut pair"####,
+                },
+                graph: None,
+                stats: (3176, 561, 4),
+            },
+            Root {
+                name: "wholeBeforeSecond",
+                want: Want::Rejected {
+                    code: "R0201",
+                    site: r####"&mut pair.right"####,
+                    related: r####"&mut pair"####,
+                },
+                graph: None,
+                stats: (3849, 900, 4),
+            },
+            Root {
+                name: "wholeBetween",
+                want: Want::Rejected {
+                    code: "R0201",
+                    site: r####"&mut pair"####,
+                    related: r####"&mut pair.left"####,
+                },
+                graph: None,
+                stats: (3182, 563, 4),
+            },
+            Root {
+                name: "sharedWholeBeforeFirst",
+                want: Want::Rejected {
+                    code: "R0201",
+                    site: r####"&mut pair.left"####,
+                    related: r####"&pair"####,
+                },
+                graph: None,
+                stats: (3177, 561, 4),
+            },
+            Root {
+                name: "wholeReadWhileLive",
+                want: Want::Rejected {
+                    code: "R0201",
+                    site: r####"pair"####,
+                    related: r####"&mut pair.left"####,
+                },
+                graph: None,
+                stats: (3505, 615, 4),
             },
         ],
     },
@@ -2098,10 +2274,18 @@ fn o04_invalid_move_is_r0200() {
 }
 
 #[test]
-fn o05_disjoint_field_loans_check_and_field_arithmetic_blocks() {
+fn o05_disjoint_field_loans_check_through_local_field_descriptors() {
     run(
-        "rfc_cases::o05_disjoint_field_loans_check_and_field_arithmetic_blocks",
+        "rfc_cases::o05_disjoint_field_loans_check_through_local_field_descriptors",
         O5,
+    );
+}
+
+#[test]
+fn o05_field_loan_conflicts_reject_and_disjoint_forms_check() {
+    run(
+        "rfc_cases::o05_field_loan_conflicts_reject_and_disjoint_forms_check",
+        O5_LOANS,
     );
 }
 
@@ -2468,6 +2652,57 @@ fn equality_expectations_exceed_their_incomplete_caps() {
             }
         },
     );
+}
+
+/// Metering rule 11, third case (ri-fmsk): O5's `separate` and its expectation
+/// now check, so the caps at which they were `Incomplete` at
+/// `pair.left + pair.right`, and the graph cap with them, give `ResourceLimit`.
+#[test]
+fn o05_old_caps_give_resource_limit() {
+    installed("rfc_cases::o05_old_caps_give_resource_limit", |request| {
+        fs::write(&request.entry, format!("{IMPORTS}\n{}", O5[0].text)).unwrap();
+        for test_mode in [false, true] {
+            let request = InstalledRequest {
+                test_mode,
+                ..request.clone()
+            };
+            let graph = loader::load_installed(request).unwrap();
+            let typed = analyze_typed(&graph, AnalysisLimits::default());
+            let receipt = typed.receipt().unwrap();
+            let module = graph
+                .modules()
+                .iter()
+                .find(|m| m.key.origin == Origin::Application && m.key.path == "main.rill")
+                .unwrap();
+            let (old, _) = limits(statistics((188006, 4283, 5)));
+            let whole = analyze_ownership(&receipt, old);
+            assert_eq!(whole.completion(), GraphCompletion::ResourceLimit);
+            for (kind, old) in [
+                (DeclarationKind::Function, (2281, 116, 3)),
+                (DeclarationKind::Expectation, (4305, 216, 3)),
+            ] {
+                let declaration = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.id.kind == kind)
+                    .unwrap();
+                let (old, _) = limits(statistics(old));
+                let limited = if kind == DeclarationKind::Expectation {
+                    lower_root(
+                        &receipt,
+                        module,
+                        BodyOwner::Declaration(&declaration.id),
+                        old,
+                    )
+                } else {
+                    lower_body(&receipt, module, &declaration.id, old)
+                }
+                .unwrap();
+                assert_eq!(limited.completion(), Completion::ResourceLimit, "{kind:?}");
+                assert!(limited.mir().is_none() && limited.findings().is_empty());
+            }
+        }
+    });
 }
 
 #[test]

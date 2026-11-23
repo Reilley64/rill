@@ -439,6 +439,8 @@ enum I32Operand {
     #[default]
     Other,
     Local,
+    /// A read of one `i32` field of a local record.
+    Field,
     Literal,
     Product,
     Sum,
@@ -2689,6 +2691,23 @@ impl<'r, 'g> Checker<'r, 'g> {
                     {
                         Local
                     }
+                    _ if slot.access == data::Access::Owned
+                        && matches!(
+                            inference.data.get(&node).map(|prepared| &prepared.fact),
+                            Some(data::DataExpression::Projection(_))
+                        )
+                        && slot.path.as_ref().is_some_and(|path| {
+                            matches!(
+                                path.projections.as_slice(),
+                                [data::PathProjection::Field(_)]
+                            ) && matches!(
+                                path.root.kind,
+                                DeclarationKind::Parameter | DeclarationKind::Binding
+                            )
+                        }) =>
+                    {
+                        Field
+                    }
                     (NodeKind::Literal, _)
                         if matches!(
                             slot.literal.map(|literal| literal.value),
@@ -2724,7 +2743,10 @@ impl<'r, 'g> Checker<'r, 'g> {
                         Product
                     }
                     (NodeKind::Binary("+"), [left, right])
-                        if matches!((operand(left), operand(right)), (Local | Product, Local)) =>
+                        if matches!(
+                            (operand(left), operand(right)),
+                            (Local | Field | Product, Local | Field)
+                        ) =>
                     {
                         Sum
                     }
@@ -2852,7 +2874,10 @@ impl<'r, 'g> Checker<'r, 'g> {
                             inference.slots.get(&operand).is_some_and(|slot| {
                                 slot.ty.as_ref().and_then(primitive_name) == Some("i32")
                                     && (module.syntax.nodes[operand].kind == NodeKind::Call
-                                        || !matches!(slot.i32_operand, I32Operand::Other)
+                                        || !matches!(
+                                            slot.i32_operand,
+                                            I32Operand::Other | I32Operand::Field
+                                        )
                                         || field_of_call(&module.syntax.nodes, operand))
                             })
                         })
