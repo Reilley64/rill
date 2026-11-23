@@ -29,9 +29,29 @@ Caps (work / entries / depth); each exact cap is replayed and each independently
 | Whole graph of this source | 189,575 / 4,219 / 5, `Incomplete` | 191,877 / 4,600 / 6, `SourceRejected` |
 | Typed stats | 328,846 / 48,424 / 12 | unchanged |
 
-Per-root attribution of the whole-graph change (D2 (b) and rule 11, third case: the blocker moved): `conflict` adds 1,014 work and 125 entries and `ordered` adds 1,284 work and 253 entries (2,298 and 378). The remaining 4 work and 3 entries are the graph's own bookkeeping for the extra rejected finding and dependency edges. `conflict` and `ordered` both reach depth 6, which sets the new maximum (the call frame, its staged borrow and the view read), from 4.
+Per-root attribution of the whole-graph change (D2 (b); rule 11, third case: the blocker moved), measured by building the same module with each root alone, at the parent `7002855e` in a temporary worktree (removed) and at this change. The module with neither root (`editAndView` and its implementation only) stays at 186,956 / 4,109 / 5 in both; the implementation root stays `Incomplete` at 10 work in the full module.
+
+| Module | Parent graph | Now | Delta |
+| --- | --- | --- | --- |
+| `conflict` alone | 188,194 / 4,160 / 5 | 189,210 / 4,286 / 6 | +1,016 work, +126 entries |
+| `ordered` alone | 188,337 / 4,168 / 5 | 189,623 / 4,423 / 6 | +1,286 work, +255 entries |
+| Both (the O11 row) | 189,575 / 4,219 / 5 | 191,877 / 4,600 / 6 | +2,302 work, +381 entries |
+
+The two per-root deltas add up to the total (1,016 + 1,286 = 2,302; 126 + 255 = 381). The targeted deltas inside the full module are +1,014 / +125 for `conflict` and +1,284 / +253 for `ordered`, so each root also adds 2 work to the graph beyond its targeted cost. Each root alone sets the new depth 6 (the call frame, its staged borrow and the view read), from 5; depth is a maximum, not a sum.
 
 The old caps now report `ResourceLimit`: [`o11_pre_family_call_caps_now_give_resource_limit`](../m5/rfc_cases.rs) asserts it for `conflict` at 2,014 / 77 / 4, `ordered` at 2,032 / 83 / 4 and the whole graph at 189,575 / 4,219 / 5 in both modes. The row's `pre_equality_graph` now holds the 189,575 / 4,219 / 5 caps, which also report `ResourceLimit`.
+
+## Whole-List uses before the view ends do not check
+
+[`o11_whole_list_uses_before_the_view_ends_do_not_check`](../m5/rfc_cases.rs) (one module, both modes, targeted query and graph root, exact and one-short caps) pins every use of the original List before `*view` as `SourceRejected`, never `Checked`. Typed 338,324 / 49,744 / 12; whole graph `SourceRejected` 198,303 / 5,020 / 6.
+
+| Root | Use before the view's last use | Finding (site; related) | Targeted |
+| --- | --- | --- | --- |
+| `indexed` | `(&owned)[0u64]` | R0201 at `&owned`; `&mut owned` | 3,174 / 275 / 6 |
+| `reborrowed` | `let again = &mut owned;` | R0201 at `&mut owned`; `&mut owned` | 3,119 / 248 / 6 |
+| `disposed` | `dispose(owned);` | R0203 at `dispose(owned)`; `&mut owned` | 3,158 / 258 / 6 |
+| `moved` | `let other = owned;` | R0203 at `owned`; `&mut owned` | 3,137 / 248 / 6 |
+| `escaped` | `return view;` from a function returning `&i32` | R0202 at `return view;`; `owned` | 3,091 / 237 / 6 |
 
 ## Unsupported siblings at their parent caps (rule 2)
 
@@ -52,7 +72,11 @@ The ticket expected O9 and O13 to reach a new blocker after family admission. Th
 
 ## Unchanged
 
-No fixed cap moved. `m5::rfc_cases` (31 tests with `legacy_caps` and `graph::inventory`), `m5::legacy_caps`, `m5::graph::inventory`, `m4_8_scoped_join_caps`, `m4_8_match_boolean_snapshots`, `m4_8_callable_once` and `m4_8_ownership` (the M4 17-source baseline 372,246 / 54,059 / 12) pass with no edited expectation. The full M5 binary runs only in hosted CI.
+No fixed cap moved. `m5::rfc_cases`, `m5::legacy_caps` and `m5::graph::inventory` (36 tests), `m5::legacy_caps`, `m5::graph::inventory`, `m4_8_scoped_join_caps`, `m4_8_match_boolean_snapshots`, `m4_8_callable_once` and `m4_8_ownership` (the M4 17-source baseline 372,246 / 54,059 / 12) pass with no edited expectation. The full M5 binary runs only in hosted CI.
+
+## Hosted CI
+
+Not run for this branch. The planner's instruction of 2026-11-23 (mail `ci-wisp-08eshh`): push the branch and hand back; the rill merger pushes the merge to the integration branch and watches CI there.
 
 ## Not established
 

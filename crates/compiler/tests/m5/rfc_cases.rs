@@ -869,6 +869,100 @@ function looped(input: List<i32>): i32 {
     },
 ];
 
+/// Whole-List uses before the exclusive view's last use (ri-2s0.6).
+const O11_NEGATIVES: &[Source] = &[Source {
+    text: r#"
+function editAndView<L>(list: L): &i32;
+implement editAndView(list: &mut List<i32>): &i32 { while (true) {} }
+function indexed(input: List<i32>): i32 {
+  let mut owned = input;
+  let view = editAndView(&mut owned);
+  let first = (&owned)[0u64];
+  return *view;
+}
+function reborrowed(input: List<i32>): i32 {
+  let mut owned = input;
+  let view = editAndView(&mut owned);
+  let again = &mut owned;
+  return *view;
+}
+function disposed(input: List<i32>): i32 {
+  let mut owned = input;
+  let view = editAndView(&mut owned);
+  dispose(owned);
+  return *view;
+}
+function moved(input: List<i32>): i32 {
+  let mut owned = input;
+  let view = editAndView(&mut owned);
+  let other = owned;
+  return *view;
+}
+function escaped(input: List<i32>): &i32 {
+  let mut owned = input;
+  let view = editAndView(&mut owned);
+  return view;
+}
+"#,
+    outcome: Outcome::Receipt {
+        typed_stats: (338324, 49744, 12),
+        graph: (GraphCompletion::SourceRejected, (198303, 5020, 6)),
+        pre_equality_graph: (189575, 4219, 5),
+        roots: &[
+            Root {
+                name: "indexed",
+                want: Want::Rejected {
+                    code: "R0201",
+                    site: r####"&owned"####,
+                    related: r####"&mut owned"####,
+                },
+                graph: None,
+                stats: (3174, 275, 6),
+            },
+            Root {
+                name: "reborrowed",
+                want: Want::Rejected {
+                    code: "R0201",
+                    site: r####"&mut owned"####,
+                    related: r####"&mut owned"####,
+                },
+                graph: None,
+                stats: (3119, 248, 6),
+            },
+            Root {
+                name: "disposed",
+                want: Want::Rejected {
+                    code: "R0203",
+                    site: r####"dispose(owned)"####,
+                    related: r####"&mut owned"####,
+                },
+                graph: None,
+                stats: (3158, 258, 6),
+            },
+            Root {
+                name: "moved",
+                want: Want::Rejected {
+                    code: "R0203",
+                    site: r####"owned"####,
+                    related: r####"&mut owned"####,
+                },
+                graph: None,
+                stats: (3137, 248, 6),
+            },
+            Root {
+                name: "escaped",
+                want: Want::Rejected {
+                    code: "R0202",
+                    site: r####"return view;"####,
+                    related: r####"owned"####,
+                },
+                graph: None,
+                stats: (3091, 237, 6),
+            },
+        ],
+    },
+}];
+
 const O12: &[Source] = &[Source {
     text: r#"
 type Point = { x: i32; y: i32 };
@@ -1591,6 +1685,14 @@ fn o11_unsupported_family_call_siblings_stay_incomplete_at_their_calls() {
     run(
         "rfc_cases::o11_unsupported_family_call_siblings_stay_incomplete_at_their_calls",
         O11_SIBLINGS,
+    );
+}
+
+#[test]
+fn o11_whole_list_uses_before_the_view_ends_do_not_check() {
+    run(
+        "rfc_cases::o11_whole_list_uses_before_the_view_ends_do_not_check",
+        O11_NEGATIVES,
     );
 }
 
