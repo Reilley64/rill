@@ -1,6 +1,6 @@
 # ri-2s0.7.1: O10 typed `get` on `List<&T>`, 2026-11-24
 
-Ticket ri-2s0.7.1 (city bead `ci-ofz5`), child 2 of 3 under ri-2s0.7 (the O10 split: extraction, this ticket, then the R0202 route ri-2s0.7.2). Branch `m5-ownership-cleanup/r-o10b-ri-2s0.7.1`, built on the base `942c8fc6` with child 1's branch (`m5-ownership-cleanup/r-o10-ri-2s0.7`, not yet on the base) merged first.
+Ticket ri-2s0.7.1 (city bead `ci-ofz5`), child 2 of 3 under ri-2s0.7 (the O10 split: extraction, this ticket, then the R0202 route ri-2s0.7.2). Branch `m5-ownership-cleanup/r-o10b-ri-2s0.7.1`, built on the base `942c8fc6` with child 1 (`m5-ownership-cleanup/r-o10-ri-2s0.7`) merged first; child 1 reached the base at `fedd91dc` before hand-back.
 
 ## Cause
 
