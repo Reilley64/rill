@@ -2411,6 +2411,17 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                                 Some(ExpressionProof::NamedRecordRebuild),
                             );
                         }
+                        if self.module.syntax.nodes[initializer].kind == NodeKind::Bracket
+                            && let Some(entry) = self.initialize_propagating_tuple(
+                                initializer,
+                                into,
+                                next,
+                                exits.returning,
+                                initializer_depth,
+                            )?
+                        {
+                            return Ok(entry);
+                        }
                         if matches!(
                             self.module.syntax.nodes[initializer].kind,
                             NodeKind::Prefix("*" | "&")
@@ -2635,7 +2646,15 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             NodeKind::IfStatement => {
                 let cond = children[0];
                 let facts = self.value(cond)?;
-                let (can_be_true, can_be_false) = Self::outcomes(facts);
+                // Screened from facts already paid for, before any charge.
+                let postfix = self.admits_bool_postfix(self.written_root(cond));
+                // A condition that always leaves through its postfix reaches neither branch.
+                let (can_be_true, can_be_false) =
+                    if postfix && !self.fact(&cond).is_some_and(|f| f.flow.normal) {
+                        (false, false)
+                    } else {
+                        Self::outcomes(facts)
+                    };
                 let parent = self.retaining_gate_values;
                 let yes = if can_be_true {
                     self.refine_retaining_gate(cond, facts, true);
@@ -2653,6 +2672,10 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 } else {
                     next
                 };
+                if postfix {
+                    let returning = exits.returning.ok_or(Stop::Pending(cond))?;
+                    return self.propagate_condition(cond, yes, no, returning, depth + 1);
+                }
                 self.condition(cond, yes, no, depth + 1)
             }
             NodeKind::While => {
@@ -4922,14 +4945,46 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
     }
 
     fn condition(&mut self, node: NodeId, yes: Pc, no: Pc, depth: usize) -> ResultOf<Pc> {
+        let branch = self.branch(node, yes, no)?;
+        self.expression(node, None, branch, depth + 1)
+    }
+
+    fn branch(&mut self, node: NodeId, yes: Pc, no: Pc) -> ResultOf<Pc> {
         let edges = match Self::outcomes(self.value(node)?) {
             (false, true) => Edges::Next(no),
             (true, false) => Edges::Next(yes),
             (true, true) => Edges::Branch { yes, no },
             (false, false) => return Err(Stop::Pending(node)),
         };
-        let branch = self.emit(node, Action::None, edges)?;
-        self.expression(node, None, branch, depth + 1)
+        self.emit(node, Action::None, edges)
+    }
+
+    /// The postfix's failure exports before the lexical cleanup; its success
+    /// continues to the ordinary branch on the copied payload.
+    fn propagate_condition(
+        &mut self,
+        node: NodeId,
+        yes: Pc,
+        no: Pc,
+        returning: Pc,
+        depth: usize,
+    ) -> ResultOf<Pc> {
+        let (postfix, postfix_depth) = self.ungroup_expression_at(node, depth + 1)?;
+        let checked = self.checked_propagation(postfix, self.value(postfix)?, postfix_depth)?;
+        let flow = &self.fact(&postfix).ok_or(Stop::Pending(postfix))?.flow;
+        if flow.pending
+            || flow.normal != checked.exit.can_continue
+            || flow.returns != checked.exit.can_return
+        {
+            return Err(Stop::Pending(postfix));
+        }
+        let branch = if checked.exit.can_continue {
+            self.branch(node, yes, no)?
+        } else {
+            no
+        };
+        self.depth(postfix_depth)?;
+        self.lower_checked_propagation(postfix, None, branch, returning, postfix_depth, checked)
     }
 
     fn expression(
@@ -5656,30 +5711,185 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         };
         let returning = returning.ok_or(Stop::Pending(postfix))?;
         let checked = self.checked_record_postfix(node, data, into, postfix, depth)?;
+        let written = |index: usize| {
+            let field = &data.fields[index];
+            (Projection::Field(field.field), field.expression)
+        };
+        self.lower_interrupted_members(
+            (node, into),
+            (next, returning),
+            depth,
+            (position, postfix, postfix_depth),
+            checked,
+            (data.fields.len(), written),
+        )
+        .map(Some)
+    }
+
+    /// A named flat tuple of primitives whose one written element is a checked
+    /// `Option<bool>` postfix. The screen reads only typed facts, so every
+    /// other tuple keeps its ordinary route and budget.
+    fn initialize_propagating_tuple(
+        &mut self,
+        node: NodeId,
+        into: Slot,
+        next: Pc,
+        returning: Option<Pc>,
+        depth: usize,
+    ) -> ResultOf<Option<Pc>> {
+        let Some((position, elements)) = self.propagating_tuple_element(node, into) else {
+            return Ok(None);
+        };
+        self.budget.step(1)?;
+        let (postfix, postfix_depth) = self.ungroup_expression_at(elements[position], depth + 1)?;
+        let returning = returning.ok_or(Stop::Pending(postfix))?;
+        self.budget.step(elements.len())?;
+        if self.contains_unadmitted_propagation(node, Some(postfix), depth)? {
+            return Err(Stop::Pending(node));
+        }
+        self.budget.step(4)?;
+        let checked = self.checked_propagation(postfix, self.value(postfix)?, postfix_depth)?;
+        let flow = &self.fact(&node).ok_or(Stop::Pending(node))?.flow;
+        if flow.pending
+            || flow.normal != checked.exit.can_continue
+            || flow.returns != checked.exit.can_return
+            || !flow.breaks.is_empty()
+            || !flow.continues.is_empty()
+        {
+            return Err(Stop::Pending(node));
+        }
+        let written = |index: usize| (Projection::TupleElement(index), elements[index]);
+        self.lower_interrupted_members(
+            (node, into),
+            (next, returning),
+            depth,
+            (position, postfix, postfix_depth),
+            checked,
+            (elements.len(), written),
+        )
+        .map(Some)
+    }
+
+    /// Screens a tuple initializer from facts already paid for: a returning
+    /// flat tuple of primitives into `into`, exactly one element of which is
+    /// an admitted (grouped) `Option<bool>` postfix, and no other element that
+    /// can leave the ordinary edge.
+    fn propagating_tuple_element(&self, node: NodeId, into: Slot) -> Option<(usize, &'a [NodeId])> {
+        let fact = self.fact(&node)?;
+        let NodeFactKind::Expression(facts) = &fact.kind else {
+            return None;
+        };
+        let (Some(DataExpression::Tuple { elements }), TypeTerm::Tuple(types)) =
+            (&facts.data, facts.ty.as_ref())
+        else {
+            return None;
+        };
+        if !fact.flow.returns
+            || elements.len() != types.len()
+            || self.slots[into].members != elements.len()
+            || !types
+                .iter()
+                .all(|ty| matches!(ty.as_ref(), TypeTerm::Primitive(_)))
+        {
+            return None;
+        }
+        let mut postfix = None;
+        for (position, &element) in elements.iter().enumerate() {
+            if self.ordinary_flow(element) {
+                continue;
+            }
+            if !self.admits_bool_postfix(self.written_root(element))
+                || postfix.replace(position).is_some()
+            {
+                return None;
+            }
+        }
+        Some((postfix?, elements.as_slice()))
+    }
+
+    /// The `Option<bool>` postfix that `checked_propagation` admits, decided
+    /// from facts already paid for: an ordinary owned operand, propagating to
+    /// a function that itself returns `Option<bool>`.
+    fn admits_bool_postfix(&self, postfix: NodeId) -> bool {
+        let syntax = &self.module.syntax.nodes[postfix];
+        if syntax.kind != NodeKind::Propagate {
+            return false;
+        }
+        let operand = syntax.children[0];
+        let (Ok(facts), Ok(input), Some((id, result))) = (
+            self.value(postfix),
+            self.value(operand),
+            self.return_contract,
+        ) else {
+            return false;
+        };
+        let (Some(DataExpression::Propagation(exit)), Some(role)) =
+            (&facts.data, self.bool_option_role(result))
+        else {
+            return false;
+        };
+        matches!(exit.target, PropagationTarget::Callable(target) if target == id)
+            && exit.error.is_none()
+            && exit.success == &role.some.id
+            && exit.failure == &role.none.id
+            && input.access == Access::Owned
+            && self.bool_option_role(&input.ty).is_some()
+            && self.ordinary_flow(operand)
+    }
+
+    fn ordinary_flow(&self, node: NodeId) -> bool {
+        self.fact(&node).is_some_and(|fact| {
+            fact.flow.normal
+                && !fact.flow.pending
+                && !fact.flow.returns
+                && fact.flow.breaks.is_empty()
+                && fact.flow.continues.is_empty()
+        })
+    }
+
+    /// The expression under written groups. Callers charge the groups'
+    /// depth with `ungroup_expression_at` once the route is admitted.
+    fn written_root(&self, mut node: NodeId) -> NodeId {
+        let nodes = &self.module.syntax.nodes;
+        while nodes[node].kind == NodeKind::Group {
+            node = nodes[node].children[0];
+        }
+        node
+    }
+
+    /// Lowers a flat constructor whose member at `position` is its one checked
+    /// postfix. On failure the header is still vacant: end just the reached
+    /// members, in reverse written order, before the regular lexical cleanup.
+    /// Only success evaluates the suffix and initializes the header.
+    fn lower_interrupted_members(
+        &mut self,
+        (node, into): (NodeId, Slot),
+        (next, returning): (Pc, Pc),
+        depth: usize,
+        (position, postfix, postfix_depth): (usize, NodeId, usize),
+        checked: CheckedPropagation<'a, 'g>,
+        (len, written): (usize, impl Fn(usize) -> (Projection<'g>, NodeId)),
+    ) -> ResultOf<Pc> {
         let mut failure = returning;
         if checked.exit.can_return {
-            // The record header is still vacant. End just the reached fields,
-            // in reverse written order, before the regular lexical cleanup.
-            for field in &data.fields[..position] {
-                let slot = self.field(node, into, &field.field.id)?;
+            for index in 0..position {
+                let slot = self.member(node, into, written(index).0)?;
                 failure = self.emit(postfix, Action::End(slot), Edges::Next(failure))?;
             }
         }
         let (reached, mut tail) = if checked.exit.can_continue {
-            (
-                data.fields.len(),
-                self.emit(node, Action::Init(into), Edges::Next(next))?,
-            )
+            (len, self.emit(node, Action::Init(into), Edges::Next(next))?)
         } else {
             (position + 1, next)
         };
-        for (index, field) in data.fields[..reached].iter().enumerate().rev() {
+        for index in (0..reached).rev() {
             self.budget.step(1)?;
+            let (projection, expression) = written(index);
             if index == position {
                 let target = checked
                     .exit
                     .can_continue
-                    .then(|| self.field(node, into, &field.field.id))
+                    .then(|| self.member(node, into, projection))
                     .transpose()?;
                 self.depth(postfix_depth)?;
                 tail = self.lower_checked_propagation(
@@ -5691,11 +5901,11 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                     checked,
                 )?;
             } else {
-                let target = self.field(node, into, &field.field.id)?;
-                tail = self.expression(field.expression, Some(target), tail, depth + 1)?;
+                let target = self.member(node, into, projection)?;
+                tail = self.expression(expression, Some(target), tail, depth + 1)?;
             }
         }
-        Ok(Some(tail))
+        Ok(tail)
     }
 
     fn checked_record_postfix(
