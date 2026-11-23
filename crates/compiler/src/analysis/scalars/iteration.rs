@@ -50,6 +50,8 @@ pub(super) enum IterationBody<'g> {
         option_text_item: bool,
         /// An owned yield of an application record; field reads are ordinary.
         record_item: bool,
+        /// A shared reference yield; wrapping it in a variant is ordinary.
+        reference_item: bool,
     },
     TextOption {
         item: Option<&'g DeclarationId>,
@@ -251,6 +253,12 @@ impl<'r, 'g> Checker<'r, 'g> {
                         if declaration.kind == DeclarationKind::Record
                             && declaration.module.origin == crate::loader::Origin::Application
                             && arguments.is_empty()),
+                reference_item: iteration.traversal == Some(ListTraversal::Owned)
+                    && matches!(iteration.yielded.as_ref(), TypeTerm::Reference { mutable: false, referent }
+                        if matches!(referent.as_ref(), TypeTerm::Nominal { declaration, arguments }
+                            if declaration.kind == DeclarationKind::Record
+                                && declaration.module.origin == crate::loader::Origin::Application
+                                && arguments.is_empty())),
             },
             _ => IterationBody::Unsupported,
         };
@@ -378,6 +386,17 @@ impl<'r, 'g> Checker<'r, 'g> {
                         ..
                     }
                 ) =>
+            {
+                return Ok(());
+            }
+            NodeKind::Call
+                if matches!(
+                    self.iteration_body,
+                    IterationBody::Ordinary {
+                        reference_item: true,
+                        ..
+                    }
+                ) && matches!(data, Some(data::DataExpression::Construction(_))) =>
             {
                 return Ok(());
             }

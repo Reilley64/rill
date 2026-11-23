@@ -153,7 +153,10 @@ fn record_yield_cleans_the_partial_item_then_the_suffix() {
             // before the record lane, except `mixed` (parent 2,512/350/2) and
             // `custom` (parent 2,522/358/2). Rejecting those element types
             // reads the record's fields and selects its disposer; no earlier
-            // fact supplies either. The dead and pruned loops are never
+            // fact supplies either. Rule 1 exception (chief of staff,
+            // 2026-11-23, ri-2s0.10): each parent cap, measured at 057c5005
+            // in a scratch worktree, now gives `ResourceLimit` (asserted
+            // after this table). The dead and pruned loops are never
             // lowered, so they open no List.
             for (name, expected, cap) in [
                 ("onBreak", Completion::Checked, stats(5_605, 1_356, 7)),
@@ -251,6 +254,19 @@ fn record_yield_cleans_the_partial_item_then_the_suffix() {
                         );
                     }
                 }
+            }
+            for (name, parent) in [
+                ("mixed", stats(2_512, 350, 2)),
+                ("custom", stats(2_522, 358, 2)),
+            ] {
+                let function = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                let limited = lower_body(receipt, module, &function.id, limits(parent).0).unwrap();
+                assert_eq!(limited.completion(), Completion::ResourceLimit, "{name}");
+                assert!(limited.mir().is_none() && limited.findings().is_empty());
             }
         },
     );

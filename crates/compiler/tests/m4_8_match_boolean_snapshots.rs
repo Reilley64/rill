@@ -685,6 +685,9 @@ function probe(flag: bool, gate: bool): void { let debt = Err<bool,i32>(61i32); 
     // Genuine rejections stay R0103. Exact numbers at 7002855e, then here. Each of the
     // two `pre` rows pays a few steps to read the written binding before it rejects, so
     // its parent cap no longer holds. The `computed` row and the mutable source cost no more.
+    // Rule 1 exception (chief of staff, 2026-11-23, ri-2s0.10): `pre: mutable binder`
+    // (+11 work) and `pre: copy of another parameter` (+14 work) pay before `R0103`, and
+    // each parent cap (7002855e) gives `ResourceLimit`.
     for (name, source, parent, exact) in [
         (
             "pre: mutable binder",
@@ -721,15 +724,23 @@ function probe(flag: bool): void {
         ),
     ] {
         let holds = exact.0 <= parent.0 && exact.1 <= parent.1;
-        installed(&probe, name, &source, holds.then_some(parent), |report| {
-            unpaid(report);
-            let stats = report.statistics();
-            assert_eq!(
-                (stats.work, stats.entries, stats.max_depth),
-                exact,
-                "{name}"
-            );
-        });
+        let over_parent = (!holds).then_some(parent);
+        installed_over_parent(
+            &probe,
+            name,
+            &source,
+            holds.then_some(parent),
+            over_parent,
+            |report| {
+                unpaid(report);
+                let stats = report.statistics();
+                assert_eq!(
+                    (stats.work, stats.entries, stats.max_depth),
+                    exact,
+                    "{name}"
+                );
+            },
+        );
     }
 }
 
@@ -780,6 +791,19 @@ fn installed(
     fixed: Option<(usize, usize, usize)>,
     check: impl Fn(&TypedReport<'_>),
 ) {
+    installed_over_parent(probe, name, source, fixed, None, check);
+}
+
+/// As `installed`, and when `over_parent` names a cap the candidate no longer
+/// fits, that parent cap gives `ResourceLimit` with no receipt.
+fn installed_over_parent(
+    probe: &std::path::Path,
+    name: &str,
+    source: &str,
+    fixed: Option<(usize, usize, usize)>,
+    over_parent: Option<(usize, usize, usize)>,
+    check: impl Fn(&TypedReport<'_>),
+) {
     let entry = probe
         .parent()
         .unwrap()
@@ -818,6 +842,22 @@ fn installed(
                 },
             );
             check(&fixed);
+        }
+        if let Some((max_work, max_entries, max_depth)) = over_parent {
+            let parent = analyze_typed(
+                &graph,
+                AnalysisLimits {
+                    max_work,
+                    max_entries,
+                    max_depth,
+                },
+            );
+            assert_eq!(
+                parent.completion(),
+                TypedCompletion::ResourceLimit,
+                "{name}, test={test_mode}: parent cap"
+            );
+            assert!(parent.receipt().is_none());
         }
         let stats = report.statistics();
         let exact = AnalysisLimits {

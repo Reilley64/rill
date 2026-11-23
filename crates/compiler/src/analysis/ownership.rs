@@ -2551,6 +2551,12 @@ enum Action<'g> {
         route: OriginalTwoHopBool,
         incoming: Slot,
     },
+    /// Replace the `i32` behind an incoming exclusive `&mut i32` parameter,
+    /// ending the scratch `incoming`. The caller owns the backing.
+    InstallScalarThrough {
+        descriptor: Slot,
+        incoming: Slot,
+    },
     CheckRetained,
     End(Slot),
     Cleanup(usize),
