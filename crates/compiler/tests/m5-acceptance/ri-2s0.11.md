@@ -1,4 +1,4 @@
-# Retained contents generalised to `&string`: O13's joined sources reject early release (ri-2s0.11, 2026-11-24)
+# Retained contents generalised to `&string`: O13's joined sources reject early release (ri-2s0.11, 2026-11-23)
 
 This is ticket R-RSA, ticket A of the retained-store sequence (city bead `ci-2ed6`). Before it, a store into a caller's `&mut &T` descriptor was checked only for `T = bool`, and a family call stopped at its call. RFC 0007 case O13 (line 491) therefore stayed `Incomplete` at `&mut slot` in its second source. Now the second source rejects early release like its direct-assignment source does: `joined` is `SourceRejected` with R0203 at `dispose(left)` (related `&left`), and `clear` is `Checked`.
 
@@ -13,6 +13,7 @@ One session was enough, so there are no child tickets. Three gaps, in the order 
 ## What changed
 
 - `analysis.rs`, `ownership.rs`, `ownership/build.rs`, `ownership/flow.rs`, `ownership/graph.rs` as above.
+- Commits, in order: `9946d644` (contents and the lone-destination call, with the plain row), `a86b4650` (the family store and the O13 flip), `1cad2b2b` and `a27e5157` (the argument-type screen and the rule-2 siblings), the merge `390aa763` of the base tip, `96560a3f` (this evidence and the status row), and the commit after it that drops `crates/target/`, which `a86b4650` committed by mistake (a build directory created by a stray `CARGO_TARGET_DIR`; no force-push, so the blobs stay in history and the tree has no such file).
 - Not renamed: `retains_exclusive_bool` and `incoming_exclusive_bools` (the first now also covers a `&mut &string` destination's exclusive source; the second stays bool-only).
 
 ## Tests
@@ -51,7 +52,7 @@ Per-root attribution of the whole-graph change, by building the module with each
 | plus `clear` | 187,538 / 4,153 / 5 | 187,593 / 4,179 / 5 | +55 work, +26 entries |
 | plus `joined` (the row) | 190,003 / 4,236 / 5 | 193,195 / 5,097 / 8 | +3,137 work, +835 entries over the previous row |
 
-The deltas add up: 55 + 3,137 = 3,192 and 26 + 835 = 861, the change of the totals. `joined` sets the new depth 8 (targeted and graph); `clear` stays at depth 1. The implementation root stays `Incomplete` and is not read by the caller.
+The family screen was made unmetered after this table was measured; the full row (193,195 / 5,097 / 8) was re-verified afterwards (`final-m5.log`). The deltas add up: 55 + 3,137 = 3,192 and 26 + 835 = 861, the change of the totals. `joined` sets the new depth 8 (targeted and graph); `clear` stays at depth 1. The implementation root stays `Incomplete` and is not read by the caller.
 
 ### New sources (no parent measurement; not moves)
 
