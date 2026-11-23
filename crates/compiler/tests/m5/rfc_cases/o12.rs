@@ -15,33 +15,35 @@ struct Case {
 }
 
 fn check(test: &str, cases: &[Case]) {
-    installed(test, |request| {
-        for (index, case) in cases.iter().enumerate() {
-            fs::write(&request.entry, format!("{IMPORTS}\n{}", case.text)).unwrap();
-            for test_mode in [false, true] {
-                let request = InstalledRequest {
-                    test_mode,
-                    ..request.clone()
-                };
-                let graph = loader::load_installed(request).unwrap();
-                let typed = analyze_typed(&graph, AnalysisLimits::default());
-                let context = format!("case {index}, test_mode {test_mode}");
-                assert_eq!(typed.completion(), TypedCompletion::Checked, "{context}");
-                assert_eq!(
-                    typed.statistics(),
-                    statistics(case.typed_stats),
-                    "{context}"
-                );
-                check_receipt(
-                    &context,
-                    &typed,
-                    application(&graph),
-                    case.graph,
-                    case.roots,
-                );
-            }
+    installed(test, |request| check_cases(&request, cases));
+}
+
+fn check_cases(request: &InstalledRequest, cases: &[Case]) {
+    for (index, case) in cases.iter().enumerate() {
+        fs::write(&request.entry, format!("{IMPORTS}\n{}", case.text)).unwrap();
+        for test_mode in [false, true] {
+            let request = InstalledRequest {
+                test_mode,
+                ..request.clone()
+            };
+            let graph = loader::load_installed(request).unwrap();
+            let typed = analyze_typed(&graph, AnalysisLimits::default());
+            let context = format!("case {index}, test_mode {test_mode}");
+            assert_eq!(typed.completion(), TypedCompletion::Checked, "{context}");
+            assert_eq!(
+                typed.statistics(),
+                statistics(case.typed_stats),
+                "{context}"
+            );
+            check_receipt(
+                &context,
+                &typed,
+                application(&graph),
+                case.graph,
+                case.roots,
+            );
         }
-    });
+    }
 }
 
 fn application(graph: &loader::Graph) -> &loader::Module {
@@ -502,44 +504,82 @@ function flag(b: bool): &string { return &`a${b}`; }
 /// this route. The screen reads the record's fields, one charge of 3 work in
 /// these two roots against `4f7a8032` (1,873 / 26 / 3 and 1,889 / 33 / 4,
 /// whole graph 187,421 / 4,277 / 5); the caps below are measured on the
-/// candidate.
+/// candidate. Metering rule 1 exception (chief of staff, 2026-11-24 06:50
+/// AEDT, ri-2s0.8): no paid fact carries the field list, so each parent cap
+/// gives `ResourceLimit`, with no MIR and no finding, in both load modes.
 #[test]
 fn text_record_results_stay_incomplete() {
-    check(
-        "rfc_cases::o12::text_record_results_stay_incomplete",
-        &[Case {
-            text: r####"
+    const TEXT: &str = r####"
 type Named = { x: i32; label: string };
 function named(): Named { return Named { x: 1, label: "a" }; }
 function textRead(): i32 { return (&named()).x; }
 function textBind(): void { let view = &named(); }
-"####,
-            typed_stats: (326215, 47827, 12),
-            graph: (GraphCompletion::Incomplete, (187427, 4277, 5)),
-            roots: &[
-                Root {
-                    name: "named",
-                    want: Want::Checked,
-                    graph: None,
-                    stats: (2373, 159, 4),
-                },
-                Root {
-                    name: "textRead",
-                    want: Want::Incomplete {
-                        blocker: r####"(&named()).x"####,
-                    },
-                    graph: None,
-                    stats: (1876, 26, 3),
-                },
-                Root {
-                    name: "textBind",
-                    want: Want::Incomplete {
-                        blocker: r####"named()"####,
-                    },
-                    graph: None,
-                    stats: (1892, 33, 4),
-                },
-            ],
-        }],
+"####;
+    installed(
+        "rfc_cases::o12::text_record_results_stay_incomplete",
+        |request| {
+            check_cases(
+                &request,
+                &[Case {
+                    text: TEXT,
+                    typed_stats: (326215, 47827, 12),
+                    graph: (GraphCompletion::Incomplete, (187427, 4277, 5)),
+                    roots: &[
+                        Root {
+                            name: "named",
+                            want: Want::Checked,
+                            graph: None,
+                            stats: (2373, 159, 4),
+                        },
+                        Root {
+                            name: "textRead",
+                            want: Want::Incomplete {
+                                blocker: r####"(&named()).x"####,
+                            },
+                            graph: None,
+                            stats: (1876, 26, 3),
+                        },
+                        Root {
+                            name: "textBind",
+                            want: Want::Incomplete {
+                                blocker: r####"named()"####,
+                            },
+                            graph: None,
+                            stats: (1892, 33, 4),
+                        },
+                    ],
+                }],
+            );
+            fs::write(&request.entry, format!("{IMPORTS}\n{TEXT}")).unwrap();
+            for test_mode in [false, true] {
+                let request = InstalledRequest {
+                    test_mode,
+                    ..request.clone()
+                };
+                let graph = loader::load_installed(request).unwrap();
+                let typed = analyze_typed(&graph, AnalysisLimits::default());
+                let receipt = typed.receipt().unwrap();
+                let module = application(&graph);
+                for (name, parent) in [("textRead", (1873, 26, 3)), ("textBind", (1889, 33, 4))] {
+                    let declaration = module
+                        .declarations
+                        .iter()
+                        .find(|d| {
+                            d.id.kind == DeclarationKind::Function
+                                && d.name.as_deref() == Some(name)
+                        })
+                        .unwrap();
+                    let (parent, _) = limits(statistics(parent));
+                    let limited = lower_body(&receipt, module, &declaration.id, parent).unwrap();
+                    assert_eq!(limited.completion(), Completion::ResourceLimit, "{name}");
+                    assert!(limited.mir().is_none() && limited.findings().is_empty());
+                }
+                let (parent, _) = limits(statistics((187421, 4277, 5)));
+                let limited = analyze_ownership(&receipt, parent);
+                assert_eq!(limited.completion(), GraphCompletion::ResourceLimit);
+                assert!(limited.findings().is_empty());
+                assert!(limited.roots().iter().all(|r| r.ordinary_mir().is_none()));
+            }
+        },
     );
 }
