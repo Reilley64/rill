@@ -369,6 +369,8 @@ pub(in crate::analysis) struct IntegratedInputs<'r, 'g> {
     pub conversions: Option<&'r crate::analysis::typed::ConversionCore<'g>>,
     pub collections: crate::analysis::typed::CollectionCore<'g>,
     pub native_ownership: &'r [crate::analysis::typed::OwnershipProtection<'g>],
+    /// Protected replacements that collection rejects (R0500).
+    pub ownership_overlaps: &'r [crate::analysis::typed::OwnershipOverlap<'g>],
     pub ordinary_scope: Option<crate::analysis::typed::InstalledOrdinaryScope<'g>>,
     pub exhausted: bool,
 }
@@ -426,6 +428,9 @@ fn analyze_bodies<'g>(
     checker.native_ownership = integration
         .as_ref()
         .map_or(&[], |core| core.native_ownership);
+    checker.ownership_overlaps = integration
+        .as_ref()
+        .map_or(&[], |core| core.ownership_overlaps);
     checker.ordinary_scope = integration
         .as_ref()
         .and_then(|core| core.ordinary_scope.clone());

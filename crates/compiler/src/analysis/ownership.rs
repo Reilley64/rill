@@ -579,6 +579,14 @@ pub enum Operation<'g> {
         right: Place<'g>,
         into: Place<'g>,
     },
+    /// Format the initialized i32 scratch values of a template's holes in
+    /// written order through the selected primitive Show, ending each
+    /// scratch and initializing the owned string result. Text pieces are
+    /// the template's own; no owner other than the scratch values ends.
+    FormatI32Template {
+        holes: Vec<Place<'g>>,
+        into: Place<'g>,
+    },
     /// Copy a scalar through a checked descriptor into its destination.
     CopyReferent {
         from: Place<'g>,
@@ -2373,6 +2381,12 @@ enum Action<'g> {
     EqualI32 {
         left: Slot,
         right: Slot,
+        into: Slot,
+    },
+    /// `count` contiguous i32 hole scratch slots starting at `first`.
+    FormatI32Template {
+        first: Slot,
+        count: usize,
         into: Slot,
     },
     Call(usize),
