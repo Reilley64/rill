@@ -20,6 +20,9 @@ use compiler::analysis::scalars::{BodyOwner, Site};
 use compiler::analysis::typed::TypedCompletion;
 use compiler::loader::DeclarationKind;
 
+#[path = "rfc_cases/o20.rs"]
+mod o20;
+
 type Triple = (usize, usize, usize);
 
 #[derive(Clone, Copy, Debug)]
@@ -1106,15 +1109,13 @@ function render(outer: Outer): string { return `${outer.value}-${outer.value}`; 
 "#,
     outcome: Outcome::Receipt {
         typed_stats: (325293, 48014, 12),
-        graph: (GraphCompletion::Incomplete, (186364, 4176, 5)),
+        graph: (GraphCompletion::Incomplete, (186732, 4311, 5)),
         pre_equality_graph: (186048, 4042, 3),
         roots: &[Root {
             name: "render",
-            want: Want::Incomplete {
-                blocker: r####"`${outer.value}-${outer.value}`"####,
-            },
+            want: Want::Checked,
             graph: None,
-            stats: (2230, 81, 3),
+            stats: (2499, 215, 4),
         }],
     },
 }];
@@ -1506,9 +1507,9 @@ fn o19_cleanup_order_holder_is_incomplete_at_its_construction() {
 }
 
 #[test]
-fn o20_transitive_guard_cleanup_is_incomplete_at_interpolation() {
+fn o20_interpolation_reads_through_the_guard_owner_and_checks() {
     run(
-        "rfc_cases::o20_transitive_guard_cleanup_is_incomplete_at_interpolation",
+        "rfc_cases::o20_interpolation_reads_through_the_guard_owner_and_checks",
         O20,
     );
 }
