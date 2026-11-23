@@ -507,6 +507,117 @@ fn fresh_join_checks_capture_conflicts_and_parent_cleanup() {
 }
 
 #[test]
+fn live_parent_error_reaches_the_join_at_its_repinned_cap() {
+    // Metering rule 11, D3 (b) (ri-785.4, review 0c3e2b4f): at d95ae9e this
+    // route stopped at the unlowered `pair` binding at 3,449/320/3. Since
+    // 003c414 it checks both captures before the parent exit, so it stops at
+    // the join call. The fixture is the legacy-caps row that pins the new cap.
+    installed(
+        "scoped_join::fresh_result::live_parent_error_reaches_the_join_at_its_repinned_cap",
+        |request| {
+            fs::write(
+                &request.entry,
+                include_str!("../legacy-caps/live-parent-err/main.rill"),
+            )
+            .unwrap();
+            for test_mode in [false, true] {
+                let loaded = loader::load_installed(InstalledRequest {
+                    test_mode,
+                    ..request.clone()
+                })
+                .unwrap();
+                let module = app(&loaded);
+                let typed = analyze_typed(&loaded, AnalysisLimits::default());
+                assert_eq!(typed.completion(), TypedCompletion::Checked);
+                let receipt = typed.receipt().unwrap();
+
+                let graph_cost = Statistics {
+                    work: 219_596,
+                    entries: 17_727,
+                    max_depth: 8,
+                };
+                let (limit, short) = budget_caps(graph_cost);
+                let graph = analyze_ownership(&receipt, limit);
+                assert_eq!(graph.statistics(), graph_cost);
+                assert_eq!(graph.completion(), GraphCompletion::Incomplete);
+                assert!(graph.findings().is_empty());
+                for cap in short {
+                    let limited = analyze_ownership(&receipt, cap);
+                    assert_eq!(limited.completion(), GraphCompletion::ResourceLimit);
+                    assert!(limited.findings().is_empty());
+                    assert!(limited.roots().iter().all(|r| r.mir().is_none()));
+                }
+
+                for (name, expected, (work, entries, max_depth)) in [
+                    ("liveParentError", Completion::Incomplete, (4_024, 571, 7)),
+                    (
+                        "retiredParentError",
+                        Completion::Checked,
+                        (25_740, 13_172, 8),
+                    ),
+                ] {
+                    let d = &module.declarations[named(module, name)];
+                    let body = &module.syntax.nodes[d.node].span;
+                    let call = module
+                        .syntax
+                        .nodes
+                        .iter()
+                        .position(|node| {
+                            node.kind == NodeKind::Call
+                                && node.span.start() >= body.start()
+                                && node.span.end() <= body.end()
+                                && node.span.bytes().starts_with(b"join([")
+                        })
+                        .unwrap();
+                    let stats = Statistics {
+                        work,
+                        entries,
+                        max_depth,
+                    };
+                    let (limit, short) = budget_caps(stats);
+                    let target = lower_body(&receipt, module, &d.id, limit).unwrap();
+                    assert_eq!(target.statistics(), stats, "{name}");
+                    assert_eq!(target.completion(), expected, "{name}");
+                    assert!(target.findings().is_empty());
+                    for cap in short {
+                        let limited = lower_body(&receipt, module, &d.id, cap).unwrap();
+                        assert_eq!(
+                            limited.completion(),
+                            Completion::ResourceLimit,
+                            "{name}: {cap:?}"
+                        );
+                        assert!(limited.mir().is_none() && limited.findings().is_empty());
+                    }
+                    let root = graph
+                        .roots()
+                        .iter()
+                        .find(|r| r.site().module == &module.key && r.site().node == d.node)
+                        .unwrap();
+                    assert_eq!(root.completion(), expected);
+                    assert_eq!(root.ordinary_completion(), expected);
+                    if expected == Completion::Checked {
+                        assert!(target.mir().is_some() && root.ordinary_mir().is_some());
+                        assert!(target.blocked_at().is_none() && root.blocked_at().is_none());
+                        continue;
+                    }
+                    assert!(target.mir().is_none() && root.ordinary_mir().is_none());
+                    assert_eq!(target.blocked_at().unwrap().node, call);
+                    assert_eq!(root.blocked_at().unwrap().node, call);
+                    let old = AnalysisLimits {
+                        max_work: 3_449,
+                        max_entries: 320,
+                        max_depth: 3,
+                    };
+                    let stopped = lower_body(&receipt, module, &d.id, old).unwrap();
+                    assert_eq!(stopped.completion(), Completion::ResourceLimit);
+                    assert!(stopped.mir().is_none() && stopped.findings().is_empty());
+                }
+            }
+        },
+    );
+}
+
+#[test]
 fn shared_join_rejects_a_live_fresh_error_without_wrapper_selection() {
     installed(
         "scoped_join::fresh_result::shared_join_rejects_a_live_fresh_error_without_wrapper_selection",
