@@ -6841,6 +6841,178 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         self.expression(*argument, Some(stage), transfer, depth + 1)
     }
 
+    /// A bounded call frame for a private once wrapper, closed by this actual
+    /// call: `function f<F>(job: F): R where callableOnce(F, [], R) { return job(); }`
+    /// called with a written pair arrow. The actual is formed into one stage,
+    /// moves into the formal and is consumed by the wrapper's one invocation;
+    /// its output is this call's result. The wrapper's own root stays open.
+    fn call_declared_once(
+        &mut self,
+        node: NodeId,
+        facts: &ExpressionFacts<'g>,
+        call: &CallFacts<'g>,
+        into: Option<Slot>,
+        next: Pc,
+        depth: usize,
+    ) -> ResultOf<Pc> {
+        let pending = || Stop::Pending(node);
+        // Keep the blocker at this call, never at the arrow or the callee.
+        let at_call = |stop| match stop {
+            Stop::Pending(_) => pending(),
+            stop => stop,
+        };
+        let syntax = &self.module.syntax.nodes;
+        // Screen the written shape before any metered lookup. Every other
+        // generic call keeps its old blocker at its old cost.
+        let (Some(into), [argument], [substitution]) = (
+            into,
+            call.arguments.as_slice(),
+            call.substitution.as_slice(),
+        ) else {
+            return Err(pending());
+        };
+        if call.callee.kind != DeclarationKind::Function
+            || call.callee.module.origin != Origin::Application
+            || call.pipe_input.is_some()
+            || !call.defaults.is_empty()
+            || call.selection.is_some()
+            || call.scoped_join.is_some()
+            || !matches!(syntax[node].children.as_slice(), [_, written] if written == argument)
+            || syntax[*argument].kind != NodeKind::Arrow
+            || self.slots[into].members != 2
+            // This first witness admits only the carried shared/Bool pair.
+            || !matches!(facts.ty.as_ref(), TypeTerm::Tuple(elements)
+                if matches!(elements.as_slice(), [descriptor, bit]
+                    if matches!(descriptor.as_ref(), TypeTerm::Reference { mutable: false, referent }
+                        if scalar::scalar(referent) == Some(Primitive::Bool))
+                        && scalar::scalar(bit) == Some(Primitive::Bool)))
+        {
+            return Err(pending());
+        }
+        self.budget.step(1 + self.module.key.path.len())?;
+        if call.callee.module != self.module.key {
+            return Err(pending());
+        }
+        let headers = &self.typed.inventory().type_facts().declarations;
+        graph::charge_key(&call.callee.module, headers.len(), self.budget)?;
+        let header = headers
+            .get(call.callee)
+            .filter(|header| std::ptr::eq(call.callee, &header.declaration.id))
+            .ok_or_else(pending)?;
+        let ([binder], DeclarationShape::Function { parameters, result }) =
+            (header.binders.as_slice(), &header.shape)
+        else {
+            return Err(pending());
+        };
+        let [formal] = parameters.as_slice() else {
+            return Err(pending());
+        };
+        if header.declaration.public
+            || header.declaration.scope.is_some()
+            || binder.position != 0
+            || substitution.position != 0
+            || !std::ptr::eq(substitution.binder, &binder.declaration.id)
+            || !matches!(formal.ty.as_ref(), TypeTerm::Parameter { declaration, position: 0 }
+                if std::ptr::eq(*declaration, &binder.declaration.id))
+            || *result != facts.ty
+        {
+            return Err(pending());
+        }
+        let actual = self.normal_value(*argument).map_err(at_call)?;
+        if actual.access != Access::Owned
+            || actual.ty != substitution.argument
+            || !matches!(actual.ty.as_ref(), TypeTerm::Callable { parameters, result: output, .. }
+                if parameters.is_empty() && *output == *result)
+        {
+            return Err(pending());
+        }
+        // The wrapper's body is exactly `return job();`: one owned once
+        // invocation of the unprojected formal under its own requirement.
+        let [_, body] = syntax[header.declaration.node].children.as_slice() else {
+            return Err(pending());
+        };
+        let [returned] = syntax[*body].children.as_slice() else {
+            return Err(pending());
+        };
+        let [invocation] = syntax[*returned].children.as_slice() else {
+            return Err(pending());
+        };
+        if syntax[*body].kind != NodeKind::Block
+            || syntax[*returned].kind != NodeKind::Return
+            || syntax[*invocation].kind != NodeKind::Call
+        {
+            return Err(pending());
+        }
+        // Four node-fact probes below, then the indexed goal.
+        self.budget
+            .step(4 * (self.facts.nodes().len().checked_ilog2().unwrap_or(0) as usize + 1) + 1)?;
+        if !matches!(self.fact(returned).map(|fact| &fact.kind),
+            Some(NodeFactKind::Return { target }) if std::ptr::eq(*target, call.callee))
+        {
+            return Err(pending());
+        }
+        let invoked = self
+            .fact(invocation)
+            .and_then(|fact| fact.callable.as_ref()?.invocation.as_deref())
+            .ok_or_else(pending)?;
+        let path = invoked.path.as_ref().ok_or_else(pending)?;
+        let receiver = self.value(invoked.receiver).map_err(at_call)?;
+        if syntax[*invocation].children.as_slice() != [invoked.receiver]
+            || syntax[invoked.receiver].kind != NodeKind::ValueReference
+            || invoked.mode != InvocationMode::Once
+            || invoked.access != Access::Owned
+            || !std::ptr::eq(path.root, &formal.declaration.id)
+            || !path.projections.is_empty()
+            || receiver.access != Access::Owned
+            || receiver.ty != formal.ty
+            || self.value(*invocation).map_err(at_call)?.ty != *result
+        {
+            return Err(pending());
+        }
+        let goal = invoked
+            .assumption
+            .as_ref()
+            .and_then(|id| self.typed.bodies().goal(id).ok())
+            .ok_or_else(pending)?;
+        let metadata = self.typed.inventory().headers();
+        graph::charge_key(&call.callee.module, metadata.len(), self.budget)?;
+        let metadata = metadata.get(call.callee).ok_or_else(pending)?;
+        let [requirement] = metadata.requirements.as_slice() else {
+            return Err(pending());
+        };
+        if !metadata.defaults.is_empty()
+            || goal.state != GoalState::Assumption
+            || goal.premise.is_some()
+            || goal.hypothetical.is_some()
+            || !std::ptr::eq(goal.source.module, &self.module.key)
+            || goal.source.node != requirement.node
+            || !matches!(&goal.judgment, GoalJudgment::Requirement {
+                target: ordinary::RequirementTarget::Predicate(id),
+                arguments,
+            } if id.name() == "callableOnce"
+                && matches!(arguments.as_slice(), [job, inputs, output]
+                    if *job == formal.ty && output == result
+                        && matches!(inputs.as_ref(), TypeTerm::Tuple(inputs) if inputs.is_empty())))
+        {
+            return Err(pending());
+        }
+        let stage = self.slot(*argument, &actual.ty)?;
+        let frame = self.emit(
+            node,
+            Action::InvokeClosurePair {
+                receiver: stage,
+                into,
+                call: PairCall::DeclaredOnce {
+                    callee: &header.declaration.id,
+                    formal: formal.declaration.node,
+                    invocation: *invocation,
+                },
+            },
+            Edges::Next(next),
+        )?;
+        self.closure(*argument, stage, frame, depth + 1)
+    }
+
     fn call(
         &mut self,
         node: NodeId,
@@ -6963,6 +7135,9 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             if let Some(route) = route {
                 return self.call_two_list_arrows(node, route, into, next, depth);
             }
+        }
+        if checked_carrier.is_none() && !call.substitution.is_empty() {
+            return self.call_declared_once(node, facts, call, into, next, depth);
         }
         if !Self::direct_application_call(call)
             || into.is_some_and(|slot| self.slots[slot].contains_guard())

@@ -649,6 +649,21 @@ pub enum Operation<'g> {
         origin: Site<'g>,
         into: Place<'g>,
     },
+    /// Move the staged actual pair owner into the private callee's sole
+    /// formal and consume it by the callee's one checked once invocation,
+    /// whose output the callee returns. As for `InvokeClosurePair`, the two
+    /// captured values transfer into `into` and its references keep the
+    /// environment's carried sources. `formal` and `invocation` are the
+    /// callee's parameter and `formal()` call; `origin` is the actual formation.
+    /// No other owner ends; the callee's open source root is not checked.
+    InvokeDeclaredOnce {
+        callee: &'g DeclarationId,
+        formal: Site<'g>,
+        invocation: Site<'g>,
+        argument: Place<'g>,
+        origin: Site<'g>,
+        into: Place<'g>,
+    },
     /// Copy both values from a known pair environment into a fresh result,
     /// in the order established by FormClosurePair. Descriptors retain their
     /// carried sources without borrowing the receiver's storage. The
@@ -2137,9 +2152,18 @@ impl<'g> Local<'g> {
 }
 
 #[derive(Clone, Copy)]
-enum PairCall {
+enum PairCall<'g> {
     Once,
-    ReadOnly { typed_origin: Option<NodeId> },
+    ReadOnly {
+        typed_origin: Option<NodeId>,
+    },
+    /// The actual moves into the private callee's sole formal, whose checked
+    /// body is exactly `return formal();`. Nodes belong to the caller's module.
+    DeclaredOnce {
+        callee: &'g DeclarationId,
+        formal: NodeId,
+        invocation: NodeId,
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -2260,7 +2284,7 @@ enum Action<'g> {
     InvokeClosurePair {
         receiver: Slot,
         into: Slot,
-        call: PairCall,
+        call: PairCall<'g>,
     },
     InvokeMutableI32Cell {
         receiver: Slot,

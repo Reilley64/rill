@@ -4188,3 +4188,406 @@ fn broader_invocations_still_need_typed_evidence() {
         },
     );
 }
+
+const DECLARED_ONCE: &str = "function invoke<F>(job: F): [&bool, bool] where callableOnce(F, [], [&bool, bool]) { return job(); }";
+
+fn assert_declared_once_frame<'g>(
+    module: &'g loader::Module,
+    mir: &Mir<'g>,
+    flag: &[u8],
+) -> Place<'g> {
+    let invoke = capture_declaration(module, "invoke");
+    let ops = linear(mir, mir.entry);
+    let route: Vec<_> = ops
+        .iter()
+        .copied()
+        .filter(|op| {
+            matches!(
+                op,
+                Operation::Move { .. }
+                    | Operation::FormClosurePair { .. }
+                    | Operation::InvokeDeclaredOnce { .. }
+                    | Operation::Export(_)
+            )
+        })
+        .collect();
+    let [
+        Operation::FormClosurePair {
+            closure,
+            captures: [first, second],
+            mode: compiler::analysis::InvocationMode::ReadOnly,
+        },
+        Operation::InvokeDeclaredOnce {
+            callee,
+            formal,
+            invocation,
+            argument,
+            origin,
+            into,
+        },
+        Operation::Export(output),
+    ] = route.as_slice()
+    else {
+        panic!("expected formation, one declared once frame and its result: {route:?}")
+    };
+    assert_eq!(closure.span.bytes(), b"() => [flag, seed]");
+    assert_eq!(
+        (first.span.bytes(), second.span.bytes()),
+        (b"flag".as_slice(), b"seed".as_slice())
+    );
+    assert!(ops.iter().any(|op| matches!(op,
+        Operation::Copy { from, into: Some(holder) }
+        if from.root.span.bytes() == flag && holder.root.node == first.node)));
+    assert!(ops.iter().any(|op| matches!(op,
+        Operation::Copy { from, into: Some(holder) }
+        if from.root.span.bytes() == b"seed: bool" && holder.root.node == second.node)));
+    // The actual formation is the frame's argument and the origin it invokes.
+    assert!(std::ptr::eq(*callee, &invoke.id));
+    assert_eq!(formal.span.bytes(), b"job: F");
+    assert_eq!(invocation.span.bytes(), b"job()");
+    assert!(formal.span.end() < invocation.span.start());
+    assert_eq!(argument.root.node, closure.node);
+    assert!(argument.projection.is_none());
+    assert_eq!(origin.node, closure.node);
+    assert_eq!(into.root.node, output.root.node);
+    assert!(path_drops(mir, mir.entry).is_empty());
+    *into
+}
+
+#[test]
+fn declared_once_formal_invokes_the_actual_pair_in_one_call_frame() {
+    probe_with_typed(
+        "captures::declared_once_formal_invokes_the_actual_pair_in_one_call_frame",
+        &format!(
+            "{DECLARED_ONCE}\nfunction caller(flag: &bool, seed: bool): [&bool, bool] {{ return invoke(() => [flag, seed]); }}\n"
+        ),
+        |_, module, receipt, typed| {
+            use compiler::analysis::ownership::DependencyContract;
+            let stats = typed.statistics();
+            assert_eq!(
+                (stats.work, stats.entries, stats.max_depth),
+                (326_305, 47_955, 12)
+            );
+            let graph = analyze_ownership(receipt, AnalysisLimits::default());
+            let target = check_local_capture_root(module, receipt, &graph, "caller", None);
+            let decl = capture_declaration(module, "caller");
+            let root = capture_graph_root(module, &graph, decl);
+            for mir in [target.mir().unwrap(), root.ordinary_mir().unwrap()] {
+                assert_declared_once_frame(module, mir, b"flag: &bool");
+            }
+            let invoke = capture_declaration(module, "invoke");
+            let [edge] = root.dependencies() else {
+                panic!("expected the one declared once frame edge")
+            };
+            assert!(std::ptr::eq(edge.declaration, &invoke.id));
+            assert_eq!(edge.site.span.bytes(), b"invoke(() => [flag, seed])");
+            let DependencyContract::DeclaredOnceInvocation { invocation, origin } = edge.contract
+            else {
+                panic!("expected a closed declared once contract")
+            };
+            assert_eq!(module.syntax.nodes[invocation].span.bytes(), b"job()");
+            assert_eq!(
+                module.syntax.nodes[origin].span.bytes(),
+                b"() => [flag, seed]"
+            );
+
+            // The unbound formal is not a standalone owner: no MIR of its own.
+            let open = lower_body(receipt, module, &invoke.id, AnalysisLimits::default()).unwrap();
+            assert_eq!(open.completion(), Completion::Incomplete);
+            assert!(open.mir().is_none() && open.findings().is_empty());
+            assert_eq!(open.blocked_at().unwrap().span.bytes(), b"job: F");
+            let open_root = capture_graph_root(module, &graph, invoke);
+            assert_eq!(open_root.ordinary_completion(), Completion::Incomplete);
+            assert!(open_root.mir().is_none() && open_root.ordinary_mir().is_none());
+
+            let used = target.statistics();
+            assert_eq!((used.work, used.entries, used.max_depth), (5_631, 299, 6));
+            let exact = AnalysisLimits {
+                max_work: used.work,
+                max_entries: used.entries,
+                max_depth: used.max_depth,
+            };
+            let run = |limit| lower_body(receipt, module, &decl.id, limit).unwrap();
+            assert_declared_once_frame(module, run(exact).mir().unwrap(), b"flag: &bool");
+            for short in short_capture_limits(exact) {
+                let limited = run(short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit, "{short:?}");
+                assert!(limited.mir().is_none() && limited.findings().is_empty());
+            }
+            let used = graph.statistics();
+            assert_eq!(
+                (used.work, used.entries, used.max_depth),
+                (190_668, 4_266, 6)
+            );
+            let exact = AnalysisLimits {
+                max_work: used.work,
+                max_entries: used.entries,
+                max_depth: used.max_depth,
+            };
+            let bounded = analyze_ownership(receipt, exact);
+            assert_declared_once_frame(
+                module,
+                capture_graph_root(module, &bounded, decl)
+                    .ordinary_mir()
+                    .unwrap(),
+                b"flag: &bool",
+            );
+            for short in short_capture_limits(exact) {
+                let limited = analyze_ownership(receipt, short);
+                assert_eq!(
+                    limited.completion(),
+                    GraphCompletion::ResourceLimit,
+                    "{short:?}"
+                );
+                assert!(
+                    limited
+                        .roots()
+                        .iter()
+                        .all(|root| root.ordinary_mir().is_none() && root.mir().is_none())
+                );
+            }
+        },
+    );
+}
+
+#[test]
+fn declared_once_frame_keeps_capture_provenance_and_rejects_without_mir() {
+    probe_with_typed(
+        "captures::declared_once_frame_keeps_capture_provenance_and_rejects_without_mir",
+        &format!(
+            "{DECLARED_ONCE}\n{}",
+            r#"
+            function escape(seed: bool): [&bool, bool] { let local = seed; let flag = &local; return invoke(() => [flag, seed]); }
+            function write(input: bool, seed: bool): [&bool, bool] { let mut local = input; let flag = &local; local = seed; return invoke(() => [flag, seed]); }
+            function reuse(flag: &bool, seed: bool): [&bool, bool] { dispose(seed); return invoke(() => [flag, seed]); }
+            function sibling(flag: &bool, seed: bool): [&bool, bool] { let view = flag; let _ = view; return invoke(() => [flag, seed]); }
+        "#
+        ),
+        |_, module, receipt, typed| {
+            let stats = typed.statistics();
+            assert_eq!(
+                (stats.work, stats.entries, stats.max_depth),
+                (336_022, 49_199, 12)
+            );
+            let graph = analyze_ownership(receipt, AnalysisLimits::default());
+            for (name, rejection, caps) in [
+                (
+                    "escape",
+                    Some(("R0202", "return invoke(() => [flag, seed]);", "local")),
+                    (5_911, 408, 6),
+                ),
+                (
+                    "write",
+                    Some(("R0203", "local = seed;", "&local")),
+                    (5_886, 396, 6),
+                ),
+                (
+                    "reuse",
+                    Some(("R0200", "seed", "dispose(seed)")),
+                    (5_904, 356, 6),
+                ),
+                // A finished sibling use of the captured descriptor is not live.
+                ("sibling", None, (6_142, 525, 6)),
+            ] {
+                let target = check_local_capture_root(module, receipt, &graph, name, rejection);
+                let decl = capture_declaration(module, name);
+                let root = capture_graph_root(module, &graph, decl);
+                match rejection {
+                    Some((code, ..)) => {
+                        assert!(root.ordinary_mir().is_none(), "{name}");
+                        if code == "R0200" {
+                            // The reused value is the frame actual's capture.
+                            let [finding] = target.findings() else {
+                                unreachable!()
+                            };
+                            let body = &module.syntax.nodes[decl.node].span;
+                            let arrow = module
+                                .syntax
+                                .nodes
+                                .iter()
+                                .find(|n| {
+                                    n.span.bytes() == b"() => [flag, seed]"
+                                        && body.start() <= n.span.start()
+                                        && n.span.end() <= body.end()
+                                })
+                                .unwrap();
+                            assert!(arrow.span.start() < finding.site.span.start());
+                            assert!(finding.site.span.end() <= arrow.span.end());
+                        }
+                    }
+                    None => {
+                        for mir in [target.mir().unwrap(), root.ordinary_mir().unwrap()] {
+                            assert_declared_once_frame(module, mir, b"flag: &bool");
+                        }
+                    }
+                }
+                let used = target.statistics();
+                assert_eq!((used.work, used.entries, used.max_depth), caps, "{name}");
+                let exact = AnalysisLimits {
+                    max_work: used.work,
+                    max_entries: used.entries,
+                    max_depth: used.max_depth,
+                };
+                let run = |limit| lower_body(receipt, module, &decl.id, limit).unwrap();
+                let replay = run(exact);
+                assert_eq!(replay.completion(), target.completion(), "{name}");
+                assert_eq!(replay.findings().len(), target.findings().len(), "{name}");
+                for short in short_capture_limits(exact) {
+                    let limited = run(short);
+                    assert_eq!(
+                        limited.completion(),
+                        Completion::ResourceLimit,
+                        "{name} {short:?}"
+                    );
+                    assert!(limited.mir().is_none() && limited.findings().is_empty());
+                }
+            }
+            let used = graph.statistics();
+            assert_eq!(
+                (used.work, used.entries, used.max_depth),
+                (207_024, 5_391, 6)
+            );
+            let exact = AnalysisLimits {
+                max_work: used.work,
+                max_entries: used.entries,
+                max_depth: used.max_depth,
+            };
+            let bounded = analyze_ownership(receipt, exact);
+            assert_eq!(bounded.findings().len(), 3);
+            for short in short_capture_limits(exact) {
+                let limited = analyze_ownership(receipt, short);
+                assert_eq!(
+                    limited.completion(),
+                    GraphCompletion::ResourceLimit,
+                    "{short:?}"
+                );
+                assert!(limited.roots().iter().all(|root| root.mir().is_none()));
+            }
+        },
+    );
+}
+
+#[test]
+fn declared_once_route_leaves_erased_and_local_descriptor_routes_unchanged() {
+    probe_report(
+        "captures::declared_once_route_leaves_erased_and_local_descriptor_routes_unchanged",
+        "function invoke(job: once () => [&bool, bool]): [&bool, bool] { return job(); }\nfunction caller(flag: &bool, seed: bool): [&bool, bool] { return invoke(() => [flag, seed]); }\n",
+        |_, _, typed| {
+            // An erased formal has no requirement: no deferred effect, no receipt.
+            assert_eq!(
+                typed.completion(),
+                compiler::analysis::typed::TypedCompletion::Incomplete
+            );
+            assert!(typed.receipt().is_none());
+            let stats = typed.statistics();
+            assert_eq!(
+                (stats.work, stats.entries, stats.max_depth),
+                (324_473, 47_678, 12)
+            );
+            let pending = typed.result_use().unwrap().pending();
+            assert!(
+                matches!(pending, [only] if only.blocker == ResultUseBlocker::CallBoundary
+                && only.site.span.bytes() == b"job()")
+            );
+        },
+    );
+    probe(
+        "captures::declared_once_route_leaves_erased_and_local_descriptor_routes_unchanged",
+        "function probe(flag: &bool, seed: bool): [&bool, bool] {\n    let f: () => [&bool, bool] = () => [flag, seed];\n    let descriptor = &f;\n    return descriptor();\n}\n",
+        |_, module, receipt| {
+            let decl = capture_declaration(module, "probe");
+            let report = lower_body(receipt, module, &decl.id, AnalysisLimits::default()).unwrap();
+            assert_eq!(report.completion(), Completion::Checked);
+            let used = report.statistics();
+            assert_eq!((used.work, used.entries, used.max_depth), (2_838, 384, 5));
+        },
+    );
+}
+
+#[test]
+fn declared_once_siblings_keep_their_parent_typed_caps() {
+    use compiler::analysis::typed::TypedCompletion;
+    let wrapper = format!("{DECLARED_ONCE}\n");
+    let caller = |body: &str| {
+        format!("function caller(flag: &bool, seed: bool): [&bool, bool] {{ {body} }}\n")
+    };
+    // Exact results measured at 5882113b, before the declared once frame.
+    // None has an M4 receipt, so no ownership query can reach the frame.
+    for (name, source, site, caps) in [
+        (
+            "grouped-actual",
+            wrapper.clone() + &caller("return invoke((() => [flag, seed]));"),
+            "job()",
+            (325_206, 47_797, 12),
+        ),
+        (
+            "grouped-call",
+            wrapper.clone() + &caller("return (invoke(() => [flag, seed]));"),
+            "job()",
+            (325_110, 47_790, 12),
+        ),
+        (
+            "grouped-receiver",
+            wrapper.replace("return job();", "return (job)();")
+                + &caller("return invoke(() => [flag, seed]);"),
+            "(job)()",
+            (325_036, 47_787, 12),
+        ),
+        (
+            "scoped",
+            wrapper.clone() + &caller("{ return invoke(() => [flag, seed]); }"),
+            "job()",
+            (325_008, 47_782, 12),
+        ),
+        (
+            "loop",
+            wrapper.clone()
+                + &caller(
+                    "while (seed) { return invoke(() => [flag, seed]); } return [flag, seed];",
+                ),
+            "job()",
+            (325_390, 47_893, 12),
+        ),
+        (
+            "bound",
+            wrapper.clone() + &caller("let out = invoke(() => [flag, seed]); return out;"),
+            "job()",
+            (324_957, 47_783, 12),
+        ),
+    ] {
+        probe_report(
+            "captures::declared_once_siblings_keep_their_parent_typed_caps",
+            &source,
+            |request, _, typed| {
+                assert_eq!(typed.completion(), TypedCompletion::Incomplete, "{name}");
+                assert!(typed.receipt().is_none(), "{name}");
+                let pending = typed.result_use().unwrap().pending();
+                assert!(
+                    matches!(pending, [only] if only.blocker == ResultUseBlocker::CallBoundary
+                        && only.site.span.bytes() == site.as_bytes()),
+                    "{name}"
+                );
+                let used = typed.statistics();
+                assert_eq!((used.work, used.entries, used.max_depth), caps, "{name}");
+                let graph = loader::load_installed(request.clone()).unwrap();
+                let exact = AnalysisLimits {
+                    max_work: used.work,
+                    max_entries: used.entries,
+                    max_depth: used.max_depth,
+                };
+                let replay = analyze_typed(&graph, exact);
+                assert_eq!(replay.completion(), TypedCompletion::Incomplete, "{name}");
+                assert_eq!(replay.statistics(), used, "{name}");
+                for short in short_capture_limits(exact) {
+                    let limited = analyze_typed(&graph, short);
+                    assert_eq!(
+                        limited.completion(),
+                        TypedCompletion::ResourceLimit,
+                        "{name}"
+                    );
+                    assert!(limited.receipt().is_none(), "{name}");
+                }
+            },
+        );
+    }
+}
