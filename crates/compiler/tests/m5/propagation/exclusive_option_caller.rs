@@ -93,7 +93,9 @@ fn exclusive_relay_caller(
     caller: &str,
     expect: Expect,
     target: (usize, usize, usize),
-    graph: (usize, usize, usize),
+    // The whole graph now, then before the i32 equality source root
+    // (ri-785.9, metering rule 11), which must give ResourceLimit.
+    graph: [(usize, usize, usize); 2],
     graph_completion: GraphCompletion,
 ) {
     let source = format!("{SIBLINGS}{caller}");
@@ -145,6 +147,12 @@ fn exclusive_relay_caller(
             assert!(limited.mir().is_none() && limited.findings().is_empty());
         }
 
+        let [graph, pre_equality] = graph;
+        assert_eq!(
+            analyze_ownership(receipt, pinned(pre_equality).1).completion(),
+            GraphCompletion::ResourceLimit,
+            "{name}"
+        );
         let (stats, exact, short) = pinned(graph);
         let report = analyze_ownership(receipt, exact);
         assert_eq!(
@@ -324,13 +332,13 @@ fn exclusive_option_relay_callers_check_at_pinned_caps() {
             "callerPostfix",
             "forward(input)",
             (9404, 1651, 4),
-            (195872, 6109, 4),
+            [(196188, 6243, 5), (195872, 6109, 4)],
         ),
         (
             "callerGroup",
             "((forward(((input)))))",
             (9424, 1659, 8),
-            (196124, 6113, 8),
+            [(196440, 6247, 8), (196124, 6113, 8)],
         ),
     ] {
         let caller = format!(
@@ -361,35 +369,35 @@ fn unsupported_exclusive_relay_siblings_keep_parent_caps() {
             "forward(((forward(input))))",
             "forward(((forward(input))))?",
             (3071, 275, 4),
-            (193300, 5281, 4),
+            [(193616, 5415, 5), (193300, 5281, 4)],
         ),
         (
             "callerPipe",
             "input |> forward(_)",
             "input |> forward(_)?",
             (3061, 270, 4),
-            (192990, 5276, 4),
+            [(193306, 5410, 5), (192990, 5276, 4)],
         ),
         (
             "callerGroupPipe",
             "(input |> forward(_))",
             "(input |> forward(_))?",
             (3066, 272, 4),
-            (193115, 5278, 4),
+            [(193431, 5412, 5), (193115, 5278, 4)],
         ),
         (
             "callerGeneric",
             "generic(input)",
             "generic(input)?",
             (3063, 271, 4),
-            (193052, 5277, 4),
+            [(193368, 5411, 5), (193052, 5277, 4)],
         ),
         (
             "callerMultiple",
             "choose(input, input)",
             "choose(input, input)?",
             (3065, 272, 4),
-            (193114, 5278, 4),
+            [(193430, 5412, 5), (193114, 5278, 4)],
         ),
     ] {
         let caller = format!(
@@ -426,7 +434,7 @@ function reuse(input: Option<&mut bool>): Option<&mut bool> {
 "#,
             Expect::Rejected("R0200", "input", "input"),
             (5537, 960, 4),
-            (195468, 5967, 4),
+            [(195784, 6101, 5), (195468, 5967, 4)],
             GraphCompletion::SourceRejected,
         ),
         (
@@ -442,7 +450,7 @@ function conflict(): Option<bool> {
 "#,
             Expect::Rejected("R0201", "&flag", "&mut flag"),
             (6970, 1336, 5),
-            (197442, 6343, 5),
+            [(197758, 6477, 5), (197442, 6343, 5)],
             GraphCompletion::SourceRejected,
         ),
         (
@@ -457,7 +465,7 @@ function escape(): Option<&mut bool> {
 "#,
             Expect::Rejected("R0202", "return Option.Some(view);", "flag"),
             (5931, 1182, 5),
-            (196283, 6189, 5),
+            [(196599, 6323, 5), (196283, 6189, 5)],
             GraphCompletion::SourceRejected,
         ),
         (
@@ -473,7 +481,7 @@ function release(): Option<bool> {
 "#,
             Expect::Rejected("R0203", "dispose(flag)", "&mut flag"),
             (7086, 1345, 5),
-            (197678, 6352, 5),
+            [(197994, 6486, 5), (197678, 6352, 5)],
             GraphCompletion::SourceRejected,
         ),
         (
@@ -490,7 +498,7 @@ function dead(): Option<bool> {
 "#,
             Expect::Checked,
             (13752, 2461, 5),
-            (198511, 6655, 5),
+            [(198827, 6789, 5), (198511, 6655, 5)],
             GraphCompletion::Incomplete,
         ),
     ] {
@@ -515,7 +523,7 @@ function caller(input: Option<&mut bool>): Option<&mut bool> {
 "#,
             "forward(input)",
             (3025, 253, 4),
-            (192773, 5259, 4),
+            [(193089, 5393, 5), (192773, 5259, 4)],
         ),
         (
             "otherPayload",
@@ -527,7 +535,7 @@ function otherPayload(input: Option<&mut i32>): Option<&mut i32> {
 "#,
             "input: Option<&mut i32>",
             (1919, 51, 0),
-            (191788, 5057, 4),
+            [(192104, 5191, 5), (191788, 5057, 4)],
         ),
     ] {
         exclusive_relay_caller(

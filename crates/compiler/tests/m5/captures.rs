@@ -4316,10 +4316,11 @@ fn declared_once_formal_invokes_the_actual_pair_in_one_call_frame() {
                 assert_eq!(limited.completion(), Completion::ResourceLimit, "{short:?}");
                 assert!(limited.mir().is_none() && limited.findings().is_empty());
             }
+            assert_pre_equality_graph_cap(receipt, (190_668, 4_266, 6));
             let used = graph.statistics();
             assert_eq!(
                 (used.work, used.entries, used.max_depth),
-                (190_668, 4_266, 6)
+                (190_984, 4_400, 6)
             );
             let exact = AnalysisLimits {
                 max_work: used.work,
@@ -4444,10 +4445,11 @@ fn declared_once_frame_keeps_capture_provenance_and_rejects_without_mir() {
                     assert!(limited.mir().is_none() && limited.findings().is_empty());
                 }
             }
+            assert_pre_equality_graph_cap(receipt, (207_024, 5_391, 6));
             let used = graph.statistics();
             assert_eq!(
                 (used.work, used.entries, used.max_depth),
-                (207_024, 5_391, 6)
+                (207_340, 5_525, 6)
             );
             let exact = AnalysisLimits {
                 max_work: used.work,

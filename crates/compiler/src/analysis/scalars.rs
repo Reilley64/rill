@@ -123,6 +123,9 @@ pub struct ExpressionFacts<'g> {
     /// The written shape is `local * literal`, or a local or that product
     /// plus a local. M5 still resolves the actual scalar slots.
     pub(in crate::analysis) bounded_i32_arithmetic: bool,
+    /// The written shape is `left == right` on two `i32` operands. M5 still
+    /// checks that each operand is normal and lowers it.
+    pub(in crate::analysis) i32_equality: bool,
 }
 pub use core::{
     ErrorConstruction, Propagation, PropagationError, PropagationTarget, RetainedError, Wrapping,
@@ -2825,6 +2828,23 @@ impl<'r, 'g> Checker<'r, 'g> {
                             slot.i32_operand,
                             I32Operand::Product | I32Operand::Sum
                         ),
+                        // Classified from the operand classes and types already
+                        // inferred, so M5 admits equality without a lookup of its
+                        // own. Each operand, through groups, is a call or an
+                        // operand that M5's checked arithmetic reads.
+                        i32_equality: module.syntax.nodes[node].kind == NodeKind::Binary("==")
+                            && primitive_name(ty) == Some("bool")
+                            && module.syntax.nodes[node].children.iter().all(|&child| {
+                                let mut operand = child;
+                                while module.syntax.nodes[operand].kind == NodeKind::Group {
+                                    operand = module.syntax.nodes[operand].children[0];
+                                }
+                                inference.slots.get(&operand).is_some_and(|slot| {
+                                    slot.ty.as_ref().and_then(primitive_name) == Some("i32")
+                                        && (module.syntax.nodes[operand].kind == NodeKind::Call
+                                            || !matches!(slot.i32_operand, I32Operand::Other))
+                                })
+                            }),
                     }),
                 };
                 if premise.is_some_and(|p| p.has_conversion()) {

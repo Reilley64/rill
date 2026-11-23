@@ -518,7 +518,8 @@ fn interrupted_tuple_initializer_cleans_only_the_reached_prefix() {
             }
 
             // The whole graph at its exact caps and independently one short.
-            let whole = stats(240_330, 13_996, 10);
+            assert_pre_equality_graph_cap(receipt, (240_330, 13_996, 10));
+            let whole = stats(240_646, 14_130, 10);
             assert_eq!(graph.statistics(), whole);
             assert_eq!(graph.completion(), GraphCompletion::SourceRejected);
             assert_eq!(analyze_ownership(receipt, exact(whole)).statistics(), whole);
@@ -765,7 +766,8 @@ fn condition_postfix_continues_on_the_ordinary_branch() {
                 }
             }
 
-            let whole = stats(221_493, 9_847, 9);
+            assert_pre_equality_graph_cap(receipt, (221_493, 9_847, 9));
+            let whole = stats(221_809, 9_981, 9);
             assert_eq!(graph.statistics(), whole);
             assert_eq!(graph.completion(), GraphCompletion::SourceRejected);
             assert_eq!(analyze_ownership(receipt, exact(whole)).statistics(), whole);

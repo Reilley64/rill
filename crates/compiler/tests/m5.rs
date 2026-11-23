@@ -692,6 +692,32 @@ fn probe_report_with_modules(
     });
 }
 
+/// Metering rule 11, D2 (b) (ri-785.9): `(work, entries, depth)` was this
+/// capture's exact whole-graph cap before the i32 equality source root, which
+/// adds 316 work and 134 entries and sets depth 5. That cap now runs out.
+fn assert_pre_equality_graph_cap(
+    receipt: &TypedReceipt<'_, '_>,
+    (work, entries, depth): (usize, usize, usize),
+) {
+    let old = AnalysisLimits {
+        max_work: work,
+        max_entries: entries,
+        max_depth: depth,
+    };
+    let report = compiler::analysis::ownership::analyze_ownership(receipt, old);
+    assert_eq!(
+        report.completion(),
+        compiler::analysis::ownership::GraphCompletion::ResourceLimit,
+        "pre-equality graph cap {old:?}"
+    );
+    assert!(
+        report
+            .roots()
+            .iter()
+            .all(|root| root.ordinary_mir().is_none())
+    );
+}
+
 fn linear<'a, 'g>(mir: &'a Mir<'g>, mut pc: usize) -> Vec<&'a Operation<'g>> {
     let mut ops = Vec::new();
     for _ in 0..mir.blocks.len() {

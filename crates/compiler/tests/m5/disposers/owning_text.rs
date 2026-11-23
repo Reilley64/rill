@@ -307,7 +307,8 @@ fn outer_disposer_runs_once_then_drops_the_remaining_text_fields() {
             }
 
             // The whole receipt for this source.
-            let pinned = stats(197_595, 5_829, 3);
+            assert_pre_equality_graph_cap(receipt, (197_595, 5_829, 3));
+            let pinned = stats(197_911, 5_963, 5);
             assert_eq!(graph.statistics(), pinned);
             assert_eq!(graph.completion(), GraphCompletion::SourceRejected);
             let (exact, short) = caps(pinned);

@@ -150,10 +150,11 @@ fn declared_shared_formal_reads_the_lent_actual_in_one_call_frame() {
                 assert_eq!(limited.completion(), Completion::ResourceLimit, "{short:?}");
                 assert!(limited.mir().is_none() && limited.findings().is_empty());
             }
+            assert_pre_equality_graph_cap(receipt, (189_816, 4_168, 6));
             let used = graph.statistics();
             assert_eq!(
                 (used.work, used.entries, used.max_depth),
-                (189_816, 4_168, 6)
+                (190_132, 4_302, 6)
             );
             let bounded = analyze_ownership(receipt, exact(used));
             assert_declared_shared_frame(
@@ -247,10 +248,11 @@ fn declared_shared_frame_checks_the_lent_owner_and_rejects_without_mir() {
                     assert!(limited.mir().is_none() && limited.findings().is_empty());
                 }
             }
+            assert_pre_equality_graph_cap(receipt, (204_090, 4_970, 6));
             let used = graph.statistics();
             assert_eq!(
                 (used.work, used.entries, used.max_depth),
-                (204_090, 4_970, 6)
+                (204_406, 5_104, 6)
             );
             let bounded = analyze_ownership(receipt, exact(used));
             assert_eq!(bounded.findings().len(), 1);
@@ -351,7 +353,8 @@ fn declared_shared_siblings_keep_their_parent_caps() {
             let limited = lower_body(receipt, module, &ignored.id, old).unwrap();
             assert_eq!(limited.completion(), Completion::ResourceLimit);
             assert!(limited.mir().is_none() && limited.findings().is_empty());
-            assert_graph_incomplete_at_caps(receipt, &graph, (187_616, 4_040, 3));
+            assert_pre_equality_graph_cap(receipt, (187_616, 4_040, 3));
+            assert_graph_incomplete_at_caps(receipt, &graph, (187_932, 4_174, 5));
         },
     );
     // Local invocations of a one-capture arrow are not frames: `f()` and
@@ -368,7 +371,8 @@ fn declared_shared_siblings_keep_their_parent_caps() {
                 check_capture_blocker(module, receipt, &graph, name, at);
                 assert_incomplete_at_caps(module, receipt, name, at, caps);
             }
-            assert_graph_incomplete_at_caps(receipt, &graph, (186_671, 4_033, 5));
+            assert_pre_equality_graph_cap(receipt, (186_671, 4_033, 5));
+            assert_graph_incomplete_at_caps(receipt, &graph, (186_987, 4_167, 5));
         },
     );
 }

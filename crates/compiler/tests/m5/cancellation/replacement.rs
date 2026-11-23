@@ -169,14 +169,25 @@ fn installed_replacement_without_the_proved_leaf_stays_unresolved() {
         "cancellation::replacement::installed_replacement_without_the_proved_leaf_stays_unresolved",
         &source,
         |_, module, receipt, _| {
-            // The full graph also checks the 14 scalar disposal source roots.
+            // The full graph also checks the 14 scalar disposal source roots
+            // and, since ri-785.9, the i32 equality source root (+316 work,
+            // +134 entries, depth 5; metering rule 11). It was 203,358/8,126/3.
             // The targeted ordinary bounds below are unchanged.
+            let old = AnalysisLimits {
+                max_work: 203358,
+                max_entries: 8126,
+                max_depth: 3,
+            };
+            assert_eq!(
+                analyze_ownership(receipt, old).completion(),
+                GraphCompletion::ResourceLimit
+            );
             let graph = analyze_ownership(
                 receipt,
                 AnalysisLimits {
-                    max_work: 203358,
-                    max_entries: 8126,
-                    max_depth: 3,
+                    max_work: 203674,
+                    max_entries: 8260,
+                    max_depth: 5,
                 },
             );
             assert_eq!(graph.completion(), GraphCompletion::Incomplete);

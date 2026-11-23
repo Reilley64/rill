@@ -402,12 +402,13 @@ fn grouped_computed_source_keeps_the_pre_literal_budget() {
                 target.blocked_at().unwrap().span.bytes(),
                 b"for (let item of (((make(gate?))))) { let _ = &item; break; }"
             );
+            assert_pre_equality_graph_cap(receipt, (192469, 4596, 4));
             let graph = analyze_ownership(
                 receipt,
                 AnalysisLimits {
-                    max_work: 192469,
-                    max_entries: 4596,
-                    max_depth: 4,
+                    max_work: 192785,
+                    max_entries: 4730,
+                    max_depth: 5,
                 },
             );
             assert_eq!(graph.completion(), GraphCompletion::SourceRejected); // independent named-source reuse
@@ -432,10 +433,11 @@ fn unproved_list_sources_keep_their_old_caps() {
         "iteration::source::unproved_list_sources_keep_their_old_caps",
         CONTROLS,
         |_, module, receipt| {
+            assert_pre_equality_graph_cap(receipt, (192_283, 4593, 4));
             let stats = Statistics {
-                work: 192_283,
-                entries: 4593,
-                max_depth: 4,
+                work: 192_599,
+                entries: 4727,
+                max_depth: 5,
             };
             let (exact, short) = limits(stats);
             let graph = analyze_ownership(receipt, exact);

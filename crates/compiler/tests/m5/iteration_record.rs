@@ -131,7 +131,8 @@ fn record_yield_cleans_the_partial_item_then_the_suffix() {
                 assert!(limited.receipt().is_none());
             }
 
-            let graph_stats = stats(234_907, 13_094, 9);
+            assert_pre_equality_graph_cap(receipt, (234_907, 13_094, 9));
+            let graph_stats = stats(235_223, 13_228, 9);
             let (exact, short) = limits(graph_stats);
             let graph = analyze_ownership(receipt, exact);
             assert_eq!(graph.statistics(), graph_stats);

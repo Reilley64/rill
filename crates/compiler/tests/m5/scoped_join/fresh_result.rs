@@ -356,9 +356,10 @@ fn fresh_join_checks_capture_conflicts_and_parent_cleanup() {
             }
         "#,
         |_, module, receipt, typed| {
+            assert_pre_equality_graph_cap(receipt, (228_462, 18_860, 8));
             let graph_cost = Statistics {
-                work: 228_462,
-                entries: 18_860,
+                work: 228_778,
+                entries: 18_994,
                 max_depth: 8,
             };
             let (limit, short) = budget_caps(graph_cost);
@@ -531,9 +532,10 @@ fn live_parent_error_reaches_the_join_at_its_repinned_cap() {
                 assert_eq!(typed.completion(), TypedCompletion::Checked);
                 let receipt = typed.receipt().unwrap();
 
+                assert_pre_equality_graph_cap(&receipt, (219_596, 17_727, 8));
                 let graph_cost = Statistics {
-                    work: 219_596,
-                    entries: 17_727,
+                    work: 219_912,
+                    entries: 17_861,
                     max_depth: 8,
                 };
                 let (limit, short) = budget_caps(graph_cost);
@@ -671,9 +673,10 @@ fn shared_join_rejects_a_live_fresh_error_without_wrapper_selection() {
                     assert_eq!(limited.completion(), Completion::ResourceLimit, "{cap:?}");
                     assert!(limited.mir().is_none());
                 }
+                assert_pre_equality_graph_cap(&receipt, (216_846, 6_179, 10));
                 let graph_cost = Statistics {
-                    work: 216_846,
-                    entries: 6_179,
+                    work: 217_162,
+                    entries: 6_313,
                     max_depth: 10,
                 };
                 let (limit, short) = budget_caps(graph_cost);
