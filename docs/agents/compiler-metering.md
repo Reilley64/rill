@@ -11,6 +11,13 @@ A new proof path decides eligibility from facts already paid for, before its fir
 - **Check:** in every new path, no `step`, `reserve`, `charge_key` or allocation precedes the last early return that rejects an unsupported shape.
 - **Example:** `335da9f` preflights both child shapes, environments and premises before allocating isolated Result-use checks.
 
+**Exceptions (2026-11-23, chief of staff, under rule 11's authority line).** Nine unsupported siblings in four tests pay before they reject, because no paid fact can reject them earlier; an earlier screen needs new M4 facts. Each keeps its current cap, pinned exact and one short, and each parent cap is asserted to give `ResourceLimit`. They stay `Incomplete` (or `SourceRejected`) at default limits. The evidence is [`ri-2s0.10.md`](../../crates/compiler/tests/m5-acceptance/ri-2s0.10.md); the restructuring is one open bead. No other sibling has an exception.
+
+- `captures::declared_shared::declared_shared_siblings_keep_their_parent_caps`: `ignored` (`skip(&f)`, +5 work) and `ignoredOther` (a lent `return other();` wrapper, +496 work).
+- `iteration::record::record_yield_cleans_the_partial_item_then_the_suffix`: `mixed` (+3 work) and `custom` (+372 work, +61 entries).
+- `m4_8_callable_once::private_once_checks_the_actual_shared_pair`: `shared-formal-actual` (+1 work), `shared-result-capture` (+16 work, +3 entries) and `shared-unclosed` (+464 work, +14 entries).
+- `m4_8_match_boolean_snapshots::installed_boolean_matches`: `pre: mutable binder` (+11 work) and `pre: copy of another parameter` (+14 work), both before the same `R0103`.
+
 ## 2. Every new admission ships a parent-cap regression
 
 Admitting a shape adds work to the shapes next to it. Pin the nearest unsupported siblings at the caps the parent revision measured, so the test fails when the new path spends before it rejects.
@@ -112,4 +119,5 @@ A ticket whose body mandates flipping a targeted outcome (for example `Incomplet
 - **Check:** the ticket's evidence file states the old numbers, the new numbers and the reason.
 - **Check:** the old cap asserts `ResourceLimit`.
 - **Check:** the cost is not avoidable by a rule-1 screen.
+- **Note (2026-11-23, chief of staff):** when a mandated flip lowers the cost, the old cap cannot give `ResourceLimit`: it still holds. The test then asserts the new exact triple and that one unit less than the new cap on each axis gives `ResourceLimit`, and the evidence file states old, new and the reason. Example: C12 (`ri-2s0.4`), rows `pre` and `computed` in `m4_8_match_boolean_snapshots::installed_boolean_matches` (426,921/48,910/12 to 426,895/48,892/12, and 428,253/49,198/12 to 427,988/49,104/12).
 - **Example:** the owner ratified three such moves on 2026-11-23 (review `ci-uaa1`). A2 (`ri-785.1`) charges the O15 `counter` reads with `charge_key`: 2,504/329/6 to 2,562/329/6, graph 187,485 to 187,543 (`rfc_cases::o15_pre_charge_counter_caps_now_give_resource_limit`). B6 (`ri-785.9`) lowers i32 equality, so the O15 expectation flips from `Incomplete` at 1,893/32/1 to `Checked` at 4,577/425/6, and O3 and O5 move with it (`rfc_cases::equality_expectations_exceed_their_incomplete_caps`). C1 (`ri-vgz.3`) admits `callerExclusive`: `Incomplete` at 3,089/284/4 to `Checked` at 9,466/1,677/4 (`propagation::option_caller::exclusive_relay_caller_exceeds_its_parent_caps`).
