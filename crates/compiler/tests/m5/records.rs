@@ -166,7 +166,6 @@ fn nested_owned_records_clean_initialized_leaves_on_exit() {
                 ("borrow", b"value".as_slice()),
                 ("protectedSibling", b"value: GuardRoot"),
                 ("customChild", b"value: CustomChild"),
-                ("customRoot", b"value: CustomRoot"),
                 ("deeper", b"value: Deeper"),
                 ("referenceLeaf", b"value: RefRoot"),
             ] {
@@ -179,6 +178,64 @@ fn nested_owned_records_clean_initialized_leaves_on_exit() {
                 assert!(body.start() <= blocker.span.start() && blocker.span.end() <= body.end());
                 assert_eq!(blocker.span.bytes(), at, "{name}");
             }
+            // ri-4lq (K2): a custom disposer over a record with a nested owned
+            // record runs once; its epilogue drops the leaves in reverse
+            // field order. Exact replay and each one-short cap.
+            let custom_root = lower("customRoot", default);
+            assert_eq!(custom_root.completion(), Completion::Checked);
+            assert_eq!(
+                custom_root.statistics(),
+                compiler::analysis::Statistics {
+                    work: 5_817,
+                    entries: 559,
+                    max_depth: 1,
+                }
+            );
+            let mir = custom_root.mir().unwrap();
+            let [
+                Obligation::InvokeDisposer {
+                    operand,
+                    implementation,
+                },
+            ] = path_drops(mir, mir.entry)[..]
+            else {
+                panic!("expected one outer disposer invocation");
+            };
+            assert_eq!(operand.root.span.bytes(), b"value: CustomRoot");
+            let body = mir.disposer(implementation).unwrap();
+            assert!(
+                matches!(path_drops(body, body.entry).as_slice(), [Obligation::Drop(sibling), Obligation::Drop(text)]
+                if sibling.root.node == text.root.node
+                    && sibling.field().is_some_and(|member| &member.id == field("CustomRoot", "sibling"))
+                    && matches!(text.projection, Some(Projection::NestedField { outer, inner })
+                        if &outer.id == field("CustomRoot", "child") && &inner.id == field("Inner", "text")))
+            );
+            let pinned = custom_root.statistics();
+            let exact = AnalysisLimits {
+                max_work: pinned.work,
+                max_entries: pinned.entries,
+                max_depth: pinned.max_depth,
+            };
+            assert_eq!(lower("customRoot", exact).completion(), Completion::Checked);
+            for short in [
+                AnalysisLimits {
+                    max_work: exact.max_work - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_entries: exact.max_entries - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_depth: exact.max_depth - 1,
+                    ..exact
+                },
+            ] {
+                let limited = lower("customRoot", short);
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none() && limited.findings().is_empty());
+            }
+
             let exact = AnalysisLimits {
                 max_work: cleanup.statistics().work,
                 max_entries: cleanup.statistics().entries,
@@ -2298,6 +2355,57 @@ fn named_nested_record_cleanup_after_one_edge_child_move() {
                 );
 
                 let report = lower(name);
+                if name == "outerDisposer" {
+                    // ri-4lq: the nested layout under a custom disposer is now
+                    // admitted, so moving `saved.child` out of the record
+                    // outside its active disposer is the RFC's R0501.
+                    assert_eq!(report.completion(), Completion::SourceRejected);
+                    assert!(report.mir().is_none());
+                    let [finding] = report.findings() else {
+                        panic!("expected one finding");
+                    };
+                    assert_eq!(
+                        (
+                            finding.code(),
+                            finding.site.span.bytes(),
+                            finding.related.span.bytes()
+                        ),
+                        ("R0501", b"saved.child".as_slice(), b"saved".as_slice())
+                    );
+                    let pinned = report.statistics();
+                    assert_eq!(
+                        (pinned.work, pinned.entries, pinned.max_depth),
+                        (4_009, 607, 5)
+                    );
+                    let exact = AnalysisLimits {
+                        max_work: pinned.work,
+                        max_entries: pinned.entries,
+                        max_depth: pinned.max_depth,
+                    };
+                    let check = |limits| {
+                        lower_body(receipt, module, &declaration(name).id, limits).unwrap()
+                    };
+                    assert_eq!(check(exact).completion(), Completion::SourceRejected);
+                    for short in [
+                        AnalysisLimits {
+                            max_work: exact.max_work - 1,
+                            ..exact
+                        },
+                        AnalysisLimits {
+                            max_entries: exact.max_entries - 1,
+                            ..exact
+                        },
+                        AnalysisLimits {
+                            max_depth: exact.max_depth - 1,
+                            ..exact
+                        },
+                    ] {
+                        let limited = check(short);
+                        assert_eq!(limited.completion(), Completion::ResourceLimit);
+                        assert!(limited.mir().is_none() && limited.findings().is_empty());
+                    }
+                    continue;
+                }
                 assert_eq!(report.completion(), Completion::Incomplete, "{name}");
                 assert!(
                     report.mir().is_none() && report.findings().is_empty(),
