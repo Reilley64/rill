@@ -397,6 +397,181 @@ function dead(xs: List<Option<string>>): Option<bool> {
     );
 }
 
+/// Reviews `3987757f` (Standards, `d8e067e`) and `ed35f525` (Spec, `437c266`)
+/// of the yielded `Option<string>` cursor. `Some(second read)` expects the
+/// independent `R0200`; `None` expects the source formal to stay pending,
+/// which means the typed result-use check did not stamp `xs`.
+const REVIEW_COUNTEREXAMPLES: [(&str, Option<&str>, Statistics, Statistics); 5] = [
+    // 3987757f: an ordinary body that borrows the carrier. A stamped `xs`
+    // moved the blocker to `&item` at 4,215/429/6.
+    (
+        "function probe(xs: List<Option<string>>): Option<bool> { for (let item of xs) { let _ = &item; break; } return Option.Some(true); }",
+        None,
+        Statistics {
+            work: 1_855,
+            entries: 19,
+            max_depth: 0,
+        },
+        Statistics {
+            work: 185_969,
+            entries: 3_980,
+            max_depth: 3,
+        },
+    ),
+    // 3987757f: an unused `List<string>` sibling. A stamped `xs` moved the
+    // blocker to `spare` at 3,048/214/3.
+    (
+        "function probe(xs: List<Option<string>>, spare: List<string>): Option<bool> { for (let item of xs) { let text = item?; break; } return Option.Some(true); }",
+        None,
+        Statistics {
+            work: 1_864,
+            entries: 23,
+            max_depth: 0,
+        },
+        Statistics {
+            work: 186_160,
+            entries: 3_984,
+            max_depth: 3,
+        },
+    ),
+    // ed35f525: the postfix fixture with an unsupported `List<bool>` sibling.
+    (
+        "function probe(xs: List<Option<string>>, spare: List<bool>): Option<bool> { for (let item of xs) { let text = item?; let _ = &text; } return Option.Some(true); }",
+        None,
+        Statistics {
+            work: 1_866,
+            entries: 24,
+            max_depth: 0,
+        },
+        Statistics {
+            work: 186_222,
+            entries: 3_985,
+            max_depth: 3,
+        },
+    ),
+    // ed35f525: an ordinary body keeps its reached move finding.
+    (
+        "function probe(xs: List<Option<string>>): Option<bool> { for (let item of xs) { let s = \"owned\"; let moved = s; let again = s; break; } return Option.Some(true); }",
+        Some("again = s"),
+        Statistics {
+            work: 4_717,
+            entries: 721,
+            max_depth: 5,
+        },
+        Statistics {
+            work: 189_076,
+            entries: 4_683,
+            max_depth: 5,
+        },
+    ),
+    (
+        "function probe(xs: List<Option<string>>): void { for (let item of xs) { let s = \"owned\"; let moved = s; let again = s; break; } }",
+        Some("again = s"),
+        Statistics {
+            work: 3_535,
+            entries: 474,
+            max_depth: 5,
+        },
+        Statistics {
+            work: 187_654,
+            entries: 4_436,
+            max_depth: 5,
+        },
+    ),
+];
+
+#[test]
+fn review_counterexamples_keep_their_outcomes_at_exact_caps() {
+    for (source, second_read, targeted, whole) in REVIEW_COUNTEREXAMPLES {
+        probe(
+            "iteration::option_text::review_counterexamples_keep_their_outcomes_at_exact_caps",
+            source,
+            |_, module, receipt| {
+                let f = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some("probe"))
+                    .unwrap();
+                let expected = if second_read.is_some() {
+                    Completion::SourceRejected
+                } else {
+                    Completion::Incomplete
+                };
+                let (exact, short) = limits(targeted);
+                let run = |cap| lower_body(receipt, module, &f.id, cap).unwrap();
+                let target = run(exact);
+                assert_eq!(target.completion(), expected, "{source}");
+                assert_eq!(target.statistics(), targeted, "{source}");
+                assert!(target.mir().is_none());
+                for cap in short {
+                    let limited = run(cap);
+                    assert_eq!(limited.completion(), Completion::ResourceLimit, "{source}");
+                    assert!(limited.mir().is_none() && limited.findings().is_empty());
+                }
+                let (exact, short) = limits(whole);
+                let graph = analyze_ownership(receipt, exact);
+                assert_eq!(graph.statistics(), whole, "{source}");
+                let root = graph
+                    .roots()
+                    .iter()
+                    .find(|r| r.site().module == &module.key && r.site().node == f.node)
+                    .unwrap();
+                assert_eq!(root.ordinary_completion(), expected, "{source}");
+                assert!(root.ordinary_mir().is_none());
+                for cap in short {
+                    let limited = analyze_ownership(receipt, cap);
+                    assert_eq!(
+                        limited.completion(),
+                        GraphCompletion::ResourceLimit,
+                        "{source}"
+                    );
+                    // Findings recorded before exhaustion survive it.
+                    let key = |f: &compiler::analysis::ownership::Finding<'_>| {
+                        (f.code(), f.site.node, f.related.node)
+                    };
+                    assert!(
+                        limited
+                            .findings()
+                            .iter()
+                            .all(|f| graph.findings().iter().any(|g| key(g) == key(f)))
+                    );
+                    assert!(limited.roots().iter().all(|r| r.ordinary_mir().is_none()));
+                }
+                let Some(second_read) = second_read else {
+                    assert_eq!(graph.completion(), GraphCompletion::Incomplete);
+                    let blocker = target.blocked_at().unwrap();
+                    assert_eq!(blocker.span.bytes(), b"xs: List<Option<string>>");
+                    assert_eq!(root.blocked_at().unwrap().node, blocker.node);
+                    assert!(target.findings().is_empty() && graph.findings().is_empty());
+                    assert!(root.dependencies().is_empty());
+                    return;
+                };
+                assert_eq!(graph.completion(), GraphCompletion::SourceRejected);
+                for findings in [target.findings(), graph.findings()] {
+                    let [finding] = findings else {
+                        panic!("expected only the second read: {source}")
+                    };
+                    assert_eq!(finding.code(), "R0200");
+                    for (site, text) in [
+                        (finding.site, second_read.as_bytes()),
+                        (finding.related, b"moved = s".as_slice()),
+                    ] {
+                        let start = module
+                            .snapshot
+                            .bytes()
+                            .windows(text.len())
+                            .position(|s| s == text)
+                            .unwrap()
+                            + text.len()
+                            - 1;
+                        assert_eq!((site.span.start(), site.span.end()), (start, start + 1));
+                    }
+                }
+            },
+        );
+    }
+}
+
 fn check_paths<'g>(
     name: &str,
     mir: &Mir<'g>,
