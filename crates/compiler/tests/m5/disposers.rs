@@ -934,6 +934,30 @@ fn protected_fields_keep_their_obligation_through_disposer_cleanup() {
                 assert_eq!(place.field().unwrap().id, field(expected).id);
                 assert_eq!(place.root.span.bytes(), b"owned: Plain");
             }
+            // ri-px1.8 (D3): the ordinary graph verifies the scope-exit
+            // release of the guard field, so both graph roots keep the
+            // targeted cleanup.
+            let graph = compiler::analysis::ownership::analyze_ownership(
+                receipt,
+                AnalysisLimits::default(),
+            );
+            for name in ["ordinary", "mixedWrapper"] {
+                let node = declaration(name).node;
+                let root = graph
+                    .roots()
+                    .iter()
+                    .find(|root| root.site().module == &module.key && root.site().node == node)
+                    .unwrap();
+                assert_eq!(root.ordinary_completion(), Completion::Checked, "{name}");
+                let graph_mir = root.ordinary_mir().unwrap();
+                let target = lower(name);
+                let target_mir = target.mir().unwrap();
+                assert_eq!(
+                    format!("{:?}", path_drops(graph_mir, graph_mir.entry)),
+                    format!("{:?}", path_drops(target_mir, target_mir.entry)),
+                    "{name}"
+                );
+            }
         },
     );
 }

@@ -657,6 +657,7 @@ fn analyze<'g>(
                         typed,
                         module,
                         &facts[work[index].module_index].nodes,
+                        work[index].facts.header,
                         &mir.blocks[block],
                         edge,
                         family_count,
