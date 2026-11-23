@@ -195,7 +195,7 @@ fn liveness(
             | Action::CheckRetained => use_one(None, None),
             Action::CheckScopedReferenceResults { entries, .. } => (entries.map(Some), None),
             Action::Init(slot) | Action::End(slot) => use_one(None, Some(slot)),
-            Action::CommitListText { into, .. } => use_one(None, Some(into)),
+            Action::CommitList { into, .. } => use_one(None, Some(into)),
             Action::OpenOwnedList { source, cursor, .. } => use_one(Some(source), Some(cursor)),
             Action::AdvanceOwnedList { cursor, into, .. } => use_one(Some(cursor), into),
             Action::Read { from, into }
@@ -316,7 +316,9 @@ fn liveness(
             _ => &[],
         };
         let stages = match instruction.action {
-            Action::CommitListText { first, count, .. } => first..first + count,
+            Action::CommitList { first, count, .. } => {
+                first..first + count * slots[first].storage(first).len()
+            }
             _ => 0..0,
         };
         // Caller storage can still expose its installed value until a write
@@ -711,6 +713,14 @@ fn cleanup_of<'g>(
                 element: disposal.element,
             })
         }
+        StorageCleanup::DisposeOwnedListIterRecordText(disposal) => {
+            Ok(Cleanup::DisposeOwnedListIterRecordText {
+                cursor: place,
+                implementation: disposal.list.implementation,
+                bridge: disposal.list.bridge,
+                element: disposal.element,
+            })
+        }
         StorageCleanup::End => Ok(Cleanup::EndStorage(place)),
     }
 }
@@ -769,6 +779,7 @@ fn cleanup_operation<'g>(
         | Cleanup::DisposeOwnedListIterText { .. }
         | Cleanup::DisposeListOptionText { .. }
         | Cleanup::DisposeOwnedListIterOptionText { .. }
+        | Cleanup::DisposeOwnedListIterRecordText { .. }
         | Cleanup::DropYieldedOptionText { .. }) => {
             budget.reserve(1)?;
             Operation::Cleanup(vec![cleanup])
@@ -2317,6 +2328,7 @@ pub(super) fn run<'a, 'g>(
                         | StorageCleanup::DisposeOwnedListIterText(_)
                         | StorageCleanup::DisposeListOptionText { .. }
                         | StorageCleanup::DisposeOwnedListIterOptionText(_)
+                        | StorageCleanup::DisposeOwnedListIterRecordText(_)
                 )
             {
                 candidate = false;
@@ -2570,32 +2582,48 @@ pub(super) fn run<'a, 'g>(
                     state[slot] = State::Initialized(empty.clone());
                     Operation::Initialize(local(slot))
                 }
-                Action::CommitListText {
+                Action::CommitList {
                     first,
                     count,
                     into,
                     backing,
                     provider,
                 } => {
-                    // Only this builder's private, borrow-free string stages
-                    // can reach commitment. The destination has no live owner.
+                    // Only this builder's private, borrow-free string or
+                    // string-field record stages can reach commitment. The
+                    // destination has no live owner.
                     if matches!(state[into], State::Initialized(_)) {
                         return Err(Stop::Pending(node));
                     }
-                    budget.step(count)?;
+                    let width = slots[first].storage(first).len();
+                    budget.step(count * width)?;
                     budget.reserve(count)?;
                     let mut elements = Vec::with_capacity(count);
-                    for (index, stage) in state[first..first + count].iter_mut().enumerate() {
-                        initialized(stage, node)?;
-                        *stage = State::Moved(node);
-                        elements.push(local(first + index));
+                    for (index, stage) in state[first..first + count * width]
+                        .chunks_mut(width)
+                        .enumerate()
+                    {
+                        for slot in stage.iter_mut() {
+                            initialized(slot, node)?;
+                            *slot = State::Moved(node);
+                        }
+                        elements.push(local(first + index * width));
                     }
                     state[into] = State::Initialized(empty.clone());
-                    Operation::CommitListText {
-                        elements,
-                        into: local(into),
-                        backing,
-                        provider,
+                    if width == 1 {
+                        Operation::CommitListText {
+                            elements,
+                            into: local(into),
+                            backing,
+                            provider,
+                        }
+                    } else {
+                        Operation::CommitListRecordText {
+                            elements,
+                            into: local(into),
+                            backing,
+                            provider,
+                        }
                     }
                 }
                 Action::OpenOwnedList {
@@ -2619,6 +2647,17 @@ pub(super) fn run<'a, 'g>(
                     retire_loans(&slots, &mut state, &[source], budget)?;
                     state[cursor] = State::Initialized(empty.clone());
                     if matches!(
+                        slots[cursor].cleanup,
+                        StorageCleanup::DisposeOwnedListIterRecordText(_)
+                    ) {
+                        Operation::OpenOwnedListRecordText {
+                            source: local(source),
+                            cursor: local(cursor),
+                            source_backing: source_backing.ok_or(Stop::Pending(node))?,
+                            cursor_backing: backing,
+                            provider,
+                        }
+                    } else if matches!(
                         slots[cursor].cleanup,
                         StorageCleanup::DisposeOwnedListIterOptionText(_)
                     ) {
@@ -2654,10 +2693,27 @@ pub(super) fn run<'a, 'g>(
                     provider,
                 } => {
                     require_initialized(&slots, &state, cursor, node, budget)?;
-                    if into.is_some_and(|slot| !matches!(state[slot], State::Vacant)) {
-                        return Err(Stop::Pending(node));
+                    if let Some(slot) = into {
+                        // A scalar or string binder is its root alone; only
+                        // record fields are additional work.
+                        let region = slots[slot].storage(slot);
+                        budget.step(region.len() - 1)?;
+                        if !state[region].iter().all(|s| matches!(s, State::Vacant)) {
+                            return Err(Stop::Pending(node));
+                        }
                     }
                     if matches!(
+                        slots[cursor].cleanup,
+                        StorageCleanup::DisposeOwnedListIterRecordText(_)
+                    ) {
+                        Operation::AdvanceOwnedListRecordText {
+                            cursor: local(cursor),
+                            into: local(into.ok_or(Stop::Pending(node))?),
+                            some,
+                            none,
+                            provider,
+                        }
+                    } else if matches!(
                         slots[cursor].cleanup,
                         StorageCleanup::DisposeOwnedListIterOptionText(_)
                     ) {
@@ -4528,6 +4584,13 @@ pub(super) fn run<'a, 'g>(
         }
         if matches!(edges, Edges::Branch { .. }) {
             budget.reserve(state.len())?;
+            // Record binder fields are initialized beside their root below.
+            if let Action::AdvanceOwnedList {
+                into: Some(item), ..
+            } = action
+            {
+                budget.step(slots[item].members)?;
+            }
         }
         let mut successor = |pc, state| known.add(pc, state, budget);
         let terminator = match edges {
@@ -4542,7 +4605,7 @@ pub(super) fn run<'a, 'g>(
                     into: Some(item), ..
                 } = action
                 {
-                    on_yes[item] = State::Initialized(empty.clone());
+                    on_yes[slots[item].storage(item)].fill(State::Initialized(empty.clone()));
                 }
                 Terminator::Branch {
                     yes: successor(yes, on_yes)?,

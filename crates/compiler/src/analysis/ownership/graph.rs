@@ -83,6 +83,17 @@ pub enum DependencyContract<'g> {
         none: &'g DeclarationId,
         bridge: &'g DeclarationId,
     },
+    /// The checked List of string-field records at this use site.
+    ListRecordTextCollection {
+        operation: CollectionOperation,
+        bridge: &'g DeclarationId,
+    },
+    /// A structural record callback: `bridge` once per field, in reverse
+    /// declaration order, for each remaining whole record.
+    RecordTextElementDisposal {
+        record: &'g DeclarationId,
+        bridge: &'g DeclarationId,
+    },
     /// A constructor outside the closed storage contract.
     ResultConstructor,
     /// Exact cause-free `Result<bool, i32>` construction in pinned storage.
@@ -638,12 +649,15 @@ fn analyze<'g>(
                             | DependencyContract::ListTextElementDisposal { .. }
                             | DependencyContract::ListOptionTextCollection { .. }
                             | DependencyContract::OptionTextElementDisposal { .. }
+                            | DependencyContract::ListRecordTextCollection { .. }
+                            | DependencyContract::RecordTextElementDisposal { .. }
                             | DependencyContract::FreshResultConstructor { .. }
                             | DependencyContract::FreshResultErrorDisposal { .. }
                     ) || closed_release::proved(
                         typed,
                         module,
                         &facts[work[index].module_index].nodes,
+                        work[index].facts.header,
                         &mir.blocks[block],
                         edge,
                         family_count,
@@ -1141,6 +1155,22 @@ pub(super) fn visit_dependencies<'g>(
                 },
                 budget,
             )?,
+            Operation::OpenOwnedListRecordText { provider, .. }
+            | Operation::AdvanceOwnedListRecordText { provider, .. } => emit(
+                &provider.implementation.id,
+                ListRecordTextCollection {
+                    operation: if matches!(
+                        block.operation,
+                        Operation::OpenOwnedListRecordText { .. }
+                    ) {
+                        CollectionOperation::Iterate(Owned)
+                    } else {
+                        CollectionOperation::Next(Owned)
+                    },
+                    bridge: &provider.bridge.id,
+                },
+                budget,
+            )?,
             Operation::CallCallableTransfer { callee, layout, .. } => {
                 emit(callee, CallableTransfer(layout), budget)?
             }
@@ -1397,6 +1427,29 @@ pub(super) fn visit_dependencies<'g>(
                                     some: element.some,
                                     none: element.none,
                                     bridge: element.payload.bridge,
+                                },
+                                budget,
+                            )?;
+                        }
+                        Cleanup::DisposeOwnedListIterRecordText {
+                            implementation,
+                            bridge,
+                            element,
+                            ..
+                        } => {
+                            emit(
+                                implementation,
+                                ListRecordTextCollection {
+                                    operation: CollectionOperation::DisposeIterator(Owned),
+                                    bridge,
+                                },
+                                budget,
+                            )?;
+                            emit(
+                                element.field.implementation,
+                                RecordTextElementDisposal {
+                                    record: element.record,
+                                    bridge: element.field.bridge,
                                 },
                                 budget,
                             )?;

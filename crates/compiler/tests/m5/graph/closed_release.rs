@@ -220,26 +220,217 @@ fn imported_text_disposal_closes_only_the_ordinary_caller_edges() {
     );
 }
 
+/// The whole ordered cleanup of a straight path: one `(kind, place)` per action.
+fn cleanup_sequence(mir: &Mir<'_>) -> Vec<(&'static str, String)> {
+    let blocks = straight_blocks(mir, mir.entry);
+    assert!(matches!(
+        blocks.last().unwrap().terminator,
+        Terminator::Return
+    ));
+    let mut events = Vec::new();
+    for block in blocks {
+        match &block.operation {
+            Operation::None => {}
+            Operation::Cleanup(actions) => {
+                for action in actions {
+                    let (kind, place) = match action {
+                        Obligation::EndStorage(place) => ("end", place),
+                        Obligation::Drop(place) => ("drop", place),
+                        Obligation::ReleaseGuard { operand, .. } => ("release", operand),
+                        other => panic!("unexpected cleanup {other:?}"),
+                    };
+                    let root = String::from_utf8_lossy(place.root.span.bytes()).into_owned();
+                    events.push((
+                        kind,
+                        match place.field() {
+                            Some(field) => format!("{root}.{}", field.name.as_deref().unwrap()),
+                            None => root,
+                        },
+                    ));
+                }
+            }
+            other => panic!("unexpected operation {other:?}"),
+        }
+    }
+    events
+}
+
 #[test]
-fn implicit_guard_does_not_pay_for_written_call_verification() {
+fn implicit_guard_release_closes_the_ordinary_root() {
     probe(
-        "graph::closed_release::implicit_guard_does_not_pay_for_written_call_verification",
+        "graph::closed_release::implicit_guard_release_closes_the_ordinary_root",
         "function implicit(lock: LockGuard<i32>): void {}",
-        |_, _, receipt| {
-            // Exact graph cap before the written release verifier, in both installed modes.
-            let limits = AnalysisLimits {
-                max_work: 185222,
+        |_, module, receipt| {
+            let report = analyze_ownership(receipt, AnalysisLimits::default());
+            let implicit = root(&report, b"function implicit");
+            let targeted =
+                lower_root(receipt, module, implicit.owner(), AnalysisLimits::default()).unwrap();
+            assert_eq!(targeted.completion(), Completion::Checked);
+            let expected = vec![("release", "lock: LockGuard<i32>".to_string())];
+            assert_eq!(cleanup_sequence(targeted.mir().unwrap()), expected);
+            assert_eq!(
+                implicit.ordinary_completion(),
+                Completion::Checked,
+                "{:?}",
+                implicit.blocked_at()
+            );
+            assert_eq!(cleanup_sequence(implicit.ordinary_mir().unwrap()), expected);
+            let [edge] = implicit.dependencies() else {
+                panic!("{:?}", implicit.dependencies())
+            };
+            let provider = standard_root(&report, "mutex.rill", b"implement<T> dispose");
+            assert_eq!(BodyOwner::Declaration(edge.declaration), provider.owner());
+            let DependencyContract::ProtectedRelease { entry } = edge.contract else {
+                panic!("{edge:?}")
+            };
+            assert!(implicit.ordinary_mir().unwrap().blocks.iter().any(|block| matches!(
+                &block.operation, Operation::Cleanup(actions)
+                    if matches!(actions.as_slice(), [Obligation::ReleaseGuard { implementation, entry: selected, .. }]
+                        if *implementation == edge.declaration && *selected == entry)
+            )));
+            assert!(report.findings().is_empty());
+            assert_eq!(report.completion(), GraphCompletion::Incomplete);
+
+            // The targeted query is unchanged from the parent (36f1cf15 with
+            // D1's branch); only the whole graph pays for the new root.
+            assert_eq!(
+                targeted.statistics(),
+                Statistics {
+                    work: 1890,
+                    entries: 31,
+                    max_depth: 1
+                }
+            );
+            // Rule 11: 185,222 / 3,993 / 3 (Incomplete, pinned by c668ad4)
+            // becomes 185,246 / 3,993 / 3 (Checked root). All 24 work is the
+            // `implicit` root's scope-exit verification; see the ledger.
+            let exact = AnalysisLimits {
+                max_work: 185246,
                 max_entries: 3993,
                 max_depth: 3,
             };
-            let report = analyze_ownership(receipt, limits);
-            assert_eq!(report.completion(), GraphCompletion::Incomplete);
-            let implicit = root(&report, b"function implicit");
-            assert_eq!(implicit.ordinary_completion(), Completion::Incomplete);
-            assert!(implicit.ordinary_mir().is_none());
-            assert!(
-                matches!(implicit.dependencies(), [edge] if matches!(edge.contract, DependencyContract::ProtectedRelease { .. }))
+            assert_eq!(
+                report.statistics(),
+                Statistics {
+                    work: exact.max_work,
+                    entries: exact.max_entries,
+                    max_depth: exact.max_depth
+                }
             );
+            let replay = analyze_ownership(receipt, exact);
+            assert_eq!(replay.completion(), GraphCompletion::Incomplete);
+            assert_eq!(
+                root(&replay, b"function implicit").ordinary_completion(),
+                Completion::Checked
+            );
+            let old = AnalysisLimits {
+                max_work: 185222,
+                ..exact
+            };
+            for short in [
+                old,
+                AnalysisLimits {
+                    max_work: exact.max_work - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_entries: exact.max_entries - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_depth: exact.max_depth - 1,
+                    ..exact
+                },
+            ] {
+                let limited = analyze_ownership(receipt, short);
+                assert_eq!(limited.completion(), GraphCompletion::ResourceLimit);
+                assert!(limited.findings().is_empty());
+                assert!(
+                    limited
+                        .roots()
+                        .iter()
+                        .all(|root| root.ordinary_mir().is_none())
+                );
+            }
+        },
+    );
+}
+
+/// Rule 2: the nearest unsupported sibling, a guard moved into a local
+/// binding and released at scope exit, keeps the caps measured at the parent
+/// (36f1cf15 with D1's branch), not re-measured on the candidate.
+#[test]
+fn implicit_guard_binding_release_keeps_its_parent_caps() {
+    probe(
+        "graph::closed_release::implicit_guard_binding_release_keeps_its_parent_caps",
+        "function local(lock: LockGuard<i32>): void { let held = lock; }",
+        |_, module, receipt| {
+            let report = analyze_ownership(receipt, AnalysisLimits::default());
+            let local = root(&report, b"function local");
+            let targeted =
+                lower_root(receipt, module, local.owner(), AnalysisLimits::default()).unwrap();
+            assert_eq!(targeted.completion(), Completion::Checked);
+            assert_eq!(
+                targeted.statistics(),
+                Statistics {
+                    work: 1988,
+                    entries: 76,
+                    max_depth: 3
+                }
+            );
+            let exact = AnalysisLimits {
+                max_work: 185441,
+                max_entries: 4038,
+                max_depth: 3,
+            };
+            assert_eq!(
+                report.statistics(),
+                Statistics {
+                    work: exact.max_work,
+                    entries: exact.max_entries,
+                    max_depth: exact.max_depth
+                }
+            );
+            let replay = analyze_ownership(receipt, exact);
+            assert_eq!(replay.statistics(), report.statistics());
+            for report in [&report, &replay] {
+                assert_eq!(report.completion(), GraphCompletion::Incomplete);
+                assert!(report.findings().is_empty());
+                let local = root(report, b"function local");
+                assert_eq!(local.ordinary_completion(), Completion::Incomplete);
+                assert!(local.ordinary_mir().is_none());
+                assert_eq!(
+                    local.blocked_at().unwrap().span.bytes(),
+                    b"{ let held = lock; }"
+                );
+                assert!(
+                    matches!(local.dependencies(), [edge] if matches!(edge.contract, DependencyContract::ProtectedRelease { .. }))
+                );
+            }
+            for short in [
+                AnalysisLimits {
+                    max_work: exact.max_work - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_entries: exact.max_entries - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_depth: exact.max_depth - 1,
+                    ..exact
+                },
+            ] {
+                let limited = analyze_ownership(receipt, short);
+                assert_eq!(limited.completion(), GraphCompletion::ResourceLimit);
+                assert!(limited.findings().is_empty());
+                assert!(
+                    limited
+                        .roots()
+                        .iter()
+                        .all(|root| root.ordinary_mir().is_none())
+                );
+            }
         },
     );
 }
@@ -300,12 +491,12 @@ function projected(parcel: Parcel): void {{ dispose(parcel.text); }}
                     .iter()
                     .any(|edge| edge.contract == DependencyContract::BuiltinDispose)
             );
-            for pending in [
-                provider,
-                root(&report, b"function implicit"),
-                root(&report, b"function unsupported"),
-                projected,
-            ] {
+            // ri-px1.8 (D3): the scope-exit release now closes its root; see
+            // `implicit_guard_release_closes_the_ordinary_root`.
+            let implicit = root(&report, b"function implicit");
+            assert_eq!(implicit.ordinary_completion(), Completion::Checked);
+            assert!(implicit.ordinary_mir().is_some());
+            for pending in [provider, root(&report, b"function unsupported"), projected] {
                 assert_eq!(pending.ordinary_completion(), Completion::Incomplete);
                 assert!(pending.ordinary_mir().is_none());
             }
