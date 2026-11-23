@@ -123,6 +123,8 @@ struct CheckedPropagation<'a, 'g> {
     operand: &'a Type<'g>,
     wrapper: Option<&'g DeclarationId>,
     option_take: Option<(&'a Type<'g>, OptionTakeSource<'a, 'g>)>,
+    /// The owning `string` success payload of a `Result<string, i32>` carrier.
+    result_text: Option<&'a Type<'g>>,
 }
 
 // The caller has already proved the canonical parent and i32 error type.
@@ -940,6 +942,14 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                     (true, StorageCleanup::Unlowered)
                 }
             }
+            TypeTerm::Nominal { .. } | TypeTerm::Variant { .. }
+                if let Some((role, _)) = self.text_result_role(ty) =>
+            {
+                self.prove_no_variant_disposer(node, ty, [role.ok, role.err])?;
+                // Postfix consumes the carrier. Cleanup of a live carrier
+                // would need variant-aware disposal.
+                (true, StorageCleanup::Unlowered)
+            }
             TypeTerm::Nominal { .. } => {
                 let fields = self.record_fields(ty)?.ok_or(Stop::Pending(node))?;
                 let disposer = self.outer_disposer(node, ty)?;
@@ -1350,6 +1360,36 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             && matches!(success.as_ref(), TypeTerm::Primitive(p) if matches!(p.name(), "bool" | "i32"))
             && matches!(error.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32"))
             .then_some((role, variant))
+    }
+
+    /// `Result<string, i32>` or one of its variants, with its success payload type.
+    fn text_result_role<'t>(
+        &self,
+        ty: &'t TypeTerm<'g>,
+    ) -> Option<(&'a ResultRole<'g>, &'t Type<'g>)> {
+        let role = self.typed.result_role()?;
+        role.representation?;
+        let parent = match ty {
+            TypeTerm::Variant {
+                parent,
+                declaration,
+            } if *declaration == &role.ok.id || *declaration == &role.err.id => parent.as_ref(),
+            other => other,
+        };
+        let TypeTerm::Nominal {
+            declaration,
+            arguments,
+        } = parent
+        else {
+            return None;
+        };
+        let [success, error] = arguments.as_slice() else {
+            return None;
+        };
+        (*declaration == &role.declaration.id
+            && owns_text(success)
+            && matches!(error.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32"))
+        .then_some((role, success))
     }
 
     fn prove_no_variant_disposer(
@@ -2300,6 +2340,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                         next,
                         exits.returning.ok_or(Stop::Pending(initializer))?,
                         initializer_depth,
+                        true,
                     );
                 }
                 if let Some(call) = self.check_value_call_propagation(
@@ -2432,7 +2473,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                     self.ungroup_expression_at(value, depth + 1)?;
                 if self.propagates_directly(expression)? {
                     let returning = exits.returning.ok_or(Stop::Pending(expression))?;
-                    self.propagate(expression, None, next, returning, expression_depth)
+                    self.propagate(expression, None, next, returning, expression_depth, true)
                 } else if let Some(call) = self.check_value_call_propagation(
                     expression,
                     true,
@@ -3669,6 +3710,18 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         facts: &'a ExpressionFacts<'g>,
         depth: usize,
     ) -> ResultOf<CheckedPropagation<'a, 'g>> {
+        self.checked_propagation_at(node, facts, depth, false)
+    }
+
+    /// `statement` admits an owning `Result<string, i32>` operand: a postfix
+    /// that is the whole initializer of a binding or an expression statement.
+    fn checked_propagation_at(
+        &mut self,
+        node: NodeId,
+        facts: &'a ExpressionFacts<'g>,
+        depth: usize,
+        statement: bool,
+    ) -> ResultOf<CheckedPropagation<'a, 'g>> {
         let syntax = &self.module.syntax.nodes[node];
         let (id, result) = self.return_contract.ok_or(Stop::Pending(node))?;
         let (exit, wrap, fresh) = match &facts.data {
@@ -3701,10 +3754,29 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             }
             (source, &operand.ty, Some(operand))
         };
+        let mut result_text = None;
         let (wrapper, option_take) = if let Some(error) = &exit.error {
-            let (role, _) = self
-                .scalar_result_role(operand)
-                .ok_or(Stop::Pending(node))?;
+            let role = if let Some((role, _)) = self.scalar_result_role(operand) {
+                role
+            } else if statement
+                && syntax.kind == NodeKind::Propagate
+                && let Some((role, payload)) = self.text_result_role(operand)
+                // Screen on paid facts: only a whole named owner moves.
+                && source_facts
+                    .and_then(|facts| facts.path.as_ref())
+                    .is_some_and(|path| {
+                        path.projections.is_empty()
+                            && matches!(
+                                path.root.kind,
+                                DeclarationKind::Binding | DeclarationKind::Parameter
+                            )
+                    })
+            {
+                result_text = Some(payload);
+                role
+            } else {
+                return Err(Stop::Pending(node));
+            };
             if !matches!(self.scalar_result_role(result), Some((_, None)))
                 || exit.success != &role.ok.id
                 || exit.failure != &role.err.id
@@ -3783,6 +3855,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             operand,
             wrapper,
             option_take,
+            result_text,
         })
     }
 
@@ -3828,10 +3901,11 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         next: Pc,
         return_cleanup: Pc,
         depth: usize,
+        statement: bool,
     ) -> ResultOf<Pc> {
         self.depth(depth)?;
         let facts = self.value(node)?;
-        let checked = self.checked_propagation(node, facts, depth)?;
+        let checked = self.checked_propagation_at(node, facts, depth, statement)?;
         self.lower_checked_propagation(node, into, next, return_cleanup, depth, checked)
     }
 
@@ -3854,6 +3928,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             operand,
             wrapper,
             option_take,
+            result_text,
         } = checked;
         let pipe_arguments = if piped
             && fresh.is_none()
@@ -3899,19 +3974,26 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             None
         };
         let (success, failure) = if let Some(wrapper) = wrapper {
-            let success = exit
-                .can_continue
-                .then(|| {
-                    self.emit(
-                        node,
-                        Action::TakeResultSuccess {
-                            operand: scratch,
-                            into,
-                        },
-                        Edges::Next(next),
-                    )
-                })
-                .transpose()?;
+            let success = if !exit.can_continue {
+                None
+            } else {
+                let (into, next) = match (into, result_text) {
+                    (None, Some(ty)) => {
+                        // A discarded owning payload drops before the continuation.
+                        let payload = self.slot(node, ty)?;
+                        (Some(payload), self.cleanup(node, &[payload], next)?)
+                    }
+                    _ => (into, next),
+                };
+                Some(self.emit(
+                    node,
+                    Action::TakeResultSuccess {
+                        operand: scratch,
+                        into,
+                    },
+                    Edges::Next(next),
+                )?)
+            };
             let failure = return_slot
                 .map(|(output, export)| {
                     if let Some(data) = wrap {
@@ -6300,7 +6382,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
     ) -> ResultOf<Pc> {
         // The proof already read this root; lowering reads its syntax and facts again.
         self.budget.step(2)?;
-        self.propagate(argument.root, into, next, failure_cleanup, depth + 1)
+        self.propagate(argument.root, into, next, failure_cleanup, depth + 1, false)
     }
 
     fn stage_propagating_argument(

@@ -1680,6 +1680,20 @@ For ri-785.6, the caller in `return invoke(() => [flag, seed]);` now checks when
 
 The positive graph checks at 190,668 / 4,266 / 6; the graph of the four contrasts checks at 207,024 / 5,391 / 6. Independently one-short limits give `ResourceLimit` with no finding and no MIR. Both installed load modes agree. The standalone `invoke` root still stops at `job: F` with no MIR. Grouping the actual, the call or the wrapper's receiver, nesting the `return` in a block or a `while`, or binding the result before returning still leaves M4 `Incomplete` at `CallBoundary`, with no receipt and the typed caps measured at `5882113b`. No ownership query reaches the frame for those shapes. The M4 receipt stays at 326,305 / 47,955 / 12. The erased `job: once () => [&bool, bool]` wrapper still has no receipt (324,473 / 47,678 / 12), and the local shared descriptor still checks at 2,838 / 384 / 5. This is one bounded witness, not a proof for every `F`, a public or erased callable contract, or Rill execution. ri-785 remains open.
 
+## Moving the string out of an owned `Result<string, i32>` (2026-11-23, ri-vgz.4)
+
+At `5882113` every body with a `Result<string, i32>` parameter stopped at that parameter. [`result_text.rs`](m5/propagation/result_text.rs) now checks `let value = input?;` in a function returning `Result<bool, i32>`, in both installed load modes, for the targeted query and the graph root:
+
+| Edge | Ownership MIR |
+| --- | --- |
+| `Ok` | `TakeResultSuccess` moves the string into `value`. The return value is exported, then `value` drops once, then the other lexical owners. |
+| `Err` | `ForwardResultFailure` exports the same wrapper before lexical cleanup. There is no payload to drop. |
+| Discard (`let _ = input?;`, `input?;`) | The taken string drops once before the continuation. |
+
+The grouped operand `((input))?`, the grouped postfix `(input?)`, an alias `held?`, both known variants, an `if`/`else` scope and a `while (true)` loop also check. A second read of the payload gives `R0200` at the second `value`, related to the first; a second postfix on the carrier gives `R0200` at `input`; a move under a live `&input` gives `R0203`. The bound form checks at 4,605 work / 715 entries / depth 4, its graph at 188,540 / 4,676 / 4; the test pins every case at exact caps, and one short in each dimension gives `ResourceLimit`.
+
+Only a whole named owner in a binding initializer or expression statement qualifies; the screen reads facts already paid for. Wrapping (`input ? 7i32`), a nested argument (`take(input?)`) and a `Result<string, i32>` return stay `Incomplete`, now at their own sites rather than the parameter. A constructor source and a call source keep their targeted caps from `5882113` (2,979 / 231 / 4 and 2,993 / 238 / 4). A function returning `Result<string, i32>` now allocates its return slot before its existing blocker, so a graph holding one costs more: the call-source module rises from 187,498 / 4,211 / 4 to 188,600 / 4,408 / 4. A live carrier at lexical exit still has no cleanup (`Incomplete`); M4 issues no receipt for a body that can leave the carrier unconsumed. Scalar `Result` tests in `m5/propagation.rs` are unchanged. No Rill program ran.
+
 ## Open acceptance obligations
 
 - Nested and borrowed place projections, nested mutable storage effects and callee-exit checks for retained destinations. Preserve the covered distinction between a carried reference and a borrow of its slot when extending these routes.
