@@ -42,7 +42,7 @@ Reviewers flagged these repeatedly (commits listed in `session-record.md` §4 "K
 Process:
 
 - Focused tests miss cap regressions; only a full M5 run on the published base finds them.
-- Usage limits kill the lead and all workers at once; workers die with uncommitted files.
+- Usage limits kill the lead and all workers at once; workers die with uncommitted files. **Superseded 2026-11-23: usage, credit and rate limits are not the chief's concern; the owner keeps the account funded and restarts any session an account error stops (chief of staff prompt).**
 - Each worker needs its own `CARGO_TARGET_DIR`; disk filled on 2026-11-20 (ENOSPC).
 - Bespoke replay scripts lived in `/tmp`, not in the repository, as of 2026-11-21.
 - Merging I into D re-raises the conflicts of merge-back `fbaad71` semantically (`91ce9cd` on D is a squash of I's `b29693f`, `08c8cf9`), even though `git merge-tree` reported I into D textually clean on 2026-11-22. **Superseded 2026-11-22 (21:55 AEDT): I was merged into D with no conflict and the trap did not materialise (`ri-tjo` notes, [resume log](m5-resume-log.md)).**
