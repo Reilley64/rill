@@ -1164,13 +1164,11 @@ type Payload = { id: i32; }
 implement release(value: LockGuard<Payload>): void { let text = "a"; let view = &text; release(view); }
 "#,
         outcome: Outcome::Typed {
-            completion: TypedCompletion::Incomplete,
+            completion: TypedCompletion::SourceRejected,
             signals: &[
-                r####"obligation FamilySelection @ release(view)"####,
-                r####"pending TypedInput @ release(view)"####,
                 r####"overlap R0500 @ implement release(value: LockGuard<Payload>): void { let text = \"a\"; let view = &text; release(view); } (related: mutex.rill implement<T> dispose(value: LockGuard<T>): void { releaseGuard(value); })"####,
             ],
-            stats: (324633, 47683, 12),
+            stats: (324760, 47779, 12),
         },
     },
     Source {
@@ -1185,13 +1183,11 @@ function ended(owner: string): void {
 }
 "#,
         outcome: Outcome::Typed {
-            completion: TypedCompletion::Incomplete,
+            completion: TypedCompletion::SourceRejected,
             signals: &[
-                r####"obligation FamilySelection @ release(view)"####,
-                r####"pending TypedInput @ release(view)"####,
                 r####"overlap R0500 @ implement release(value: LockGuard<Payload>): void { } (related: mutex.rill implement<T> dispose(value: LockGuard<T>): void { releaseGuard(value); })"####,
             ],
-            stats: (325896, 47704, 12),
+            stats: (326030, 47803, 12),
         },
     },
 ];
@@ -1201,9 +1197,11 @@ function ended(owner: string): void {
 /// body's `FamilySelection` obligation. It now gives `ResourceLimit`.
 const O21_PRE_REJECTION: Triple = (323823, 47493, 12);
 
-/// Exact typed caps of O21's two `Incomplete` siblings measured at 7002855e,
-/// before the rejection (metering rules 1 and 2). Each still completes
-/// `Incomplete` there; it loses only the replacement body's obligation.
+/// Exact typed caps of O21's two siblings measured at 7002855e, before the
+/// rejection (metering rules 1 and 2). Each completed `Incomplete` there at the
+/// `dispose(view)` `FamilySelection` obligation. Since ri-2s0.9 that call ends
+/// its descriptor, each sibling is `SourceRejected` (R0500 only) and these
+/// caps give `ResourceLimit`.
 const O21_SIBLINGS_PARENT: [Triple; 2] = [(325035, 47684, 12), (326297, 47705, 12)];
 
 /// O22 source 0's exact typed cap before `dispose(view)` of a `&string` ended
@@ -1684,14 +1682,11 @@ fn o21_guard_release_replacement_reports_r0500() {
                 let sibling = analyze_typed(graph, parent);
                 assert_eq!(
                     sibling.completion(),
-                    TypedCompletion::Incomplete,
+                    TypedCompletion::ResourceLimit,
                     "{context}"
                 );
-                assert_eq!(
-                    sibling.statistics(),
-                    analyze_typed(graph, AnalysisLimits::default()).statistics(),
-                    "{context}"
-                );
+                assert!(sibling.receipt().is_none(), "{context}");
+                assert!(sibling.bodies().findings().is_empty(), "{context}");
                 return;
             }
             let (old, _) = limits(statistics(O21_PRE_REJECTION));
