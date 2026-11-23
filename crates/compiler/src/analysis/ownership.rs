@@ -5,7 +5,7 @@ use super::scalars::{BodyOwner, NodeFactKind, NodeFacts, Site};
 use super::typed::{CollectionProvider, CollectionRepresentation, TypedReceipt, TypedReport};
 use super::{
     AnalysisLimits, DeclarationShape, InvocationMode, Module, NodeId, QueryError, Statistics, Type,
-    TypeTerm, retained_bool_contents_type,
+    TypeTerm, retained_bool_contents_type, retained_contents_type,
 };
 use crate::loader::{CollectionArtifact, Declaration, DeclarationId, DeclarationKind};
 use crate::source::Span;
@@ -763,6 +763,12 @@ pub enum Operation<'g> {
         callee: &'g DeclarationId,
         destination: RetainedPlace<'g>,
         input: Place<'g>,
+    },
+    /// A direct call that passes the destination alone. It adds no source and
+    /// ends none: the contents keep every source they already held.
+    CallRetainingNoInput {
+        callee: &'g DeclarationId,
+        destination: RetainedPlace<'g>,
     },
     /// A direct call can retain either of two compatible Bool inputs.
     /// Input stages are listed in parameter order, omitting the destination.
@@ -1697,11 +1703,10 @@ fn lower<'a, 'g>(
         budget.step(parameters.len())?;
         if let Some(destination) = parameters
             .iter()
-            .position(|parameter| retained_bool_contents_type(&parameter.ty).is_some())
+            .position(|parameter| retained_contents_type(&parameter.ty).is_some())
         {
-            retains_exclusive_bool =
-                retained_bool_contract(parameters, result, destination, budget)?
-                    .is_some_and(|contract| contract.exclusive_source);
+            retains_exclusive_bool = retained_contract(parameters, result, destination, budget)?
+                .is_some_and(|contract| contract.exclusive_source);
         }
     }
     let two_hop = retained_two_hop_bool_contract(header);
@@ -1733,7 +1738,7 @@ fn lower<'a, 'g>(
         let slot = build.parameter(parameter)?;
         params.push(slot);
         owns_guard |= build.slots[slot].contains_guard();
-        if let Some(ty) = retained_bool_contents_type(&parameter.ty) {
+        if let Some(ty) = retained_contents_type(&parameter.ty) {
             let contents = build.slot(parameter.declaration.node, ty)?;
             build.budget.reserve(1)?;
             build
@@ -1806,7 +1811,9 @@ fn lower<'a, 'g>(
     };
     if collect_trace
         && matches!(frame, Frame::OrdinaryFunction)
-        && let ([destination, _, _], [_, _, gate]) = (params.as_slice(), parameters.as_slice())
+        && let ([destination, _, _], [bool_destination, _, gate]) =
+            (params.as_slice(), parameters.as_slice())
+        && retained_bool_contents_type(&bool_destination.ty).is_some()
         && matches!(
             build.retained.get(destination),
             Some(RetainedContents::OneHop(_))
@@ -2021,7 +2028,7 @@ fn retained_two_hop_bool_contract<'a, 'g>(
     .then_some((destination, contents))
 }
 
-struct RetainedBoolContract<'a, 'g> {
+struct RetainedContract<'a, 'g> {
     contents: &'a Type<'g>,
     extra: Option<RetainedCallExtra>,
     exclusive_source: bool,
@@ -2033,15 +2040,17 @@ enum RetainedCallExtra {
     OptionBool,
 }
 
-// Void calls: one destination, one or two compatible sources and at most one
-// independent Bool. Check the same declared contract at calls and exits.
-fn retained_bool_contract<'a, 'g>(
+// Void calls: one destination, up to two compatible sources and at most one
+// independent Bool. A string destination takes no Bool. Check the same
+// declared contract at calls and exits. A call with the destination alone
+// stores nothing new: the contents keep every source they already held.
+fn retained_contract<'a, 'g>(
     parameters: &'a [super::MemberType<'g>],
     result: &Type<'g>,
     destination: usize,
     budget: &mut Budget,
-) -> ResultOf<Option<RetainedBoolContract<'a, 'g>>> {
-    if !matches!(parameters.len(), 2..=4)
+) -> ResultOf<Option<RetainedContract<'a, 'g>>> {
+    if !matches!(parameters.len(), 1..=4)
         || !matches!(result.as_ref(), TypeTerm::Primitive(p) if p.name() == "void")
     {
         return Ok(None);
@@ -2049,10 +2058,11 @@ fn retained_bool_contract<'a, 'g>(
     budget.step(1)?;
     let Some(contents) = parameters
         .get(destination)
-        .and_then(|formal| retained_bool_contents_type(&formal.ty))
+        .and_then(|formal| retained_contents_type(&formal.ty))
     else {
         return Ok(None);
     };
+    let bool_contents = retained_bool_contents_type(&parameters[destination].ty).is_some();
     let mut scalar = None;
     let mut sources = 0;
     let mut exclusive_source = false;
@@ -2070,7 +2080,8 @@ fn retained_bool_contract<'a, 'g>(
         {
             sources += 1;
             exclusive_source = true;
-        } else if matches!(formal.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "bool")
+        } else if bool_contents
+            && matches!(formal.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "bool")
             && scalar.is_none()
         {
             scalar = Some(index);
@@ -2078,11 +2089,14 @@ fn retained_bool_contract<'a, 'g>(
             return Ok(None);
         }
     }
-    Ok(matches!(sources, 1 | 2).then_some(RetainedBoolContract {
-        contents,
-        extra: scalar.map(|position| RetainedCallExtra::Bool { position }),
-        exclusive_source,
-    }))
+    // A lone destination admits no Bool: `parameters.len() == 1`.
+    Ok(matches!(sources, 0..=2)
+        .then_some(RetainedContract {
+            contents,
+            extra: scalar.map(|position| RetainedCallExtra::Bool { position }),
+            exclusive_source,
+        })
+        .filter(|_| sources > 0 || parameters.len() == 1))
 }
 
 fn site_at(module: &Module, node: NodeId) -> Site<'_> {
@@ -2711,7 +2725,8 @@ enum CallResult<'a, 'g> {
 struct CallDestination {
     storage: CallStorage,
     argument: Slot,
-    input: Slot,
+    /// None for a call that passes the destination alone.
+    input: Option<Slot>,
     second_input: Option<Slot>,
     extra: Option<RetainedCallExtra>,
 }

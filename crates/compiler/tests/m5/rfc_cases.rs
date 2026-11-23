@@ -1094,6 +1094,83 @@ function joined(flag: bool, left: string, right: string, seed: &string): void {
     },
 ];
 
+/// Retained-store A (ri-2s0.11), stage 1: the same two sources through plain
+/// functions, so the `&string` contents contract and the one-destination `clear`
+/// call are checked without family admission. Written for this ticket.
+const O13_PLAIN: &[Source] = &[Source {
+    text: r#"
+function remember(slot: &mut &string, source: &string): void { }
+function clear(slot: &mut &string): void { }
+function joined(flag: bool, left: string, right: string, seed: &string): void {
+  let mut slot = seed;
+  if (flag) { remember(&mut slot, &left); } else { remember(&mut slot, &right); }
+  clear(&mut slot);
+  dispose(left);
+  let last = slot;
+}
+function loops(flag: bool, left: string, seed: &string): void {
+  let mut slot = seed;
+  while (flag) { remember(&mut slot, &left); continue; }
+  clear(&mut slot);
+  dispose(left);
+  let last = slot;
+}
+function released(flag: bool, left: string, right: string, seed: &string): void {
+  let mut slot = seed;
+  if (flag) { remember(&mut slot, &left); } else { remember(&mut slot, &right); }
+  clear(&mut slot);
+  let last = slot;
+  dispose(left);
+  dispose(right);
+}
+"#,
+    outcome: Outcome::Receipt {
+        typed_stats: (337065, 49293, 12),
+        graph: (GraphCompletion::SourceRejected, (203549, 7569, 8)),
+        pre_equality_graph: (203548, 7569, 8),
+        roots: &[
+            Root {
+                name: "remember",
+                want: Want::Checked,
+                graph: None,
+                stats: (2234, 202, 1),
+            },
+            Root {
+                name: "clear",
+                want: Want::Checked,
+                graph: None,
+                stats: (2183, 182, 1),
+            },
+            Root {
+                name: "joined",
+                want: Want::Rejected {
+                    code: "R0203",
+                    site: r####"dispose(left)"####,
+                    related: r####"&left"####,
+                },
+                graph: None,
+                stats: (3746, 999, 8),
+            },
+            Root {
+                name: "loops",
+                want: Want::Rejected {
+                    code: "R0203",
+                    site: r####"dispose(left)"####,
+                    related: r####"&left"####,
+                },
+                graph: None,
+                stats: (3791, 1018, 8),
+            },
+            Root {
+                name: "released",
+                want: Want::Checked,
+                graph: None,
+                stats: (9199, 1887, 8),
+            },
+        ],
+    },
+}];
+
 const O14: &[Source] = &[Source {
     text: r#"
 import std::core::dispose as release;
@@ -1701,6 +1778,14 @@ fn o13_joined_retained_sources_reject_early_release() {
     run(
         "rfc_cases::o13_joined_retained_sources_reject_early_release",
         O13,
+    );
+}
+
+#[test]
+fn o13_plain_string_retained_contract_rejects_early_release() {
+    run(
+        "rfc_cases::o13_plain_string_retained_contract_rejects_early_release",
+        O13_PLAIN,
     );
 }
 

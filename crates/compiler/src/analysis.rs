@@ -72,19 +72,29 @@ pub enum TypeTerm<'g> {
     },
 }
 // The scoped retained-destination handoff recognizes only a caller's
-// exclusive access to a shared bool descriptor, not general nested storage.
-fn retained_bool_contents_type<'a, 'g>(ty: &'a TypeTerm<'g>) -> Option<&'a Type<'g>> {
+// exclusive access to a shared bool or string descriptor, not general nested
+// storage. Returns the descriptor type (`&bool` or `&string`).
+fn retained_contents_type<'a, 'g>(ty: &'a TypeTerm<'g>) -> Option<&'a Type<'g>> {
     if let TypeTerm::Reference {
         mutable: true,
         referent,
     } = ty
         && matches!(referent.as_ref(), TypeTerm::Reference { mutable: false, referent: inner }
-            if matches!(inner.as_ref(), TypeTerm::Primitive(p) if p.name() == "bool"))
+            if matches!(inner.as_ref(), TypeTerm::Primitive(p) if matches!(p.name(), "bool" | "string")))
     {
         Some(referent)
     } else {
         None
     }
+}
+
+// The bool descriptor alone: the two-hop route, the Bool gate and the
+// `Option<bool>` handoff stay bool-only.
+fn retained_bool_contents_type<'a, 'g>(ty: &'a TypeTerm<'g>) -> Option<&'a Type<'g>> {
+    retained_contents_type(ty).filter(|contents| {
+        matches!(contents.as_ref(), TypeTerm::Reference { referent, .. }
+            if matches!(referent.as_ref(), TypeTerm::Primitive(p) if p.name() == "bool"))
+    })
 }
 
 #[derive(Clone, Debug)]

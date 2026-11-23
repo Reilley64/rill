@@ -2024,7 +2024,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         }
         self.budget.step(2)?;
         let source = self.value(syntax.children[0])?;
-        if retained_bool_contents_type(&source.ty).is_none() {
+        if retained_contents_type(&source.ty).is_none() {
             return Err(Stop::Pending(node));
         }
         self.locals
@@ -5574,7 +5574,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                         from,
                         into,
                         exclusive,
-                        retained_target: retained_bool_contents_type(&facts.ty).is_some(),
+                        retained_target: retained_contents_type(&facts.ty).is_some(),
                     }
                 }
             }
@@ -6439,7 +6439,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         position: usize,
         result: &Type<'g>,
         value_use: bool,
-    ) -> ResultOf<RetainedBoolContract<'a, 'g>> {
+    ) -> ResultOf<RetainedContract<'a, 'g>> {
         // The declaration determines the possible inputs. Do not use the
         // callee body to narrow them.
         let (formals, declared_result) = self.direct_application_signature(node, call)?;
@@ -6462,13 +6462,13 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             if seed.ty != *contents || gate.ty != *declared_result {
                 return Err(Stop::Pending(node));
             }
-            RetainedBoolContract {
+            RetainedContract {
                 contents,
                 extra: Some(RetainedCallExtra::OptionBool),
                 exclusive_source: false,
             }
         } else {
-            retained_bool_contract(formals, declared_result, position, self.budget)?
+            retained_contract(formals, declared_result, position, self.budget)?
                 .ok_or(Stop::Pending(node))?
         };
         for (formal, &actual) in formals.iter().zip(&call.arguments) {
@@ -6525,7 +6525,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         call: &crate::analysis::scalars::CallFacts<'g>,
         position: usize,
         args: &[Slot],
-        contract: RetainedBoolContract<'a, 'g>,
+        contract: RetainedContract<'a, 'g>,
         depth: usize,
     ) -> ResultOf<CallDestination> {
         self.budget.step(args.len())?;
@@ -6536,7 +6536,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         let mut sources = (0..args.len())
             .filter(|&i| i != position && independent != Some(i))
             .map(|i| args[i]);
-        let input = sources.next().unwrap();
+        let input = sources.next();
         let second_input = sources.next();
         let destination = |storage| CallDestination {
             storage,
@@ -7862,7 +7862,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             }
             for (position, &arg) in call.arguments.iter().enumerate() {
                 self.budget.step(1)?;
-                if retained_bool_contents_type(&self.value(arg)?.ty).is_some() {
+                if retained_contents_type(&self.value(arg)?.ty).is_some() {
                     pipe_retention = Some((
                         position,
                         self.retained_call_contract(node, call, position, result, false)?,
@@ -7927,7 +7927,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                     return Err(Stop::Pending(arg));
                 }
                 two_hop = Some(self.two_hop_call_route(node, call, result, depth + 1)?);
-            } else if retained_bool_contents_type(&ty).is_some() {
+            } else if retained_contents_type(&ty).is_some() {
                 if !piped && destination.replace(position).is_some() {
                     return Err(Stop::Pending(arg));
                 }
@@ -7962,7 +7962,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             Some(CallDestination {
                 storage: CallStorage::ThroughTwoHopParameter(route),
                 argument: args[0],
-                input: args[1],
+                input: Some(args[1]),
                 second_input: None,
                 extra: None,
             })

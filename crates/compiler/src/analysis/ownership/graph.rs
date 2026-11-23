@@ -1119,6 +1119,7 @@ pub(super) fn visit_dependencies<'g>(
             | Operation::CallBorrowingRecord { callee, .. }
             | Operation::CallIntoTemporary { callee, .. }
             | Operation::CallRetaining { callee, .. }
+            | Operation::CallRetainingNoInput { callee, .. }
             | Operation::CallRetainingPair { callee, .. }
             | Operation::CallRetainingWithBool { callee, .. }
             | Operation::CallRetainingWithOptionBool { callee, .. } => {
