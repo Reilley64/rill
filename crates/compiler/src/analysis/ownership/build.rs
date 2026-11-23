@@ -2535,6 +2535,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                     self.discard(node, value, next, depth + 1)
                 }
             }
+            NodeKind::Assignment("+=") => self.add_through_exclusive_i32(node, next, depth),
             NodeKind::Assignment("=") => {
                 let (left, value) = (children[0], children[1]);
                 self.budget.step(1)?;

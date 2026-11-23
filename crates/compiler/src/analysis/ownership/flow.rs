@@ -274,6 +274,10 @@ fn liveness(
                 route: OriginalTwoHopBool { descriptor, .. },
                 incoming,
             } => ([Some(descriptor), Some(incoming)], None),
+            Action::InstallScalarThrough {
+                descriptor,
+                incoming,
+            } => ([Some(descriptor), Some(incoming)], None),
             Action::TestVariant { operand, .. } => use_one(Some(operand), None),
             Action::CopyOptionPayload { operand, into }
             | Action::TakeOptionPayload { operand, into } => use_one(Some(operand), Some(into)),
@@ -1250,6 +1254,7 @@ fn flat_action(action: Action<'_>, slots: &[Local<'_>]) -> bool {
         | Action::Install { .. }
         | Action::CopyThrough { .. }
         | Action::InstallThrough { .. }
+        | Action::InstallScalarThrough { .. }
         | Action::CheckRetained
         | Action::End(_)
         | Action::Cleanup(_)
@@ -4482,6 +4487,28 @@ pub(super) fn run<'a, 'g>(
                         ValueOrigin::Untracked
                     };
                     state[target.contents_slot()] = State::Initialized(value);
+                    state[incoming] = State::Vacant;
+                    Operation::InstallThrough {
+                        descriptor: local(descriptor),
+                        incoming: local(incoming),
+                    }
+                }
+                Action::InstallScalarThrough {
+                    descriptor,
+                    incoming,
+                } => {
+                    initialized(&state[descriptor], node)?;
+                    initialized(&state[incoming], node)?;
+                    conflict(
+                        &slots,
+                        &state,
+                        &live[pc],
+                        descriptor,
+                        (node, Conflict::Access),
+                        Access::Exclusive,
+                        budget,
+                    )?;
+                    // The caller keeps the scalar's backing; only the scratch ends.
                     state[incoming] = State::Vacant;
                     Operation::InstallThrough {
                         descriptor: local(descriptor),
