@@ -1759,7 +1759,13 @@ fn lower<'a, 'g>(
         if build.slots[*slot].custom_disposer != Some(&header.declaration.id) {
             return Err(Stop::Pending(entry_site));
         }
-        let remainder = build.slot(body, &parameter.ty)?;
+        // The one parameter is the only nested record value so far. Its
+        // epilogue copies that proved region; a flat record is rebuilt.
+        let remainder = if build.nested_record_values.is_empty() {
+            build.slot(body, &parameter.ty)?
+        } else {
+            build.clone_region(*slot, body)?
+        };
         Some(DisposerFrame {
             operand: *slot,
             remainder,

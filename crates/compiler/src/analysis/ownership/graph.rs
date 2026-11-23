@@ -668,6 +668,7 @@ fn analyze<'g>(
                         work[index].facts.header,
                         &mir.blocks[block],
                         edge,
+                        index >= report.source_roots,
                         family_count,
                         budget,
                     )? {
