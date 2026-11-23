@@ -2616,6 +2616,8 @@ struct Build<'a, 'g, 'b> {
     return_contract: Option<(&'g DeclarationId, &'a Type<'g>)>,
     callable_frame: Option<(CallableLayout, Slot)>,
     proved_variant_cleanup: Vec<Type<'g>>,
+    /// Roots, in slot order, whose custom disposer can read a reference member.
+    observing_disposers: Vec<Slot>,
     budget: &'b mut Budget,
 }
 
