@@ -153,6 +153,10 @@ impl<'g> OrdinaryAnalysis<'g> {
         &self.headers
     }
 
+    pub(super) fn family_probes(&self) -> usize {
+        self.families.len()
+    }
+
     pub(super) fn captured_family(&self, id: &DeclarationId) -> Option<&FamilyFacts<'g>> {
         self.families.get(id)
     }

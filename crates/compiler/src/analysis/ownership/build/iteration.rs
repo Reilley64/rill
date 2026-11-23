@@ -355,6 +355,7 @@ impl<'a, 'g> Build<'a, 'g, '_> {
             }
             _ => self.record_field_disposal,
         };
+        let outer = std::mem::replace(&mut self.in_loop, true);
         let yes = self.statement(
             body,
             looping.continues,
@@ -364,6 +365,7 @@ impl<'a, 'g> Build<'a, 'g, '_> {
             },
             depth + 1,
         );
+        self.in_loop = outer;
         self.record_field_disposal = enclosing;
         let yes = yes?;
         self.code[head].edges = Edges::Branch { yes, no: retire };

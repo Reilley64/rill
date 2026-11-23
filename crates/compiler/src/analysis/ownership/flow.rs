@@ -3473,7 +3473,9 @@ pub(super) fn run<'a, 'g>(
                         let storage = slots[arg].storage(arg);
                         if matches!(
                             call.result,
-                            CallResult::RetainsInputs | CallResult::RetainsRecordInput
+                            CallResult::RetainsInputs
+                                | CallResult::RetainsRecordInput
+                                | CallResult::RetainsExclusiveInput
                         ) && call.into.is_some()
                         {
                             // A staged record borrow holds both whole access and its
@@ -3533,6 +3535,15 @@ pub(super) fn run<'a, 'g>(
                             implementation: call.callee,
                             argument: local(*argument),
                             into: call.into.map(local),
+                        }
+                    } else if matches!(call.result, CallResult::RetainsExclusiveInput) {
+                        let [argument] = call.args.as_slice() else {
+                            return Err(Stop::Pending(node));
+                        };
+                        Operation::CallExclusiveView {
+                            callee: call.callee,
+                            argument: local(*argument),
+                            into: local(call.into.ok_or(Stop::Pending(node))?),
                         }
                     } else if matches!(call.result, CallResult::RetainsRecordInput) {
                         let [argument] = call.args.as_slice() else {
