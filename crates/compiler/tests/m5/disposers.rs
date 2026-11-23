@@ -1,5 +1,8 @@
 use super::*;
 
+#[path = "disposers/mixed_wrapper.rs"]
+mod mixed_wrapper;
+
 #[test]
 fn custom_record_rebuild() {
     use compiler::analysis::{DeclarationShape, ownership::Place, scalars::NodeFactKind};
@@ -895,7 +898,6 @@ fn protected_fields_keep_their_obligation_through_disposer_cleanup() {
             }
             for (name, site) in [
                 ("borrowedWrapper", "&value"),
-                ("mixedWrapper", "view: &Plain"),
                 ("pass", "value"),
                 ("callArgument", "value"),
                 ("callOutput", "pass(value)"),
@@ -916,6 +918,22 @@ fn protected_fields_keep_their_obligation_through_disposer_cleanup() {
                 .mir()
                 .expect("the earlier reference-only transfer remains checked");
             assert!(path_drops(mir, mir.entry).is_empty());
+            // ri-px1.6 (D1): the mixed signature now checks; its order and caps
+            // are pinned in `mixed_wrapper.rs`.
+            let mixed = lower("mixedWrapper");
+            let mir = mixed.mir().expect("the shared wrapper view is exported");
+            let drops = path_drops(mir, mir.entry);
+            let [Obligation::Drop(tail), guard, Obligation::Drop(head)] = drops.as_slice() else {
+                panic!("expected the owned wrapper's reverse field cleanup: {drops:?}");
+            };
+            for (place, expected) in [
+                (tail, "plainTail"),
+                (&is_release(*guard).unwrap(), "plainLock"),
+                (head, "plainHead"),
+            ] {
+                assert_eq!(place.field().unwrap().id, field(expected).id);
+                assert_eq!(place.root.span.bytes(), b"owned: Plain");
+            }
         },
     );
 }
@@ -1294,3 +1312,6 @@ fn active_disposer_cleans_only_remaining_fields() {
         },
     );
 }
+
+#[path = "disposers/owning_text.rs"]
+mod owning_text;

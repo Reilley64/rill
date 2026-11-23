@@ -1705,11 +1705,15 @@ fn lower<'a, 'g>(
     }
     if owns_guard {
         // The scoped release contract does not establish mixed borrowed
-        // guard routes. Leave the existing reference-only bodies unchanged.
+        // guard routes. A shared view of a guard wrapper is only a copied
+        // reference beside the owned cleanup; a borrowed guard and an
+        // exclusive wrapper view stay outside. The charges match the earlier
+        // guard-bearing screen up to each of those rejections.
         build.budget.step(parameters.len())?;
         for parameter in parameters {
-            if let TypeTerm::Reference { referent, .. } = parameter.ty.as_ref()
-                && build.guard_bearing_type(referent)?
+            if let TypeTerm::Reference { mutable, referent } = parameter.ty.as_ref()
+                && (build.guard_provider(referent)?.is_some()
+                    || (build.guard_wrapper(referent)? && *mutable))
             {
                 return Err(Stop::Pending(parameter.declaration.node));
             }

@@ -1761,6 +1761,86 @@ The reason is one cause: A2 charges the reads of `first` and `second` in `first 
 
 `m5::rfc_cases::o15_pre_charge_counter_caps_now_give_resource_limit` asserts, in both installed load modes, that the old caps give `ResourceLimit`: 2,504 / 329 / 6 on the `counter` query (no MIR, no findings) and 187,485 / 4,297 / 6 on the graph. No other `rfc_cases` row and no number in `o15_arithmetic.rs` changed. No Rill program ran.
 
+## An owned guard wrapper beside a borrowed view (ri-px1.6, 2026-11-23)
+
+This is ticket D1. Since `f2e3459`, a body that owned a guard-bearing parameter stopped at any reference parameter whose referent bore a guard. At the parent `37a0a99e`, [`mixed_wrapper_exports_the_view_then_cleans_the_owned_wrapper`](m5/disposers/mixed_wrapper.rs) first returned `Incomplete` at `view: &Plain` for `mixedWrapper(owned: Plain, view: &Plain): &Plain`. The screen now admits a **shared** view of a flat guard wrapper. A borrowed guard (`&LockGuard<i32>`) and an exclusive wrapper view (`&mut Plain`) stay outside. Up to each of those rejections, the screen charges what it charged before.
+
+In both installed modes, `mixedWrapper` copies the incoming view and exports it. The view's storage ends, and then the owned wrapper is cleaned once in reverse field order: drop `plainTail`, release `plainLock` with the installed provider, drop `plainHead`. The test compares the whole ordered action list. Targeted caps, each exact and independently one short:
+
+| Function | Work / entries / depth | Ordinary graph root |
+| --- | --- | --- |
+| `mixedWrapper` | 2,630 / 266 / 3 | `Incomplete` at the body. The implicit guard release is an unverified `ProtectedRelease` edge (row D3). |
+| `mixedGrouped`, `return ((view));` | 2,636 / 266 / 5 | As `mixedWrapper`. |
+| `mixedExplicit`, which moves `plainLock` to `held` and writes `dispose(held)` | 2,959 / 425 / 3 | `Checked`, with the targeted MIR. |
+| `guardBesideView`, an owned bare guard | 2,196 / 174 / 3 | `Incomplete`, as `mixedWrapper`. |
+| `disposedWrapperForward`, a custom-disposed `Kept` beside `&Kept` | 5,744 / 639 / 3 | `Incomplete`, with an `ActiveDisposer` edge. |
+
+The source's whole receipt is 197,974 / 5,550 / 5 (`Incomplete`); each one-short cap gives `ResourceLimit`. The siblings keep the targeted caps measured at `37a0a99e`. `wrapperReferenceOnly` checks at 2,153 / 166 / 3. `exclusiveWrapper` stops at `view: &mut Plain` at 2,432 / 169 / 1. `guardForward` stops at `view: &LockGuard<i32>` at 2,421 / 169 / 1. `disposedGuardForward`, which disposes the owned wrapper with `release(owned)`, stops at the same parameter at 2,427 / 170 / 1. The `mixedWrapper` row of `protected_fields_keep_their_obligation_through_disposer_cleanup` moves from its `Incomplete` list to a reverse-cleanup assertion.
+
+The literal `mixedWrapper` graph root stays `Incomplete` until the implicit release of a guard field is a verified graph edge. Only the written-release body `mixedExplicit` has root MIR. No Rill program ran.
+
+## Interrupted tuple staging and a postfix condition, 2026-11-23 (ri-vgz.6)
+
+This section closes the two witnesses of audit 4(c) (`old-partial`, `old-entangled` in `r76-audit`). [`staging.rs`](m5/propagation/staging.rs) checks them through the installed compiler in both load modes, with the targeted query and the ordinary graph root, at exact caps and one short on each axis. At the parent `37a0a99e` both were `Incomplete`: `tuple` at its bracket (4,000/625/4) and `condition` at `gate?` (3,405/439/6).
+
+A named flat tuple of primitives may now hold one `Option<bool>` postfix element, as the flat record already could. `let value: [string, string, bool, string] = [stage(first), stage(second), gate?, stage(suffix)];` has these MIR paths:
+
+| Reached edge | What owns the strings |
+| --- | --- |
+| `gate?` returns `None` | Export `None`, then drop `value.1`, `value.0` (reverse written order), then lexical cleanup. `stage(suffix)` never runs, `value` is never initialized and the unmoved `suffix` drops with the other formals. |
+| `gate?` continues | Copy the payload into `value.2`, call `stage(suffix)`, initialize `value`, then the ordinary return and cleanup. |
+
+`tuple` checks at 8,617/2,053/7 and its grouped `((gate?))` form at 8,625/2,053/9. Scoped and loop-wrapped forms drop the same reached prefix. A known `None` stops after the prefix, so a previously moved suffix source is not reached and the body checks. A moved suffix source reached on the success edge and a moved prefix source each give `R0200` at the reached read, related to the earlier move. The ordinary `checkTuple` control is unchanged.
+
+The ordinary continuation witness is `if (gate?)`. `None` exports before lexical cleanup and reaches neither branch. `Some` continues to the ordinary branch on the payload. `condition` checks at 4,072/821/6, its grouped form at 4,077/821/9, and an `else` with a move in each branch moves only that branch's formal. A known `None` reaches neither branch. `conditionRead` gives `R0200` at its second `dispose(retired)`, related to the first.
+
+Both routes are screened from typed facts before their first charge. These siblings keep the caps and blockers measured at `37a0a99e`: in a tuple, an embedded postfix (`relay(gate?)`), two postfixes, an `Option<string>` postfix and a nested tuple; in a condition, `while (gate?)`, `!(gate?)`, `relay(gate?)` and a `Result<bool, i32>` postfix. The interrupted-record route now shares its lowering with the tuple; the tests in `records.rs` and `patterns/commitment.rs` pass unchanged.
+
+No fixed cap moved. This is not general aggregate initialization, a return-constructor postfix such as `Option.Some(gate?)`, or a postfix in a loop condition. No Rill program ran.
+
+## Custom disposer over owning `string` fields (ri-px1.7, 2026-11-23)
+
+This is ticket D2. The [normal-edge](#normal-edge-custom-disposer-cleanup) and [explicit](#explicit-custom-disposal-of-local-records) disposer slices already lowered records whose fields own `string` values: `string` is a prelude primitive, so "primitive fields" in those sections includes it. Their tests asserted only the targeted query. This ticket adds no compiler change. [`owning_text.rs`](m5/disposers/owning_text.rs) checks the same behavior in both installed modes through the targeted query and the ordinary graph root, at the parent `36f1cf15`. The compiler already had the behavior, so the new tests had no red step.
+
+`type Note = { head: string; moved: string; tail: string; }` has a canonical disposer, reached through the alias `release`, whose body moves `value.moved` into `saved`. Each caller invokes the selected implementation once and drops no field. The body drops `saved`, passes the remaining fields to the epilogue, and the epilogue drops `tail`, then `head`. It does not drop `moved` again. The graph's reached active body has the same ordered actions and no edges. Each root's only edge is `ActiveDisposer` to that implementation. Caps are exact, and each axis is independently one short:
+
+| Function | Target work / entries / depth | Outcome | Ordinary graph root |
+| --- | --- | --- | --- |
+| `normal(value: Note)` | 5,552 / 542 / 3 | `Checked`: disposer | `Checked`, same MIR |
+| `explicit(value: Note, later: string)`, `release(value)` | 5,701 / 622 / 3 | `Checked`: disposer, then drop `later` | `Checked`, same MIR |
+| `canonical(value: Note)`, `dispose(value)` | 5,664 / 604 / 3 | `Checked`: disposer | `Checked`, same MIR |
+| `outside`, `return value.moved;` | 2,428 / 179 / 3 | `R0501` at `value.moved`, related `value: Note` | `SourceRejected` |
+| `outsideLocal`, `let taken = value.head;` | 2,438 / 188 / 3 | `R0501` at `value.head`, related `value: Note` | `SourceRejected` |
+| `reread`, body rereads moved `value.text` | 5,369 / 470 / 3 | `R0200` at the second `value.text`, related the first | `SourceRejected`; the finding is recorded once, in the active body |
+| `manual`, body writes `dispose(value.second)` | 5,487 / 518 / 3 | `Checked`: the body disposes `second`, the epilogue drops `first` | `Incomplete` at `dispose(value.second)` |
+
+The source's whole receipt is 197,595 / 5,829 / 3 (`SourceRejected`); each one-short cap gives `ResourceLimit`. `manual` marks the boundary. `graph/closed_release.rs` verifies a written `dispose` only for an operand with no field projection, so the active body and its caller stay `Incomplete`. That is filed as `ri-4lq`. The same shape occurs in `active_disposer_cleans_only_remaining_fields` and `custom_record_rebuild`, which assert only the targeted query. No source changed, so no fixed cap moved, including the scalar and primitive-field caps in `m5/disposers.rs`. No Rill program ran.
+
+## Live parent `Err` before a fresh `Result` join: re-pinned cap, 2026-11-23 (ri-785.4)
+
+This section settles the cap that `003c414` moved, under rule 11 of the [metering standard](../../../docs/agents/compiler-metering.md) and owner decision D3 (b). It is the only cap D3 (b) moves.
+
+The fixture is [`legacy-caps/live-parent-err`](m5/legacy-caps/live-parent-err/main.rill), the `preflight-app` source of task `f1d1681a` (`tmp-2026-11-22/scoped-admission.2sEJsT/`). In `liveParentError`, `let error = Err<bool, i32>(11i32);` is live across `let pair = join([(): Result<bool, i32> => Result.Ok(true), () => false]);`, so the parent cannot retire it on a cancellation exit.
+
+| Targeted `lower_body(liveParentError)` | Outcome | Blocker | Work / entries / depth |
+| --- | --- | --- | --- |
+| `d95ae9e` (old cap) | `Incomplete` | `pair`, the unlowered pair binding | 3,449 / 320 / 3 |
+| `003c414` and this branch (new cap) | `Incomplete` | the `join([...])` call | 4,024 / 571 / 7 |
+
+The check the old number skipped: at `d95ae9e` the route stopped at the `pair` binding, before the join's typed result was lowered. It never checked either child capture or the parent exit. Standards review `0c3e2b4f` required both. Since `003c414`, the route checks both actual captures first, then the parent's cancellation exit, and stops before lowering either child.
+
+The cost cannot be avoided with an earlier screen (rule 1). A screen that rejected the live parent before the capture checks would hide a conflicting second capture. [`fresh_join_checks_capture_conflicts_and_parent_cleanup`](m5/scoped_join/fresh_result.rs) pins that case: `conflict(seed: bool, bag: Bag)` has an unsupported parent disposer and still reports `R0201` at `flag`, related to `&mut flag`, at 4,520 / 693 / 7.
+
+Where the change lives:
+
+- Manifest: the `live-parent-err` body rows of [`legacy-caps.tsv`](m5/legacy-caps.tsv), one per load mode, at 4,024 / 571 / 7, replayed at the exact cap and one short per axis. The fixture's other rows are the Standard module count (18), the typed query (`Checked` 436,305 / 50,259 / 12, the same at `d95ae9e`) and the graph root (`Incomplete/Incomplete`). `legacy_caps` now has 34 fixtures and 276 cap triples.
+- Old-cap assertion: [`live_parent_error_reaches_the_join_at_its_repinned_cap`](m5/scoped_join/fresh_result.rs), in both installed modes. At 3,449 / 320 / 3, `liveParentError` gives `ResourceLimit` with no MIR and no finding. At 4,024 / 571 / 7 it is `Incomplete` at the join call, in the target and the ordinary graph root, and one short on any axis gives `ResourceLimit`.
+- The same test pins two numbers for the first time; they move no published cap. The control `retiredParentError`, which consumes the parent `Err` before the join, is `Checked` at 25,740 / 13,172 / 8 with MIR in the target and the graph root. The whole graph is `Incomplete` at 219,596 / 17,727 / 8. At `d95ae9e`, `retiredParentError` measured `Incomplete` at 3,457 / 326 / 3 and the graph measured 197,064 / 4,761 / 5. The fresh `Result` join admission (`332454a`, `72f3d81`) produced those changes, not D3 (b). Neither number was ever published, so this section claims neither under D2 (b).
+
+For the review's ruling on `003c414`: apart from the cap above, that commit replaced default-limit or self-measured assertions with fixed caps measured on `003c414` itself. These are first pins, not moves. In `fresh_join_checks_capture_conflicts_and_parent_cleanup`: graph 228,462 / 18,860 / 8; `unproved` 4,246 / 561 / 7; `conflict` 4,520 / 693 / 7; `liveParentError` (in that fixture) 4,182 / 638 / 7; `retiredParentError` 25,938 / 13,247 / 8. In `installed_join_fresh_results_keep_the_written_occurrence`: graph 282,035 / 49,331 / 8; typed 445,380 / 51,426 / 12; `success` and `successSecond` 22,226 / 10,127 / 8; `failure` 24,588 / 12,120 / 8; `failureFirst` 25,683 / 13,123 / 8. That test checks both result orders and all four retirement subsets. In `an_unproved_join_does_not_invent_a_discard`: typed 427,565 / 49,016 / 12. It also added `bag: Bag` to `conflict`. All of these pass unchanged on this branch, and so do `m4_8_scoped_join_caps`, `m4_8_match_boolean_snapshots` and `disjoint-live`. `disjoint-live` keeps `R0201` at the target 4,159 / 838 / 10 and the graph 213,183 / 5,602 / 10.
+
+No other cap or expectation moved. This is LLVM-free host ownership analysis. No Rill program ran.
+
 ## Open acceptance obligations
 
 - Nested and borrowed place projections, nested mutable storage effects and callee-exit checks for retained destinations. Preserve the covered distinction between a carried reference and a borrow of its slot when extending these routes.
