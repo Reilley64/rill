@@ -1,73 +1,6 @@
 use super::*;
 
 impl<'a, 'g> Build<'a, 'g, '_> {
-    pub(super) fn admits_checked_i32_arithmetic(
-        &self,
-        node: NodeId,
-        facts: &ExpressionFacts<'g>,
-    ) -> bool {
-        // An unsupported binary used to stop here, before any operand depth
-        // checks or MIR allocation. The group hint keeps admission bounded.
-        if scalar::scalar(&facts.ty) != Some(Primitive::I32) {
-            return false;
-        }
-        let syntax = &self.module.syntax.nodes;
-        let [left, right] = *syntax[node].children.as_slice() else {
-            return false;
-        };
-        if syntax[node].kind == NodeKind::Binary("*") {
-            return self.admits_i32_product(left, right);
-        }
-        if !self.has_arithmetic_local(right) {
-            return false;
-        }
-        let Some((left, facts)) = self.i32_operand(left) else {
-            return false;
-        };
-        match (syntax[left].kind, syntax[left].children.as_slice()) {
-            (NodeKind::Binary("*"), [multiplicand, multiplier]) => {
-                self.admits_i32_product(*multiplicand, *multiplier)
-            }
-            _ => self
-                .arithmetic_local_path(left, facts)
-                .is_some_and(|path| self.locals.contains_key(path.root)),
-        }
-    }
-
-    fn admits_i32_product(&self, left: NodeId, right: NodeId) -> bool {
-        self.has_arithmetic_local(left)
-            && self
-                .i32_operand(right)
-                .is_some_and(|(node, facts)| self.arithmetic_literal(node, facts).is_some())
-    }
-
-    fn has_arithmetic_local(&self, node: NodeId) -> bool {
-        self.i32_operand(node).is_some_and(|(operand, facts)| {
-            self.arithmetic_local_path(operand, facts)
-                .is_some_and(|path| self.locals.contains_key(path.root))
-        })
-    }
-
-    fn i32_operand(&self, node: NodeId) -> Option<(NodeId, &'a ExpressionFacts<'g>)> {
-        let node = if self.module.syntax.nodes[node].kind == NodeKind::Group {
-            self.value(node).ok()?.grouped_i32_arithmetic_operand?
-        } else {
-            node
-        };
-        let fact = self.fact(&node)?;
-        let flow = &fact.flow;
-        let NodeFactKind::Expression(value) = &fact.kind else {
-            return None;
-        };
-        (flow.normal
-            && !flow.pending
-            && !flow.returns
-            && flow.breaks.is_empty()
-            && flow.continues.is_empty()
-            && scalar::scalar(&value.ty) == Some(Primitive::I32))
-        .then_some((node, value))
-    }
-
     /// Admit `local * literal` and addition of a local or that product to a
     /// local. The reads use the actual scalar slots, not initializer values.
     pub(super) fn checked_i32_arithmetic(
@@ -164,6 +97,12 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         let path = self
             .arithmetic_local_path(operand, facts)
             .ok_or(Stop::Pending(node))?;
-        self.resolve_place(operand, path)
+        // The key ends in the declaration's module path: charge each probe.
+        let probes = 1 + self.locals.len().max(1).ilog2() as usize;
+        graph::charge_key(&path.root.module, probes, self.budget)?;
+        self.locals
+            .get(path.root)
+            .copied()
+            .ok_or(Stop::Pending(node))
     }
 }

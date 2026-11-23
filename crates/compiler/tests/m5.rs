@@ -650,13 +650,7 @@ fn probe_report(
     probe_report_with_modules(test, source, &[], verify);
 }
 
-fn probe_report_with_modules(
-    test: &str,
-    source: &str,
-    modules: &[(&str, &str)],
-    mut verify: impl for<'g> FnMut(&InstalledRequest, &'g loader::Module, &TypedReport<'g>),
-) {
-    const IMPORTS: &str = r#"
+const IMPORTS: &str = r#"
             import std::{List, Result, Err};
             import std::channel::{Receiver, Sender};
             import std::convert::{into, tryInto};
@@ -668,6 +662,13 @@ fn probe_report_with_modules(
             import std::result::{isOk, map as mapResult};
             import std::shared::Shared;
     "#;
+
+fn probe_report_with_modules(
+    test: &str,
+    source: &str,
+    modules: &[(&str, &str)],
+    mut verify: impl for<'g> FnMut(&InstalledRequest, &'g loader::Module, &TypedReport<'g>),
+) {
     installed(test, |request| {
         fs::write(&request.entry, format!("{IMPORTS}\n{source}")).unwrap();
         for (file, source) in modules {

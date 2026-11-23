@@ -116,14 +116,14 @@ impl<'a, 'g> Check<'a, 'g> {
             self.pending(node, ResultUseBlocker::CallBoundary)?;
         }
         let once = if settled && !scoped && !states.is_empty() {
-            self.once_call(node, value, call)?
+            self.once_call(node, value, call, &states)?
         } else {
             None
         };
         let mut closed_once = true;
         for state in &mut states {
-            let checked = if let Some((_, _, argument)) = once {
-                let proved = self.prove_once_arrow(state, argument, depth + 1)?;
+            let checked = if let Some((_, _, actual)) = once {
+                let proved = self.prove_closed_actual(state, actual, depth + 1)?;
                 closed_once &= proved;
                 proved
             } else {

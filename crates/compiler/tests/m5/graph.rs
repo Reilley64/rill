@@ -16,6 +16,8 @@ use loader::DeclarationKind::{Expectation, Function, Implementation};
 mod closed_release;
 #[path = "graph/delivery.rs"]
 mod delivery;
+#[path = "graph/inventory.rs"]
+mod inventory;
 #[path = "graph/scalar.rs"]
 mod scalar;
 

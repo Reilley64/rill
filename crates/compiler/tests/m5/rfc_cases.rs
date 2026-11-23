@@ -903,13 +903,13 @@ expect counter() == 12i32;
 "#,
     outcome: Outcome::Receipt {
         typed_stats: (323681, 47925, 12),
-        graph: (GraphCompletion::Incomplete, (187485, 4297, 6)),
+        graph: (GraphCompletion::Incomplete, (187543, 4297, 6)),
         roots: &[
             Root {
                 name: "counter",
                 want: Want::Checked,
                 graph: None,
-                stats: (2504, 329, 6),
+                stats: (2562, 329, 6),
             },
             Root {
                 name: "expect",
@@ -1353,6 +1353,52 @@ fn o15_counter_body_checks_and_its_expectation_is_incomplete() {
     run(
         "rfc_cases::o15_counter_body_checks_and_its_expectation_is_incomplete",
         O15,
+    );
+}
+
+/// Metering rule 11: A2 (ri-785.1) charges the reads of `first` and `second`
+/// with `charge_key`, so the pre-A2 counter caps (2,504/329/6 targeted,
+/// 187,485/4,297/6 graph) now give `ResourceLimit`. The row above holds the new
+/// caps and the ledger section in `m5-acceptance.md` the reason.
+#[test]
+fn o15_pre_charge_counter_caps_now_give_resource_limit() {
+    installed(
+        "rfc_cases::o15_pre_charge_counter_caps_now_give_resource_limit",
+        |request| {
+            fs::write(&request.entry, format!("{IMPORTS}\n{}", O15[0].text)).unwrap();
+            for test_mode in [false, true] {
+                let request = InstalledRequest {
+                    test_mode,
+                    ..request.clone()
+                };
+                let graph = loader::load_installed(request).unwrap();
+                let typed = analyze_typed(&graph, AnalysisLimits::default());
+                assert_eq!(typed.completion(), TypedCompletion::Checked);
+                let module = graph
+                    .modules()
+                    .iter()
+                    .find(|m| m.key.origin == Origin::Application && m.key.path == "main.rill")
+                    .unwrap();
+                let receipt = typed.receipt().unwrap();
+                let counter = module
+                    .declarations
+                    .iter()
+                    .find(|d| {
+                        d.id.kind == DeclarationKind::Function
+                            && d.name.as_deref() == Some("counter")
+                    })
+                    .unwrap();
+                let (old, _) = limits(statistics((2504, 329, 6)));
+                let limited = lower_body(&receipt, module, &counter.id, old).unwrap();
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none() && limited.findings().is_empty());
+                let (old, _) = limits(statistics((187485, 4297, 6)));
+                assert_eq!(
+                    analyze_ownership(&receipt, old).completion(),
+                    GraphCompletion::ResourceLimit
+                );
+            }
+        },
     );
 }
 
