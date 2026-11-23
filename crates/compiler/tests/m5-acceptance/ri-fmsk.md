@@ -21,7 +21,7 @@ Getting O5 to `Checked` needs new ownership lowering for compound assignment and
 
 ## What the branch holds
 
-- `scalars.rs`: a new `I32Operand::Field` class: an `i32` field read of a local record (`Access::Owned`, one `Field` projection, root a parameter or binding, through groups). It is an operand of `+` only. It is not an operand of `*` or of equality. The screen reads facts already paid for, before any charge (rule 1).
+- `scalars.rs`: a new `I32Operand::Field` class: an `i32` field read of a local record (`Access::Owned`, one `Field` projection, root a parameter or binding). It is an operand of `+` only. It is not an operand of `*` or of equality. The screen reads facts already paid for, before any charge (rule 1).
 - `ownership/build/i32_arithmetic.rs`: the addition reads a field operand into a scratch slot through the ordinary expression path (no new keyed lookup, rule 3 unaffected), adds, then ends the scratch slots, left before right. Locals keep their charge: the `arithmetic_local` split charges nothing new (a first draft double-charged one step; `counter_expectation_checks_past_its_incomplete_cap` caught it, and it passes).
 - `m5/o05_field_arithmetic.rs`: `unsupported_field_arithmetic_keeps_its_parent_caps_and_sites` and `field_addition_checks_with_exact_and_one_short_caps`. Both pass in both load modes.
 
@@ -45,4 +45,4 @@ Supported control `bare` (`let pair = Pair { left: 1, right: 2 }; return pair.le
 
 ## Not established
 
-Nothing about `separate` or its expectation being `Checked`. Grouped field operands (`((pair.left)) + ((pair.right))`) and mixed local and field sums are implemented by the same path but not pinned. The hosted check did not run.
+Nothing about `separate` or its expectation being `Checked`. Grouped field operands (`((pair.left)) + ((pair.right))`) and mixed local and field sums: the classification passes groups through and accepts a local beside a field, but no test runs them. Untested. The hosted check did not run.
