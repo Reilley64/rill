@@ -20,6 +20,8 @@ mod delivery;
 mod inventory;
 #[path = "graph/scalar.rs"]
 mod scalar;
+#[path = "graph/scalar_comparison.rs"]
+mod scalar_comparison;
 
 #[test]
 fn callable_transfer_specialization_is_not_an_open_source_root_proof() {

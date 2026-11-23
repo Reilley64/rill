@@ -1064,9 +1064,7 @@ fn lower_indexed<'a, 'g>(
             };
             (&implementation.header, frame, false)
         }
-        DeclarationKind::Implementation
-            if module.key.origin == Origin::Standard && module.key.path == "core.rill" =>
-        {
+        DeclarationKind::Implementation if scalar::standard_module(module) => {
             let (implementation, _) = facts.implementation.ok_or_else(pending)?;
             let frame = scalar::implementation_frame(
                 typed,

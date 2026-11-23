@@ -89,8 +89,8 @@ fn counter_probe(test: &str, source: &str, name: &str) {
             );
         }
 
-        // Equality/call evaluation and the expectation outcome are separate
-        // from the function's ordinary arithmetic proof.
+        // The expectation root calls the function and compares its i32 result
+        // (ri-785.9). This is MIR for the root, not the observed value 12.
         let expect = module
             .declarations
             .iter()
@@ -104,22 +104,13 @@ fn counter_probe(test: &str, source: &str, name: &str) {
         )
         .unwrap();
         let root = graph_root(&graph, module, expect.node);
-        let equality = format!("{name}() == 12i32");
-        for (completion, mir, blocked) in [
-            (
-                expectation.completion(),
-                expectation.mir(),
-                expectation.blocked_at(),
-            ),
-            (
-                root.ordinary_completion(),
-                root.ordinary_mir(),
-                root.blocked_at(),
-            ),
+        assert!(expectation.findings().is_empty());
+        for (completion, mir) in [
+            (expectation.completion(), expectation.mir()),
+            (root.ordinary_completion(), root.ordinary_mir()),
         ] {
-            assert_eq!(completion, Completion::Incomplete);
-            assert!(mir.is_none());
-            assert_eq!(blocked.unwrap().span.bytes(), equality.as_bytes());
+            assert_eq!(completion, Completion::Checked);
+            check_expectation(mir.unwrap(), &decl.id, &format!("{name}()"), "12i32");
         }
 
         let foreign = loader::load_installed(request.clone()).unwrap();
@@ -176,14 +167,16 @@ fn rfc_counter_caps_include_the_charged_local_reads() {
 }
 
 #[test]
-fn counter_expectation_keeps_its_incomplete_cap() {
+fn counter_expectation_checks_past_its_incomplete_cap() {
     // The parked fixture of task 5dd0ff7d: the 17-source typed baseline plus
-    // the counter, measured before the arithmetic fact.
+    // the counter. Before the i32 equality expression (ri-785.9) the
+    // expectation root was Incomplete at the comparison at 2,279/210/1; that
+    // cap now gives ResourceLimit.
     let baseline = include_str!("../../../../tests/installed/typed/main.rill");
     let checks = include_str!("../../../../tests/installed/typed/checks.rill");
     let counter = ORIGINAL_COUNTER.replace("originalCounter", "counter");
     installed(
-        "o15_arithmetic::counter_expectation_keeps_its_incomplete_cap",
+        "o15_arithmetic::counter_expectation_checks_past_its_incomplete_cap",
         |request| {
             fs::write(
                 &request.entry,
@@ -215,25 +208,23 @@ fn counter_expectation_keeps_its_incomplete_cap() {
                 let query = |cap| {
                     lower_root(&receipt, module, BodyOwner::Declaration(&expect.id), cap).unwrap()
                 };
-                let stats = statistics(2279, 210, 1);
+                let incomplete = query(caps(statistics(2279, 210, 1)).0);
+                assert_eq!(incomplete.completion(), Completion::ResourceLimit);
+                assert!(incomplete.mir().is_none() && incomplete.findings().is_empty());
+
+                let stats = statistics(5329, 781, 6);
+                assert_eq!(query(AnalysisLimits::default()).statistics(), stats);
                 let (exact, short) = caps(stats);
                 let target = query(exact);
-                let graph = analyze_ownership(&receipt, AnalysisLimits::default());
-                let root = graph_root(&graph, module, expect.node);
+                assert_eq!(target.completion(), Completion::Checked);
                 assert_eq!(target.statistics(), stats);
                 assert!(target.findings().is_empty());
-                for (completion, mir, blocked) in [
-                    (target.completion(), target.mir(), target.blocked_at()),
-                    (
-                        root.ordinary_completion(),
-                        root.ordinary_mir(),
-                        root.blocked_at(),
-                    ),
-                ] {
-                    assert_eq!(completion, Completion::Incomplete);
-                    assert!(mir.is_none());
-                    assert_eq!(blocked.unwrap().span.bytes(), b"counter() == 12i32");
-                }
+                let counter = &named(module, "counter").id;
+                check_expectation(target.mir().unwrap(), counter, "counter()", "12i32");
+                let graph = analyze_ownership(&receipt, AnalysisLimits::default());
+                let root = graph_root(&graph, module, expect.node);
+                assert_eq!(root.ordinary_completion(), Completion::Checked);
+                check_expectation(root.ordinary_mir().unwrap(), counter, "counter()", "12i32");
                 for cap in short {
                     let limited = query(cap);
                     assert_eq!(limited.completion(), Completion::ResourceLimit);
@@ -242,6 +233,285 @@ fn counter_expectation_keeps_its_incomplete_cap() {
             }
         },
     );
+}
+
+/// The expectation evaluates the call, then the literal, compares the two
+/// scratch values and exports the comparison.
+fn check_expectation(mir: &Mir<'_>, callee: &loader::DeclarationId, call: &str, literal: &str) {
+    let path = straight_blocks(mir, mir.entry);
+    assert_eq!(
+        path.last().unwrap().terminator,
+        Terminator::FinishExpectation
+    );
+    let ops = path
+        .iter()
+        .map(|block| &block.operation)
+        .filter(|op| !matches!(op, Operation::None))
+        .collect::<Vec<_>>();
+    let [
+        Operation::Call(called),
+        Operation::Initialize(right_value),
+        Operation::EqualI32 { left, right, into },
+        Operation::Export(exported),
+    ] = ops.as_slice()
+    else {
+        panic!("expected call, literal, comparison and export: {ops:?}");
+    };
+    assert_eq!(*called, callee);
+    assert_eq!(left.root.span.bytes(), call.as_bytes());
+    assert_eq!(right.root.span.bytes(), literal.as_bytes());
+    assert_eq!(right.root.node, right_value.root.node);
+    assert_eq!(
+        into.root.span.bytes(),
+        format!("{call} == {literal}").as_bytes()
+    );
+    assert_eq!(exported.root.node, into.root.node);
+}
+
+/// Exact caps measured at 1c27e7c9, before the i32 equality expression
+/// (ri-785.9). Nothing here is admitted, so each root keeps its cap and
+/// blocker, and the whole graph grows by the i32 equality source root alone.
+#[test]
+fn unsupported_equality_keeps_pre_equality_caps_and_sites() {
+    probe(
+        "o15_arithmetic::unsupported_equality_keeps_pre_equality_caps_and_sites",
+        r#"
+function seven(): i32 { return 7i32; }
+function ready(): bool { return true; }
+function wide(): i64 { return 7i64; }
+function different(left: i32, right: i32): bool { return left != right; }
+function computed(left: i32, right: i32): bool { return left * right == right; }
+expect seven() != 7i32;
+expect ready() == true;
+expect wide() == 7i64;
+expect seven() < 8i32;
+expect seven() + 1i32 == 8i32;
+expect ((seven() + 1i32)) == 8i32;
+expect seven() == 7i32 && true;
+"#,
+        |_, module, receipt| {
+            // Whole-graph cap before: the i32 equality source root alone adds
+            // 316 work and 134 entries and sets depth 5 (metering rule 11).
+            let before = statistics(190397, 4219, 3);
+            assert_eq!(
+                analyze_ownership(receipt, caps(before).0).completion(),
+                GraphCompletion::ResourceLimit
+            );
+            let graph_stats = statistics(190713, 4353, 5);
+            let (exact, short) = caps(graph_stats);
+            let graph = analyze_ownership(receipt, exact);
+            assert_eq!(graph.completion(), GraphCompletion::Incomplete);
+            assert_eq!(graph.statistics(), graph_stats);
+            for cap in short {
+                assert_eq!(
+                    analyze_ownership(receipt, cap).completion(),
+                    GraphCompletion::ResourceLimit
+                );
+            }
+            for (root, work, entries, depth, blocker) in [
+                ("function different(", 1975, 80, 3, "left != right"),
+                ("function computed(", 1975, 80, 3, "left * right == right"),
+                ("expect seven() != 7i32;", 1971, 68, 1, "seven() != 7i32"),
+                ("expect ready() == true;", 1972, 68, 1, "ready() == true"),
+                ("expect wide() == 7i64;", 1973, 68, 1, "wide() == 7i64"),
+                ("expect seven() < 8i32;", 1974, 68, 1, "seven() < 8i32"),
+                (
+                    "expect seven() + 1i32 == 8i32;",
+                    1975,
+                    68,
+                    1,
+                    "seven() + 1i32 == 8i32",
+                ),
+                (
+                    "expect ((seven() + 1i32)) == 8i32;",
+                    1976,
+                    68,
+                    1,
+                    "((seven() + 1i32)) == 8i32",
+                ),
+                (
+                    "expect seven() == 7i32 && true;",
+                    1977,
+                    68,
+                    1,
+                    "seven() == 7i32 && true",
+                ),
+            ] {
+                let decl = written(module, root);
+                let query = |cap| {
+                    lower_root(receipt, module, BodyOwner::Declaration(&decl.id), cap).unwrap()
+                };
+                let stats = statistics(work, entries, depth);
+                let (exact, short) = caps(stats);
+                let target = query(exact);
+                assert_eq!(target.completion(), Completion::Incomplete, "{root}");
+                assert_eq!(target.statistics(), stats, "{root}");
+                assert!(target.mir().is_none() && target.findings().is_empty());
+                assert_eq!(
+                    target.blocked_at().unwrap().span.bytes(),
+                    blocker.as_bytes()
+                );
+                let graph_root = graph_root(&graph, module, decl.node);
+                assert_eq!(graph_root.ordinary_completion(), Completion::Incomplete);
+                assert!(graph_root.ordinary_mir().is_none());
+                assert_eq!(
+                    graph_root.blocked_at().unwrap().span.bytes(),
+                    blocker.as_bytes()
+                );
+                for cap in short {
+                    let limited = query(cap);
+                    assert_eq!(limited.completion(), Completion::ResourceLimit, "{root}");
+                    assert!(limited.mir().is_none() && limited.findings().is_empty());
+                }
+            }
+        },
+    );
+}
+
+#[test]
+fn i32_equality_is_not_a_counter_special_case() {
+    probe(
+        "o15_arithmetic::i32_equality_is_not_a_counter_special_case",
+        r#"
+function seven(): i32 { return 7i32; }
+function same(left: i32, right: i32): bool { return left == right; }
+function scaled(left: i32, right: i32): bool { return ((left * 10i32 + right)) == (right); }
+expect seven() == 7i32;
+expect (((seven()))) == ((7i32));
+expect 7i32 == seven();
+"#,
+        |_, module, receipt| {
+            // Before: Incomplete at each comparison, 188,285/4,095/3 for the graph.
+            let before = statistics(188285, 4095, 3);
+            assert_eq!(
+                analyze_ownership(receipt, caps(before).0).completion(),
+                GraphCompletion::ResourceLimit
+            );
+            let graph_stats = statistics(189812, 4724, 8);
+            let (exact, short) = caps(graph_stats);
+            let graph = analyze_ownership(receipt, exact);
+            assert_eq!(graph.completion(), GraphCompletion::Incomplete);
+            assert_eq!(graph.statistics(), graph_stats);
+            for cap in short {
+                assert_eq!(
+                    analyze_ownership(receipt, cap).completion(),
+                    GraphCompletion::ResourceLimit
+                );
+            }
+            let seven = &named(module, "seven").id;
+            // Groups add depth, not operations: the grouped expectation is
+            // two deeper than the bare one and fails one short of it.
+            for (root, work, entries, depth) in [
+                ("function same(", 2172, 179, 4),
+                ("function scaled(", 2339, 237, 8),
+                ("expect seven() == 7i32;", 4012, 185, 3),
+                ("expect (((seven()))) == ((7i32));", 4023, 185, 5),
+                ("expect 7i32 == seven();", 4014, 185, 3),
+            ] {
+                let decl = written(module, root);
+                let query = |cap| {
+                    lower_root(receipt, module, BodyOwner::Declaration(&decl.id), cap).unwrap()
+                };
+                let stats = statistics(work, entries, depth);
+                assert_eq!(
+                    query(AnalysisLimits::default()).statistics(),
+                    stats,
+                    "{root}"
+                );
+                let (exact, short) = caps(stats);
+                let target = query(exact);
+                assert_eq!(target.completion(), Completion::Checked, "{root}");
+                assert!(target.findings().is_empty());
+                let graph_root = graph_root(&graph, module, decl.node);
+                assert_eq!(graph_root.ordinary_completion(), Completion::Checked);
+                for mir in [target.mir().unwrap(), graph_root.ordinary_mir().unwrap()] {
+                    match root {
+                        "function same(" => {
+                            let [
+                                Operation::EqualI32 { left, right, into },
+                                Operation::Export(exported),
+                            ] = equality_effects(mir, Terminator::Return).as_slice()
+                            else {
+                                panic!("{root}: expected comparison then export");
+                            };
+                            assert_eq!(left.root.span.bytes(), b"left");
+                            assert_eq!(right.root.span.bytes(), b"right");
+                            assert_eq!(into.root.span.bytes(), b"left == right");
+                            assert_eq!(exported.root.node, into.root.node);
+                        }
+                        "function scaled(" => {
+                            let [
+                                Operation::CheckedI32Multiply { .. },
+                                Operation::CheckedI32Add { into: sum, .. },
+                                Operation::EqualI32 { left, right, into },
+                                Operation::Export(exported),
+                            ] = equality_effects(mir, Terminator::Return).as_slice()
+                            else {
+                                panic!("{root}: expected arithmetic, comparison, export");
+                            };
+                            assert_eq!(left.root.node, sum.root.node);
+                            assert_eq!(left.root.span.bytes(), b"((left * 10i32 + right))");
+                            assert_eq!(right.root.span.bytes(), b"(right)");
+                            assert_eq!(exported.root.node, into.root.node);
+                        }
+                        "expect seven() == 7i32;" => {
+                            check_expectation(mir, seven, "seven()", "7i32")
+                        }
+                        "expect (((seven()))) == ((7i32));" => {
+                            check_expectation(mir, seven, "(((seven())))", "((7i32))")
+                        }
+                        _ => {
+                            // The literal is evaluated first when it is written first.
+                            let [
+                                Operation::Initialize(literal),
+                                Operation::Call(called),
+                                Operation::EqualI32 { left, right, into },
+                                Operation::Export(exported),
+                            ] = equality_effects(mir, Terminator::FinishExpectation).as_slice()
+                            else {
+                                panic!("{root}: expected literal, call, comparison, export");
+                            };
+                            assert_eq!(*called, seven);
+                            assert_eq!(left.root.node, literal.root.node);
+                            assert_eq!(right.root.span.bytes(), b"seven()");
+                            assert_eq!(into.root.span.bytes(), b"7i32 == seven()");
+                            assert_eq!(exported.root.node, into.root.node);
+                        }
+                    }
+                }
+                for cap in short {
+                    let limited = query(cap);
+                    assert_eq!(limited.completion(), Completion::ResourceLimit, "{root}");
+                    assert!(limited.mir().is_none() && limited.findings().is_empty());
+                }
+            }
+        },
+    );
+}
+
+/// Calls, literals, checked arithmetic, comparisons and exports on the
+/// straight path, ending at `end`.
+fn equality_effects<'a, 'g>(mir: &'a Mir<'g>, end: Terminator) -> Vec<&'a Operation<'g>> {
+    let path = straight_blocks(mir, mir.entry);
+    assert_eq!(path.last().unwrap().terminator, end);
+    path.iter()
+        .map(|block| &block.operation)
+        .filter(|op| {
+            arithmetic_effect(op)
+                || matches!(
+                    op,
+                    Operation::Call(_) | Operation::Initialize(_) | Operation::EqualI32 { .. }
+                )
+        })
+        .collect()
+}
+
+fn written<'g>(module: &'g loader::Module, prefix: &str) -> &'g loader::Declaration {
+    module
+        .declarations
+        .iter()
+        .find(|d| d.span.bytes().starts_with(prefix.as_bytes()))
+        .unwrap()
 }
 
 #[test]
