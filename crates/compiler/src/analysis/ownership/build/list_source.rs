@@ -139,7 +139,7 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         if let Some((into, backing, open)) = commitment {
             tail = self.emit(
                 source.literal,
-                Action::CommitListText {
+                Action::CommitList {
                     first: slots[0],
                     count,
                     into,
@@ -170,6 +170,138 @@ impl<'a, 'g> Build<'a, 'g, '_> {
             self.budget.step(1)?;
             tail = self.expression(
                 stages[position],
+                Some(slots[position]),
+                tail,
+                source.literal_depth + 1,
+            )?;
+        }
+        Ok(tail)
+    }
+}
+
+/// An ordinary List literal of record constructions with no exit edge.
+pub(super) struct ListRecordSource<'a, 'g> {
+    pub(super) literal: NodeId,
+    pub(super) provider: CollectionArtifact<'g>,
+    elements: &'a [NodeId],
+    literal_depth: usize,
+}
+
+impl<'a, 'g> Build<'a, 'g, '_> {
+    pub(super) fn ordinary_list_record_source(
+        &mut self,
+        node: NodeId,
+        (source, expected_literal): (NodeId, NodeId),
+        actual: &ExpressionFacts<'g>,
+        yielded: &Type<'g>,
+        depth: usize,
+    ) -> ResultOf<ListRecordSource<'a, 'g>> {
+        let pending = || Stop::Pending(node);
+        if !matches!(
+            self.module.syntax.nodes[source].kind,
+            NodeKind::Bracket | NodeKind::Group
+        ) || actual.access != Access::Owned
+        {
+            return Err(pending());
+        }
+        let flow = &self.fact(&source).ok_or_else(pending)?.flow;
+        // Construction cannot leave early, so no stage needs an exit edge.
+        if flow.pending
+            || !flow.normal
+            || flow.returns
+            || flow.reaches_postfix
+            || !flow.breaks.is_empty()
+            || !flow.continues.is_empty()
+        {
+            return Err(pending());
+        }
+        let (literal, literal_depth) = self.ungroup_expression_at(source, depth)?;
+        if literal != expected_literal {
+            return Err(pending());
+        }
+        self.budget.step(1)?;
+        let bracket = self.value(literal).map_err(|_| pending())?;
+        let Some(DataExpression::List {
+            declaration,
+            elements,
+        }) = &bracket.data
+        else {
+            return Err(pending());
+        };
+        if bracket.ty != actual.ty
+            || bracket.access != Access::Owned
+            || self.module.syntax.nodes[literal].kind != NodeKind::Bracket
+            || elements.is_empty()
+            || !self
+                .typed
+                .list_role()
+                .is_some_and(|role| std::ptr::eq(*declaration, &role.declaration.id))
+        {
+            return Err(pending());
+        }
+        self.budget.step(elements.len())?;
+        if elements.as_slice() != self.module.syntax.nodes[literal].children.as_slice() {
+            return Err(pending());
+        }
+        for &element in elements {
+            self.budget.step(1)?;
+            let (root, _) = self.ungroup_expression_at(element, literal_depth + 1)?;
+            let value = self.normal_value(element)?;
+            if self.module.syntax.nodes[root].kind != NodeKind::Construction
+                || value.access != Access::Owned
+                || value.ty != *yielded
+            {
+                return Err(pending());
+            }
+        }
+        let provider = self.typed.list_operations_artifact().ok_or_else(pending)?;
+        Ok(ListRecordSource {
+            literal,
+            provider,
+            elements,
+            literal_depth,
+        })
+    }
+
+    /// Initialize each record stage in written order, then commit them all
+    /// to `into` and continue at `open`. No stage is live on any other edge.
+    pub(super) fn stage_list_record_source(
+        &mut self,
+        source: ListRecordSource<'a, 'g>,
+        yielded: &Type<'g>,
+        (into, backing, open): (Slot, CollectionRepresentation<'g>, Pc),
+    ) -> ResultOf<Pc> {
+        let count = source.elements.len();
+        self.budget.reserve(count)?;
+        let mut slots = Vec::with_capacity(count);
+        for &element in source.elements {
+            self.budget.step(1)?;
+            slots.push(self.slot(element, yielded)?);
+        }
+        // Commitment reads equal-width regions from the first stage.
+        let width = self.slots[slots[0]].storage(slots[0]).len();
+        if slots
+            .iter()
+            .enumerate()
+            .any(|(index, &slot)| slot != slots[0] + index * width)
+        {
+            return Err(Stop::Pending(source.literal));
+        }
+        let mut tail = self.emit(
+            source.literal,
+            Action::CommitList {
+                first: slots[0],
+                count,
+                into,
+                backing,
+                provider: source.provider,
+            },
+            Edges::Next(open),
+        )?;
+        for position in (0..count).rev() {
+            self.budget.step(1)?;
+            tail = self.expression(
+                source.elements[position],
                 Some(slots[position]),
                 tail,
                 source.literal_depth + 1,

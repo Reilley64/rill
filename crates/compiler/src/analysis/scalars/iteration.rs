@@ -48,6 +48,8 @@ pub(super) enum IterationBody<'g> {
     Unsupported,
     Ordinary {
         option_text_item: bool,
+        /// An owned yield of an application record; field reads are ordinary.
+        record_item: bool,
     },
     TextOption {
         item: Option<&'g DeclarationId>,
@@ -244,6 +246,11 @@ impl<'r, 'g> Checker<'r, 'g> {
             (Some(iteration), _) => IterationBody::Ordinary {
                 option_text_item: iteration.traversal == Some(ListTraversal::Owned)
                     && Self::is_iteration_option(self.option, &iteration.yielded, "string"),
+                record_item: iteration.traversal == Some(ListTraversal::Owned)
+                    && matches!(iteration.yielded.as_ref(), TypeTerm::Nominal { declaration, arguments }
+                        if declaration.kind == DeclarationKind::Record
+                            && declaration.module.origin == crate::loader::Origin::Application
+                            && arguments.is_empty()),
             },
             _ => IterationBody::Unsupported,
         };
@@ -327,7 +334,8 @@ impl<'r, 'g> Checker<'r, 'g> {
             self.iteration_body,
             IterationBody::TextOption { item: Some(_), .. }
                 | IterationBody::Ordinary {
-                    option_text_item: true
+                    option_text_item: true,
+                    ..
                 }
         ) && matches!(syntax[node].kind, NodeKind::Prefix("&" | "&mut"))
             && matches!(slot.ty.as_deref(), Some(TypeTerm::Reference { referent, .. })
@@ -362,6 +370,17 @@ impl<'r, 'g> Checker<'r, 'g> {
             | NodeKind::ValueReference
             | NodeKind::Group
             | NodeKind::Prefix("&" | "&mut" | "*") => return Ok(()),
+            NodeKind::Field
+                if matches!(
+                    self.iteration_body,
+                    IterationBody::Ordinary {
+                        record_item: true,
+                        ..
+                    }
+                ) =>
+            {
+                return Ok(());
+            }
             NodeKind::Call
                 if call.is_some_and(|call| call.callee == &self.input.graph.prelude().dispose) =>
             {

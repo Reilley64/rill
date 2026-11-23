@@ -449,6 +449,14 @@ pub enum Operation<'g> {
         backing: CollectionRepresentation<'g>,
         provider: CollectionArtifact<'g>,
     },
+    /// Move the initialized record stages in written order into a new backing
+    /// using the linked `List::from_elements`. No partial List is published.
+    CommitListRecordText {
+        elements: Vec<Place<'g>>,
+        into: Place<'g>,
+        backing: CollectionRepresentation<'g>,
+        provider: CollectionArtifact<'g>,
+    },
     /// Consume the List and initialize the sole owner of its unyielded slots.
     OpenOwnedListI32 {
         source: Place<'g>,
@@ -493,6 +501,23 @@ pub enum Operation<'g> {
     /// Branch on outer Option<Option<string>>. Only outer Some initializes
     /// `into`, moving the inner Option unchanged, including an inner None.
     AdvanceOwnedListOptionText {
+        cursor: Place<'g>,
+        into: Place<'g>,
+        some: &'g DeclarationId,
+        none: &'g DeclarationId,
+        provider: CollectionProvider<'g>,
+    },
+    /// Transfer the committed List of string-field records into the suffix owner.
+    OpenOwnedListRecordText {
+        source: Place<'g>,
+        cursor: Place<'g>,
+        source_backing: CollectionRepresentation<'g>,
+        cursor_backing: CollectionRepresentation<'g>,
+        provider: CollectionProvider<'g>,
+    },
+    /// Remove one record from the cursor on Some and initialize every field
+    /// of `into`. On None the cursor is empty and `into` stays vacant.
+    AdvanceOwnedListRecordText {
         cursor: Place<'g>,
         into: Place<'g>,
         some: &'g DeclarationId,
@@ -969,6 +994,15 @@ pub enum Cleanup<'g> {
         bridge: &'g DeclarationId,
         element: OptionTextDisposal<'g>,
     },
+    /// Retire the remaining backing in reverse position order. Each
+    /// remaining record is a whole element: `element` releases its fields.
+    /// Fields of the current item are not here; they are the binder's own.
+    DisposeOwnedListIterRecordText {
+        cursor: Place<'g>,
+        implementation: &'g DeclarationId,
+        bridge: &'g DeclarationId,
+        element: RecordTextDisposal<'g>,
+    },
     /// Transfer the initialized remainder to the active disposer's epilogue.
     DeferDisposerFields {
         from: Place<'g>,
@@ -990,6 +1024,16 @@ pub struct OptionTextDisposal<'g> {
     pub some: &'g DeclarationId,
     pub none: &'g DeclarationId,
     pub payload: TextElementDisposal<'g>,
+}
+
+/// Default structural disposal of one application record whose fields are
+/// all owned strings, after ruling out a custom disposer for the record:
+/// each field in reverse declaration order through the protected string
+/// winner `field`.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct RecordTextDisposal<'g> {
+    pub record: &'g DeclarationId,
+    pub field: TextElementDisposal<'g>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -2047,6 +2091,7 @@ enum StorageCleanup<'g> {
     },
     DisposeOwnedListIterOptionText(OptionTextListDisposal<'g>),
     DropYieldedOptionText(OptionTextDisposal<'g>),
+    DisposeOwnedListIterRecordText(RecordTextListDisposal<'g>),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -2067,6 +2112,12 @@ struct TextListDisposal<'g> {
 struct OptionTextListDisposal<'g> {
     list: ListDisposal<'g>,
     element: OptionTextDisposal<'g>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct RecordTextListDisposal<'g> {
+    list: ListDisposal<'g>,
+    element: RecordTextDisposal<'g>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -2102,6 +2153,7 @@ impl<'g> Local<'g> {
                     | StorageCleanup::DisposeOwnedListIterText(_)
                     | StorageCleanup::DisposeListOptionText { .. }
                     | StorageCleanup::DisposeOwnedListIterOptionText(_)
+                    | StorageCleanup::DisposeOwnedListIterRecordText(_)
             )
     }
 
@@ -2165,7 +2217,9 @@ enum Action<'g> {
         forwarding_possible: bool,
     },
     Init(Slot),
-    CommitListText {
+    /// `count` equal-width stage regions starting at `first`: string leaves
+    /// or whole records of string fields.
+    CommitList {
         first: Slot,
         count: usize,
         into: Slot,
@@ -2459,6 +2513,9 @@ struct Build<'a, 'g, 'b> {
     incoming_shared_i32: BTreeSet<Slot>,
     /// Receipt-local storage proof opened by an eligible incoming List<string>.
     text_list_disposal: Option<TextListDisposal<'g>>,
+    /// The protected string winner proved for the record yield of the
+    /// enclosing consuming loop, while its body is lowered.
+    record_field_disposal: Option<TextElementDisposal<'g>>,
     slots: Vec<Local<'g>>,
     code: Vec<Instruction<'g>>,
     calls: Vec<Call<'a, 'g>>,

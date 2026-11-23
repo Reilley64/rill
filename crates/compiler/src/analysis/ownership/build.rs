@@ -521,6 +521,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             incoming_exclusive_bools: Vec::new(),
             incoming_shared_i32: BTreeSet::new(),
             text_list_disposal: None,
+            record_field_disposal: None,
             slots: Vec::new(),
             code: Vec::new(),
             calls: Vec::new(),
@@ -6687,6 +6688,40 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         )
     }
 
+    /// `dispose(record.field)` of one owned string field of a named record
+    /// through the string winner proved for the enclosing record yield.
+    fn record_field_dispose_target(
+        &mut self,
+        node: NodeId,
+        facts: &ExpressionFacts<'g>,
+        call: &CallFacts<'g>,
+        depth: usize,
+        element: TextElementDisposal<'g>,
+    ) -> ResultOf<()> {
+        let pending = || Stop::Pending(node);
+        let argument = self.written_scalar_argument(node, facts, call, depth)?;
+        let (field, _) = self.ungroup_expression_at(argument, depth + 1)?;
+        let actual = self.normal_value(argument)?;
+        if self.module.syntax.nodes[field].kind != NodeKind::Field
+            || actual.access != Access::Owned
+            || !matches!(&actual.path, Some(path)
+                if matches!(path.root.kind, DeclarationKind::Binding | DeclarationKind::Parameter)
+                    && matches!(path.projections.as_slice(), [PathProjection::Field(_)]))
+        {
+            return Err(pending());
+        }
+        scalar::call_target(
+            self.typed,
+            self.module,
+            node,
+            call,
+            facts,
+            (&actual.ty, Some(element)),
+            self.budget,
+        )?;
+        Ok(())
+    }
+
     fn check_list_dispose_call(
         &mut self,
         node: NodeId,
@@ -6908,6 +6943,11 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 {
                     self.scalar_dispose_target(node, facts, call, depth, Some(disposal.element))?;
                     target = WrittenDisposal::Text(disposal.element);
+                } else if owns_text(&actual.ty)
+                    && let Some(element) = self.record_field_disposal
+                {
+                    self.record_field_dispose_target(node, facts, call, depth, element)?;
+                    target = WrittenDisposal::Text(element);
                 } else if !matches!(actual.ty.as_ref(), TypeTerm::Primitive(_))
                     && !matches!((self.slots[operand].custom_disposer, &call.selection),
                         (Some(expected), Some(selection))

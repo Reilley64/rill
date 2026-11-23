@@ -7,7 +7,7 @@ use rill_collection::List;
 #[path = "iteration_postfix.rs"]
 mod postfix;
 
-const SOURCE: &str = r#"
+pub(super) const SOURCE: &str = r#"
 import std::collection::{List as Words};
 function onBreak(xs: List<string>, outer: string): void {
     for (let item of xs) {
