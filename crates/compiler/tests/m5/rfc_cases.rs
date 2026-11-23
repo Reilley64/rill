@@ -914,15 +914,13 @@ function stale(old: Owner, next: string): void {
 "#,
     outcome: Outcome::Receipt {
         typed_stats: (328345, 48121, 12),
-        graph: (GraphCompletion::SourceRejected, (192578, 5361, 5)),
+        graph: (GraphCompletion::SourceRejected, (193432, 5361, 5)),
         pre_equality_graph: (192262, 5227, 4),
         roots: &[
             Root {
                 name: "replace",
                 want: Want::Checked,
-                graph: Some(Want::Incomplete {
-                    blocker: r####"dispose(value.text)"####,
-                }),
+                graph: None,
                 stats: (6922, 882, 4),
             },
             Root {
@@ -1452,6 +1450,34 @@ fn o14_replacement_reaches_the_old_disposer_and_a_stale_view_rejects() {
     run(
         "rfc_cases::o14_replacement_reaches_the_old_disposer_and_a_stale_view_rejects",
         O14,
+    );
+}
+
+/// Metering rule 11, D2 (b) (ri-4lq): the reached disposer's written
+/// `dispose(value.text)` is now a verified graph edge, so `replace` checks in
+/// the graph too. That adds 854 work and no entries; depth stays 5. The O14
+/// graph cap before ri-4lq, 192,578/5,361/5, now gives `ResourceLimit`. The
+/// row above holds the new cap.
+#[test]
+fn o14_pre_field_edge_graph_cap_now_gives_resource_limit() {
+    installed(
+        "rfc_cases::o14_pre_field_edge_graph_cap_now_gives_resource_limit",
+        |request| {
+            fs::write(&request.entry, format!("{IMPORTS}\n{}", O14[0].text)).unwrap();
+            for test_mode in [false, true] {
+                let request = InstalledRequest {
+                    test_mode,
+                    ..request.clone()
+                };
+                let graph = loader::load_installed(request).unwrap();
+                let typed = analyze_typed(&graph, AnalysisLimits::default());
+                let receipt = typed.receipt().unwrap();
+                let (old, _) = limits(statistics((192578, 5361, 5)));
+                let limited = analyze_ownership(&receipt, old);
+                assert_eq!(limited.completion(), GraphCompletion::ResourceLimit);
+                assert!(limited.roots().iter().all(|root| root.mir().is_none()));
+            }
+        },
     );
 }
 

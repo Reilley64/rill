@@ -4,7 +4,7 @@ use super::*;
 use crate::analysis::{
     scalars::{
         CallFacts, ExpressionFacts,
-        data::{Access, DataExpression},
+        data::{Access, DataExpression, PathProjection},
     },
     typed::{
         NativeOwnershipAction, NativeRepresentationKind, OwnershipCoverage, OwnershipRule,
@@ -21,6 +21,7 @@ pub(super) fn proved<'g>(
     header: Option<&DeclarationFacts<'g>>,
     block: &Block<'g>,
     edge: Dependency<'g>,
+    active: bool,
     family_count: usize,
     budget: &mut Budget,
 ) -> ResultOf<bool> {
@@ -63,8 +64,15 @@ pub(super) fn proved<'g>(
     let Some(family) = typed.dispose_role().map(|role| &role.id) else {
         return Ok(false);
     };
-    let Some((expr, call, input)) =
-        written_operand(module, nodes, block.site.node, operand, family, budget)?
+    let Some((expr, call, input)) = written_operand(
+        module,
+        nodes,
+        block.site.node,
+        operand,
+        family,
+        active && edge.contract == BuiltinDispose,
+        budget,
+    )?
     else {
         return Ok(false);
     };
@@ -101,13 +109,25 @@ fn written_operand<'a, 'g>(
     node: NodeId,
     operand: Place<'g>,
     family: &'g DeclarationId,
+    field_disposal: bool,
     budget: &mut Budget,
 ) -> ResultOf<Option<(&'a ExpressionFacts<'g>, &'a CallFacts<'g>, &'a Type<'g>)>> {
     // A reachable Dispose/ReleaseGuard is emitted only after flow verifies
     // initialization, ownership and conflicting loans on this exact storage.
+    // A written `dispose` of a field in an active disposer body (ri-4lq) is
+    // screened from its place and the field's own declaration before the
+    // first charge.
+    let fields = match (operand.projection, field_disposal) {
+        (None, _) => [None, None],
+        (Some(Projection::Field(field)), true) => [Some(field), None],
+        (Some(Projection::NestedField { outer, inner }), true) => [Some(outer), Some(inner)],
+        _ => return Ok(None),
+    };
     if module.syntax.nodes[node].kind != NodeKind::Call
-        || operand.projection.is_some()
         || !std::ptr::eq(operand.root.module, &module.key)
+        || fields[1]
+            .or(fields[0])
+            .is_some_and(|leaf| !declared_text(module, leaf))
     {
         return Ok(None);
     }
@@ -136,9 +156,27 @@ fn written_operand<'a, 'g>(
     let Some(path) = actual.path.as_ref() else {
         return Ok(None);
     };
+    budget.step(path.projections.len())?;
+    let same = |written: &DeclarationId, field: &Declaration| {
+        written.start == field.id.start && written.kind == field.id.kind
+    };
+    let projected = match (path.projections.as_slice(), fields) {
+        ([], [None, None]) => true,
+        ([PathProjection::Field(written)], [Some(field), None]) => same(written, field),
+        (
+            [PathProjection::Field(outer), PathProjection::Field(inner)],
+            [Some(outer_field), Some(inner_field)],
+        ) => same(outer, outer_field) && same(inner, inner_field),
+        _ => false,
+    };
     if actual.access != Access::Owned
-        || !path.projections.is_empty()
-        || !actual.binding.is_some_and(|id| std::ptr::eq(id, path.root))
+        || !projected
+        // A name is its binding; a field read has none, and its root is
+        // matched to the operand's slot below.
+        || !match fields[0] {
+            None => actual.binding.is_some_and(|id| std::ptr::eq(id, path.root)),
+            Some(_) => actual.binding.is_none(),
+        }
         || actual.refinement.is_some()
         || actual.admission.is_some()
     {
@@ -173,6 +211,24 @@ fn written_operand<'a, 'g>(
             std::ptr::eq(&declaration.id, path.root) && declaration.node == declaration_node
         });
     Ok(matched.then_some((expr, call, &actual.ty)))
+}
+
+/// `field` is declared in `module` (by address, not by key) with the written
+/// type `string`. Syntax only screens; the typed operand is checked after.
+fn declared_text(module: &Module, field: &Declaration) -> bool {
+    if !module
+        .declarations
+        .as_ptr_range()
+        .contains(&std::ptr::from_ref(field))
+    {
+        return false;
+    }
+    let syntax = &module.syntax.nodes;
+    let declaration = &syntax[field.node];
+    matches!(declaration.kind, NodeKind::RecordField { .. })
+        && declaration.children.get(1).is_some_and(|&ty| {
+            syntax[ty].kind == NodeKind::NamedType && syntax[ty].span.bytes() == b"string"
+        })
 }
 
 fn protected_guard<'g>(

@@ -810,13 +810,11 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         if !nested {
             return Ok(None);
         }
-        if self.outer_disposer(node, ty)?.is_some() {
-            return Err(Stop::Pending(node));
-        }
+        let disposer = self.outer_disposer(node, ty)?;
         // Keep each child record in one contiguous region with the same
         // slot order as its standalone type. A field transfer moves that
         // region; outer cleanup still walks the remaining slots in reverse.
-        let root = self.aggregate_root(node, None, 0)?;
+        let root = self.aggregate_root(node, disposer, 0)?;
         for outer in fields {
             self.budget.step(1)?;
             let child = if matches!(outer.ty.as_ref(), TypeTerm::Primitive(_)) {
@@ -1834,7 +1832,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         Ok(Some(from))
     }
 
-    fn clone_region(&mut self, from: Slot, dest: NodeId) -> ResultOf<Slot> {
+    pub(super) fn clone_region(&mut self, from: Slot, dest: NodeId) -> ResultOf<Slot> {
         let region = self.slots[from].storage(from);
         let owner = self.slots.len();
         self.budget.step(region.len())?;
@@ -7558,7 +7556,15 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             let [arg] = call.arguments.as_slice() else {
                 return Err(Stop::Pending(node));
             };
-            let operand = self.place(*arg)?;
+            let written = self.value(*arg)?;
+            let path = written.path.as_ref().ok_or(Stop::Pending(*arg))?;
+            // A field of a nested owned record parameter is read through its
+            // region; any other place resolves as before.
+            let operand = if path.projections.is_empty() {
+                self.resolve_place(*arg, path)?
+            } else {
+                self.read_value_place(*arg, written)?
+            };
             let mut target = WrittenDisposal::Ordinary;
             if let Some(release) = self.slots[operand].guard_release() {
                 let Some(DataExpression::NativeOwnership(native)) = &facts.data else {
