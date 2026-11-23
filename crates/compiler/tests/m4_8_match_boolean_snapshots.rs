@@ -553,10 +553,10 @@ fn installed_boolean_matches() {
     // Reviews 35776287 and f67c0458 at db944e6: a single wildcard arm that copies its
     // source, and nested wildcard matches whose bodies copy and observe it. Verbatim,
     // including the reviewers' `std::routine::join` import.
-    // Review e519e598 at 2ec4f36: two false R0103s that predate bd10617, pinned at
-    // their current outcome as known limitations. `pre` copies the Boolean before the
-    // match begins tracking it; `computed` matches through an alias selected by an
-    // `if` expression, which has no typed source place.
+    // Review e519e598 at 2ec4f36: two false R0103s that predate bd10617. `pre` copies
+    // the Boolean before the match begins tracking it; `computed` matches through an
+    // alias selected by an `if` expression, which has no typed source place.
+    // Both check since ri-2s0.4 (C12).
     // Exact (work, entries, depth), the same in both load modes.
     for (name, source, exact, check) in [
         (
@@ -605,22 +605,22 @@ function probe(flag: bool, gate: bool): void {
             checked,
         ),
         (
-            "known limitation e519e598 pre: copy taken before the match",
+            "review e519e598 pre: copy taken before the match",
             "
 import std::routine::join;
 function probe(flag: bool): void { let debt = Err<bool,i32>(61i32); let before = flag; let copy = match (flag) { _ => before }; if (flag) { if (copy) { let _ = debt; } } else { if (!copy) { let _ = debt; } } }
 ",
-            (426921, 48910, 12),
-            unpaid,
+            (426895, 48892, 12),
+            checked,
         ),
         (
-            "known limitation e519e598 computed: alias selected by an if expression",
+            "review e519e598 computed: alias selected by an if expression",
             "
 import std::routine::join;
 function probe(flag: bool, gate: bool): void { let debt = Err<bool,i32>(61i32); match (*(if (gate) &flag else &flag)) { true if flag => { let _ = debt; }, false if !flag => { let _ = debt; }, _ => {} }; }
 ",
-            (428253, 49198, 12),
-            unpaid,
+            (427988, 49104, 12),
+            checked,
         ),
     ] {
         installed(&probe, name, source, None, |report| {
@@ -629,6 +629,124 @@ function probe(flag: bool, gate: bool): void { let debt = Err<bool,i32>(61i32); 
             assert_eq!((stats.work, stats.entries, stats.max_depth), exact, "{name}");
         });
     }
+
+    // ri-2s0.4 (C12). Both rows cost less than the false R0103 they replace, so their
+    // parent caps still hold: the old exact numbers, measured at 7002855e, now give Checked.
+    for (name, source, old) in [
+        ("pre", PRE, (426921, 48910, 12)),
+        ("computed", COMPUTED, (428253, 49198, 12)),
+    ] {
+        installed(&probe, name, source, Some(old), checked);
+    }
+
+    // Grouped forms check like the bare control. The stdlib sets depth 12 for every row, so
+    // grouping shows in work and entries; one short on depth still gives `ResourceLimit`.
+    for (name, source, exact) in [
+        (
+            "pre: bare control",
+            pre("let before = flag;", "before"),
+            (324672, 48105, 12),
+        ),
+        (
+            "pre: grouped initializer",
+            pre("let before = (flag);", "before"),
+            (324704, 48117, 12),
+        ),
+        (
+            "pre: grouped binder",
+            pre("let (before) = flag;", "before"),
+            (324698, 48117, 12),
+        ),
+        (
+            "pre: grouped arm body",
+            pre("let before = flag;", "(before)"),
+            (324742, 48122, 12),
+        ),
+        (
+            "computed: grouped scrutinee",
+            COMPUTED.replace(
+                "match (*(if (gate) &flag else &flag))",
+                "match (((*(if (gate) &flag else &flag))))",
+            ),
+            (325778, 48356, 12),
+        ),
+    ] {
+        installed(&probe, name, &source, None, |report| {
+            checked(report);
+            let stats = report.statistics();
+            assert_eq!(
+                (stats.work, stats.entries, stats.max_depth),
+                exact,
+                "{name}"
+            );
+        });
+    }
+
+    // Genuine rejections stay R0103. Exact numbers at 7002855e, then here. Each of the
+    // two `pre` rows pays a few steps to read the written binding before it rejects, so
+    // its parent cap no longer holds. The `computed` row and the mutable source cost no more.
+    for (name, source, parent, exact) in [
+        (
+            "pre: mutable binder",
+            pre("let mut before = flag;", "before"),
+            (324698, 48123, 12),
+            (324709, 48123, 12),
+        ),
+        (
+            "pre: copy of another parameter",
+            pre("let before = other;", "before"),
+            (324698, 48123, 12),
+            (324712, 48123, 12),
+        ),
+        (
+            "pre: mutable source",
+            "
+function probe(flag: bool): void {
+  let debt = Err<bool,i32>(61i32);
+  let mut current = flag;
+  let before = current;
+  let copy = match (current) { _ => before };
+  if (current) { if (copy) { let _ = debt; } } else { if (!copy) { let _ = debt; } }
+}
+"
+            .to_owned(),
+            (324529, 48133, 12),
+            (324529, 48133, 12),
+        ),
+        (
+            "computed: alias selects another place",
+            COMPUTED.replace("&flag else &flag", "&flag else &other"),
+            (325928, 48413, 12),
+            (325886, 48394, 12),
+        ),
+    ] {
+        let holds = exact.0 <= parent.0 && exact.1 <= parent.1;
+        installed(&probe, name, &source, holds.then_some(parent), |report| {
+            unpaid(report);
+            let stats = report.statistics();
+            assert_eq!(
+                (stats.work, stats.entries, stats.max_depth),
+                exact,
+                "{name}"
+            );
+        });
+    }
+}
+
+const PRE: &str = "
+function probe(flag: bool): void { let debt = Err<bool,i32>(61i32); let before = flag; let copy = match (flag) { _ => before }; if (flag) { if (copy) { let _ = debt; } } else { if (!copy) { let _ = debt; } } }
+";
+
+const COMPUTED: &str = "
+function probe(flag: bool, other: bool, gate: bool): void { let debt = Err<bool,i32>(61i32); match (*(if (gate) &flag else &flag)) { true if flag => { let _ = debt; }, false if !flag => { let _ = debt; }, _ => {} }; }
+";
+
+fn pre(binding: &str, arm: &str) -> String {
+    format!(
+        "
+function probe(flag: bool, other: bool): void {{ let debt = Err<bool,i32>(61i32); {binding} let copy = match (flag) {{ _ => {arm} }}; if (flag) {{ if (copy) {{ let _ = debt; }} }} else {{ if (!copy) {{ let _ = debt; }} }} }}
+"
+    )
 }
 
 fn checked(report: &TypedReport<'_>) {
