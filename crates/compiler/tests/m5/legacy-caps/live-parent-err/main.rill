@@ -1,0 +1,23 @@
+import std::{List, Result, Err};
+import std::channel::{Receiver, Sender};
+import std::convert::{into, tryInto};
+import std::error::formatError;
+import std::iter::iterate;
+import std::mutex::LockGuard;
+import std::number::ParseError;
+import std::option::{Option, map as mapOption};
+import std::result::{isOk, map as mapResult};
+import std::shared::Shared;
+
+import std::routine::join;
+function liveParentError(): [Result<bool, i32>, bool] {
+ let error = Err<bool, i32>(11i32);
+ let pair = join([(): Result<bool, i32> => Result.Ok(true), () => false]);
+ let _ = error;
+ return pair;
+}
+function retiredParentError(): [Result<bool, i32>, bool] {
+ let error = Err<bool, i32>(11i32);
+ let _ = error;
+ return join([(): Result<bool, i32> => Result.Ok(true), () => false]);
+}

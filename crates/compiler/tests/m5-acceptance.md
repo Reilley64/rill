@@ -1816,6 +1816,31 @@ This is ticket D2. The [normal-edge](#normal-edge-custom-disposer-cleanup) and [
 
 The source's whole receipt is 197,595 / 5,829 / 3 (`SourceRejected`); each one-short cap gives `ResourceLimit`. `manual` marks the boundary. `graph/closed_release.rs` verifies a written `dispose` only for an operand with no field projection, so the active body and its caller stay `Incomplete`. That is filed as `ri-4lq`. The same shape occurs in `active_disposer_cleans_only_remaining_fields` and `custom_record_rebuild`, which assert only the targeted query. No source changed, so no fixed cap moved, including the scalar and primitive-field caps in `m5/disposers.rs`. No Rill program ran.
 
+## Live parent `Err` before a fresh `Result` join: re-pinned cap, 2026-11-23 (ri-785.4)
+
+This section settles the cap that `003c414` moved, under rule 11 of the [metering standard](../../../docs/agents/compiler-metering.md) and owner decision D3 (b). It is the only cap D3 (b) moves.
+
+The fixture is [`legacy-caps/live-parent-err`](m5/legacy-caps/live-parent-err/main.rill), the `preflight-app` source of task `f1d1681a` (`tmp-2026-11-22/scoped-admission.2sEJsT/`). In `liveParentError`, `let error = Err<bool, i32>(11i32);` is live across `let pair = join([(): Result<bool, i32> => Result.Ok(true), () => false]);`, so the parent cannot retire it on a cancellation exit.
+
+| Targeted `lower_body(liveParentError)` | Outcome | Blocker | Work / entries / depth |
+| --- | --- | --- | --- |
+| `d95ae9e` (old cap) | `Incomplete` | `pair`, the unlowered pair binding | 3,449 / 320 / 3 |
+| `003c414` and this branch (new cap) | `Incomplete` | the `join([...])` call | 4,024 / 571 / 7 |
+
+The check the old number skipped: at `d95ae9e` the route stopped at the `pair` binding, before the join's typed result was lowered. It never checked either child capture or the parent exit. Standards review `0c3e2b4f` required both. Since `003c414`, the route checks both actual captures first, then the parent's cancellation exit, and stops before lowering either child.
+
+The cost cannot be avoided with an earlier screen (rule 1). A screen that rejected the live parent before the capture checks would hide a conflicting second capture. [`fresh_join_checks_capture_conflicts_and_parent_cleanup`](m5/scoped_join/fresh_result.rs) pins that case: `conflict(seed: bool, bag: Bag)` has an unsupported parent disposer and still reports `R0201` at `flag`, related to `&mut flag`, at 4,520 / 693 / 7.
+
+Where the change lives:
+
+- Manifest: the `live-parent-err` body rows of [`legacy-caps.tsv`](m5/legacy-caps.tsv), one per load mode, at 4,024 / 571 / 7, replayed at the exact cap and one short per axis. The fixture's other rows are the Standard module count (18), the typed query (`Checked` 436,305 / 50,259 / 12, the same at `d95ae9e`) and the graph root (`Incomplete/Incomplete`). `legacy_caps` now has 34 fixtures and 276 cap triples.
+- Old-cap assertion: [`live_parent_error_reaches_the_join_at_its_repinned_cap`](m5/scoped_join/fresh_result.rs), in both installed modes. At 3,449 / 320 / 3, `liveParentError` gives `ResourceLimit` with no MIR and no finding. At 4,024 / 571 / 7 it is `Incomplete` at the join call, in the target and the ordinary graph root, and one short on any axis gives `ResourceLimit`.
+- The same test pins two numbers for the first time; they move no published cap. The control `retiredParentError`, which consumes the parent `Err` before the join, is `Checked` at 25,740 / 13,172 / 8 with MIR in the target and the graph root. The whole graph is `Incomplete` at 219,596 / 17,727 / 8. At `d95ae9e`, `retiredParentError` measured `Incomplete` at 3,457 / 326 / 3 and the graph measured 197,064 / 4,761 / 5. The fresh `Result` join admission (`332454a`, `72f3d81`) produced those changes, not D3 (b). Neither number was ever published, so this section claims neither under D2 (b).
+
+For the review's ruling on `003c414`: apart from the cap above, that commit replaced default-limit or self-measured assertions with fixed caps measured on `003c414` itself. These are first pins, not moves. In `fresh_join_checks_capture_conflicts_and_parent_cleanup`: graph 228,462 / 18,860 / 8; `unproved` 4,246 / 561 / 7; `conflict` 4,520 / 693 / 7; `liveParentError` (in that fixture) 4,182 / 638 / 7; `retiredParentError` 25,938 / 13,247 / 8. In `installed_join_fresh_results_keep_the_written_occurrence`: graph 282,035 / 49,331 / 8; typed 445,380 / 51,426 / 12; `success` and `successSecond` 22,226 / 10,127 / 8; `failure` 24,588 / 12,120 / 8; `failureFirst` 25,683 / 13,123 / 8. That test checks both result orders and all four retirement subsets. In `an_unproved_join_does_not_invent_a_discard`: typed 427,565 / 49,016 / 12. It also added `bag: Bag` to `conflict`. All of these pass unchanged on this branch, and so do `m4_8_scoped_join_caps`, `m4_8_match_boolean_snapshots` and `disjoint-live`. `disjoint-live` keeps `R0201` at the target 4,159 / 838 / 10 and the graph 213,183 / 5,602 / 10.
+
+No other cap or expectation moved. This is LLVM-free host ownership analysis. No Rill program ran.
+
 ## Open acceptance obligations
 
 - Nested and borrowed place projections, nested mutable storage effects and callee-exit checks for retained destinations. Preserve the covered distinction between a carried reference and a borrow of its slot when extending these routes.
