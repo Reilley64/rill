@@ -60,6 +60,8 @@ Named in ri-kdi before the diff (owner decision, chief's decision 3).
 | `cargo fmt --all -- --check` | clean | `fmt.log` |
 | `cargo clippy -p compiler --all-targets -- -D warnings` | clean | `clippy.log` |
 
+After merging the base tip `247c2f26` (O20 ri-w0g and O21 ri-8qlm; one conflict, the O19 to O21 rows of `m5-status.md`, resolved by keeping each ticket's row) in `8525194e`, the same checks were rerun: `rfc_cases:: graph::inventory legacy_caps::` 36 passed, `field_routes:: disposers:: records::` 32 passed, both M4.8 binaries 1 passed each, fmt, clippy and `check:docs` clean (`merged-*.log`). No O19 number moved.
+
 The full M5 binary runs in hosted CI only.
 
 ## Not established
