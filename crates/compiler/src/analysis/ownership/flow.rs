@@ -1559,7 +1559,7 @@ impl<'g> CancellationTrace<'_, 'g> {
             Some(CallDestination {
                 storage: CallStorage::Local(target),
                 argument,
-                input: source,
+                input: Some(source),
                 second_input: None,
                 extra: Some(RetainedCallExtra::Bool { position: 2 }),
             }),
@@ -3459,8 +3459,10 @@ pub(super) fn run<'a, 'g>(
                             slots[contents].storage(contents),
                             budget,
                         )?;
-                        for slot in
-                            std::iter::once(destination.input).chain(destination.second_input)
+                        for slot in destination
+                            .input
+                            .into_iter()
+                            .chain(destination.second_input)
                         {
                             initialized(&state[slot], node)?;
                             include_loans(&mut loans, &state, slots[slot].storage(slot), budget)?;
@@ -3529,20 +3531,27 @@ pub(super) fn run<'a, 'g>(
                                 callee: call.callee,
                                 destination,
                                 arguments: call.args.iter().copied().map(local).collect(),
-                                input: local(retention.input),
+                                input: local(retention.input.ok_or(Stop::Pending(node))?),
                                 second_input: retention.second_input.map(local),
                             }
-                        } else if let Some(second) = retention.second_input {
-                            Operation::CallRetainingPair {
-                                callee: call.callee,
-                                destination,
-                                inputs: [local(retention.input), local(second)],
+                        } else if let Some(input) = retention.input {
+                            if let Some(second) = retention.second_input {
+                                Operation::CallRetainingPair {
+                                    callee: call.callee,
+                                    destination,
+                                    inputs: [local(input), local(second)],
+                                }
+                            } else {
+                                Operation::CallRetaining {
+                                    callee: call.callee,
+                                    destination,
+                                    input: local(input),
+                                }
                             }
                         } else {
-                            Operation::CallRetaining {
+                            Operation::CallRetainingNoInput {
                                 callee: call.callee,
                                 destination,
-                                input: local(retention.input),
                             }
                         }
                     } else if matches!(call.result, CallResult::ScalarCopy) {
