@@ -1798,6 +1798,24 @@ Both routes are screened from typed facts before their first charge. These sibli
 
 No fixed cap moved. This is not general aggregate initialization, a return-constructor postfix such as `Option.Some(gate?)`, or a postfix in a loop condition. No Rill program ran.
 
+## Custom disposer over owning `string` fields (ri-px1.7, 2026-11-23)
+
+This is ticket D2. The [normal-edge](#normal-edge-custom-disposer-cleanup) and [explicit](#explicit-custom-disposal-of-local-records) disposer slices already lowered records whose fields own `string` values: `string` is a prelude primitive, so "primitive fields" in those sections includes it. Their tests asserted only the targeted query. This ticket adds no compiler change. [`owning_text.rs`](m5/disposers/owning_text.rs) checks the same behavior in both installed modes through the targeted query and the ordinary graph root, at the parent `36f1cf15`. The compiler already had the behavior, so the new tests had no red step.
+
+`type Note = { head: string; moved: string; tail: string; }` has a canonical disposer, reached through the alias `release`, whose body moves `value.moved` into `saved`. Each caller invokes the selected implementation once and drops no field. The body drops `saved`, passes the remaining fields to the epilogue, and the epilogue drops `tail`, then `head`. It does not drop `moved` again. The graph's reached active body has the same ordered actions and no edges. Each root's only edge is `ActiveDisposer` to that implementation. Caps are exact, and each axis is independently one short:
+
+| Function | Target work / entries / depth | Outcome | Ordinary graph root |
+| --- | --- | --- | --- |
+| `normal(value: Note)` | 5,552 / 542 / 3 | `Checked`: disposer | `Checked`, same MIR |
+| `explicit(value: Note, later: string)`, `release(value)` | 5,701 / 622 / 3 | `Checked`: disposer, then drop `later` | `Checked`, same MIR |
+| `canonical(value: Note)`, `dispose(value)` | 5,664 / 604 / 3 | `Checked`: disposer | `Checked`, same MIR |
+| `outside`, `return value.moved;` | 2,428 / 179 / 3 | `R0501` at `value.moved`, related `value: Note` | `SourceRejected` |
+| `outsideLocal`, `let taken = value.head;` | 2,438 / 188 / 3 | `R0501` at `value.head`, related `value: Note` | `SourceRejected` |
+| `reread`, body rereads moved `value.text` | 5,369 / 470 / 3 | `R0200` at the second `value.text`, related the first | `SourceRejected`; the finding is recorded once, in the active body |
+| `manual`, body writes `dispose(value.second)` | 5,487 / 518 / 3 | `Checked`: the body disposes `second`, the epilogue drops `first` | `Incomplete` at `dispose(value.second)` |
+
+The source's whole receipt is 197,595 / 5,829 / 3 (`SourceRejected`); each one-short cap gives `ResourceLimit`. `manual` marks the boundary. `graph/closed_release.rs` verifies a written `dispose` only for an operand with no field projection, so the active body and its caller stay `Incomplete`. That is filed as `ri-4lq`. The same shape occurs in `active_disposer_cleans_only_remaining_fields` and `custom_record_rebuild`, which assert only the targeted query. No source changed, so no fixed cap moved, including the scalar and primitive-field caps in `m5/disposers.rs`. No Rill program ran.
+
 ## Open acceptance obligations
 
 - Nested and borrowed place projections, nested mutable storage effects and callee-exit checks for retained destinations. Preserve the covered distinction between a carried reference and a borrow of its slot when extending these routes.
