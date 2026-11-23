@@ -839,6 +839,20 @@ fn installed(test: &str, check: impl FnOnce(InstalledRequest)) {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+    // A name that matches no test runs zero tests and still succeeds.
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("running 1 test\n") && stdout.contains("test result: ok. 1 passed;"),
+        "child `{test}` ran no test or more than one:\n{stdout}"
+    );
+}
+
+/// Review ci-uaa1, ri-px1.5 #1: a child name that matches no test runs zero
+/// tests and exits successfully, so `installed` must fail on it.
+#[test]
+#[should_panic(expected = "ran no test")]
+fn installed_fails_when_the_child_runs_no_test() {
+    installed("installed_child_name_that_matches_no_test", |_| {});
 }
 
 struct Cleanup<'a>(&'a Path);
