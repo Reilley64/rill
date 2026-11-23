@@ -779,7 +779,7 @@ function literal(): &string { return &"static"; }
 "#,
     outcome: Outcome::Receipt {
         typed_stats: (328111, 48084, 12),
-        graph: (GraphCompletion::Incomplete, (188807, 4385, 5)),
+        graph: (GraphCompletion::SourceRejected, (191182, 5092, 9)),
         pre_equality_graph: (188491, 4251, 4),
         roots: &[
             Root {
@@ -790,27 +790,25 @@ function literal(): &string { return &"static"; }
             },
             Root {
                 name: "within",
-                want: Want::Incomplete {
-                    blocker: r####"(&shifted(Point { x: 1, y: 2 })).x"####,
-                },
+                want: Want::Checked,
                 graph: None,
-                stats: (1899, 39, 3),
+                stats: (5914, 661, 9),
             },
             Root {
                 name: "stored",
-                want: Want::Incomplete {
-                    blocker: r####"shifted(Point { x: 1, y: 2 })"####,
+                want: Want::Rejected {
+                    code: "R0203",
+                    site: r####"let view = &shifted(Point { x: 1, y: 2 });"####,
+                    related: r####"&shifted(Point { x: 1, y: 2 })"####,
                 },
                 graph: None,
-                stats: (1932, 52, 4),
+                stats: (2989, 361, 7),
             },
             Root {
                 name: "literal",
-                want: Want::Incomplete {
-                    blocker: r####"\"static\""####,
-                },
+                want: Want::Checked,
                 graph: None,
-                stats: (1900, 39, 4),
+                stats: (1949, 66, 4),
             },
         ],
     },
@@ -1432,9 +1430,9 @@ fn o11_exclusive_return_view_contract_is_incomplete_at_its_call() {
 }
 
 #[test]
-fn o12_borrowed_temporary_is_incomplete_past_its_producer() {
+fn o12_borrowed_temporary_lives_through_its_statement_and_static_view_checks() {
     run(
-        "rfc_cases::o12_borrowed_temporary_is_incomplete_past_its_producer",
+        "rfc_cases::o12_borrowed_temporary_lives_through_its_statement_and_static_view_checks",
         O12,
     );
 }

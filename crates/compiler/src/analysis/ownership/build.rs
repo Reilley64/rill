@@ -2793,25 +2793,39 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         {
             return Ok(None);
         }
-        let (borrow, depth) = self.ungroup_expression_at(base, depth + 1)?;
-        let syntax = &self.module.syntax.nodes[borrow];
-        if syntax.kind != NodeKind::Prefix("&") {
+        // Peek through groups on the written syntax, uncharged: depth is
+        // charged below, only for a shape that passes the screen.
+        let nodes = &self.module.syntax.nodes;
+        let peel = |mut node: NodeId| {
+            while nodes[node].kind == NodeKind::Group {
+                node = nodes[node].children[0];
+            }
+            node
+        };
+        let borrow = peel(base);
+        if nodes[borrow].kind != NodeKind::Prefix("&") {
             return Ok(None);
         }
-        let (call_node, _) = self.ungroup_expression_at(syntax.children[0], depth + 1)?;
-        if self.module.syntax.nodes[call_node].kind != NodeKind::Call {
+        let call_node = peel(nodes[borrow].children[0]);
+        if nodes[call_node].kind != NodeKind::Call {
             return Ok(None);
         }
-        self.budget.step(1)?;
         let produced = self.value(call_node)?;
         let Some(call) = produced.call.as_deref() else {
             return Ok(None);
         };
-        let descriptor = self.normal_value(borrow)?;
         if produced.path.is_some()
             || produced.access != Access::Owned
-            || !matches!(descriptor.ty.as_ref(), TypeTerm::Reference { mutable: false, referent } if *referent == produced.ty)
+            || !matches!(produced.ty.as_ref(), TypeTerm::Nominal { .. })
             || !self.scalar_record(&produced.ty)?
+        {
+            return Ok(None);
+        }
+        let (borrow, depth) = self.ungroup_expression_at(base, depth + 1)?;
+        let (call_node, _) =
+            self.ungroup_expression_at(self.module.syntax.nodes[borrow].children[0], depth + 1)?;
+        let descriptor = self.normal_value(borrow)?;
+        if !matches!(descriptor.ty.as_ref(), TypeTerm::Reference { mutable: false, referent } if *referent == produced.ty)
         {
             return Err(Stop::Pending(value));
         }
@@ -5763,9 +5777,9 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             return Ok(false);
         };
         self.budget.step(fields.len())?;
-        Ok(fields
-            .iter()
-            .all(|field| matches!(field.ty.as_ref(), TypeTerm::Primitive(_)) && !owns_text(&field.ty)))
+        Ok(fields.iter().all(|field| {
+            matches!(field.ty.as_ref(), TypeTerm::Primitive(_)) && !owns_text(&field.ty)
+        }))
     }
 
     /// RFC 0006's explicit exception: a direct borrow of an uninterpolated
