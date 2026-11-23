@@ -536,6 +536,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             list_delivery_loop: None,
             scalar_copy_read: None,
             copied_origins: BTreeSet::new(),
+            declared_shared_frame: false,
             dispose: typed.dispose_role().map(|d| &d.id),
             return_contract,
             callable_frame: None,
@@ -7136,6 +7137,11 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
     /// called with a written pair arrow. The actual is formed into one stage,
     /// moves into the formal and is consumed by the wrapper's one invocation;
     /// its output is this call's result. The wrapper's own root stays open.
+    ///
+    /// The read-only twin: `function f<F>(job: &F): bool where callable(F, [], bool)
+    /// { return job(); }` called as `f(&local)`. The shared loan of the local
+    /// descriptor is the staged argument; the wrapper reads through it and the
+    /// descriptor stays with this caller.
     fn call_declared_once(
         &mut self,
         node: NodeId,
@@ -7161,23 +7167,64 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         ) else {
             return Err(pending());
         };
-        if call.callee.kind != DeclarationKind::Function
+        let lent = syntax[*argument].kind == NodeKind::Prefix("&");
+        let written_actual = if lent {
+            // `&name` of a read-only `() => bool` descriptor, nothing else.
+            matches!(syntax[*argument].children.as_slice(), [operand]
+                if syntax[*operand].kind == NodeKind::ValueReference)
+                && scalar::scalar(&facts.ty) == Some(Primitive::Bool)
+                && matches!(substitution.argument.as_ref(), TypeTerm::Callable {
+                    mode: InvocationMode::ReadOnly,
+                    parameters,
+                    result,
+                } if parameters.is_empty() && *result == facts.ty)
+        } else {
+            syntax[*argument].kind == NodeKind::Arrow
+                && self.slots[into].members == 2
+                // This first witness admits only the carried shared/Bool pair.
+                && matches!(facts.ty.as_ref(), TypeTerm::Tuple(elements)
+                    if matches!(elements.as_slice(), [descriptor, bit]
+                        if matches!(descriptor.as_ref(), TypeTerm::Reference { mutable: false, referent }
+                            if scalar::scalar(referent) == Some(Primitive::Bool))
+                            && scalar::scalar(bit) == Some(Primitive::Bool)))
+        };
+        if !written_actual
+            || call.callee.kind != DeclarationKind::Function
             || call.callee.module.origin != Origin::Application
             || call.pipe_input.is_some()
             || !call.defaults.is_empty()
             || call.selection.is_some()
             || call.scoped_join.is_some()
             || !matches!(syntax[node].children.as_slice(), [_, written] if written == argument)
-            || syntax[*argument].kind != NodeKind::Arrow
-            || self.slots[into].members != 2
-            // This first witness admits only the carried shared/Bool pair.
-            || !matches!(facts.ty.as_ref(), TypeTerm::Tuple(elements)
-                if matches!(elements.as_slice(), [descriptor, bit]
-                    if matches!(descriptor.as_ref(), TypeTerm::Reference { mutable: false, referent }
-                        if scalar::scalar(referent) == Some(Primitive::Bool))
-                        && scalar::scalar(bit) == Some(Primitive::Bool)))
         {
             return Err(pending());
+        }
+        if lent {
+            // Any generic `&F` call reaches here. Find the wrapper in this
+            // module by identity and screen its `return name();` body before
+            // the keyed header lookup. Declarations are ordered by (start, kind).
+            let declarations = &self.module.declarations;
+            self.budget
+                .step((usize::BITS - declarations.len().leading_zeros() + 1) as usize)?;
+            let wrapper = declarations
+                .binary_search_by_key(&(call.callee.start, call.callee.kind), |d| {
+                    (d.id.start, d.id.kind)
+                })
+                .ok()
+                .map(|index| &declarations[index])
+                .filter(|wrapper| std::ptr::eq(&wrapper.id, call.callee))
+                .ok_or_else(pending)?;
+            let returns_invocation = matches!(syntax[wrapper.node].children.as_slice(), [_, body]
+                if syntax[*body].kind == NodeKind::Block
+                    && matches!(syntax[*body].children.as_slice(), [returned]
+                        if syntax[*returned].kind == NodeKind::Return
+                            && matches!(syntax[*returned].children.as_slice(), [invocation]
+                                if syntax[*invocation].kind == NodeKind::Call
+                                    && matches!(syntax[*invocation].children.as_slice(), [receiver]
+                                        if syntax[*receiver].kind == NodeKind::ValueReference))));
+            if !returns_invocation {
+                return Err(pending());
+            }
         }
         self.budget.step(1 + self.module.key.path.len())?;
         if call.callee.module != self.module.key {
@@ -7197,27 +7244,51 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         let [formal] = parameters.as_slice() else {
             return Err(pending());
         };
+        // The requirement's subject: an owned `F`, or the `F` behind `&F`.
+        let subject = match (lent, formal.ty.as_ref()) {
+            (false, _) => &formal.ty,
+            (
+                true,
+                TypeTerm::Reference {
+                    mutable: false,
+                    referent,
+                },
+            ) => referent,
+            (true, _) => return Err(pending()),
+        };
         if header.declaration.public
             || header.declaration.scope.is_some()
             || binder.position != 0
             || substitution.position != 0
             || !std::ptr::eq(substitution.binder, &binder.declaration.id)
-            || !matches!(formal.ty.as_ref(), TypeTerm::Parameter { declaration, position: 0 }
+            || !matches!(subject.as_ref(), TypeTerm::Parameter { declaration, position: 0 }
                 if std::ptr::eq(*declaration, &binder.declaration.id))
             || *result != facts.ty
         {
             return Err(pending());
         }
-        let actual = self.normal_value(*argument).map_err(at_call)?;
+        // The moved arrow, or the unprojected local descriptor behind `&`.
+        let actual = if lent {
+            self.normal_value(syntax[*argument].children[0])
+        } else {
+            self.normal_value(*argument)
+        }
+        .map_err(at_call)?;
         if actual.access != Access::Owned
             || actual.ty != substitution.argument
-            || !matches!(actual.ty.as_ref(), TypeTerm::Callable { parameters, result: output, .. }
-                if parameters.is_empty() && *output == *result)
+            || !matches!(actual.ty.as_ref(), TypeTerm::Callable { mode, parameters, result: output }
+                if parameters.is_empty() && *output == *result
+                    && (!lent || *mode == InvocationMode::ReadOnly))
+            || lent
+                && !actual.path.as_ref().is_some_and(|path| {
+                    path.root.kind == DeclarationKind::Binding && path.projections.is_empty()
+                })
         {
             return Err(pending());
         }
         // The wrapper's body is exactly `return job();`: one owned once
-        // invocation of the unprojected formal under its own requirement.
+        // invocation of the unprojected formal, or one read-only invocation
+        // through the lent formal, under the wrapper's own requirement.
         let [_, body] = syntax[header.declaration.node].children.as_slice() else {
             return Err(pending());
         };
@@ -7247,13 +7318,28 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             .ok_or_else(pending)?;
         let path = invoked.path.as_ref().ok_or_else(pending)?;
         let receiver = self.value(invoked.receiver).map_err(at_call)?;
+        let (mode, access, projections, predicate) = if lent {
+            (
+                InvocationMode::ReadOnly,
+                Access::ReadOnly,
+                [PathProjection::Dereference].as_slice(),
+                "callable",
+            )
+        } else {
+            (
+                InvocationMode::Once,
+                Access::Owned,
+                [].as_slice(),
+                "callableOnce",
+            )
+        };
         if syntax[*invocation].children.as_slice() != [invoked.receiver]
             || syntax[invoked.receiver].kind != NodeKind::ValueReference
-            || invoked.mode != InvocationMode::Once
-            || invoked.access != Access::Owned
+            || invoked.mode != mode
+            || invoked.access != access
             || !std::ptr::eq(path.root, &formal.declaration.id)
-            || !path.projections.is_empty()
-            || receiver.access != Access::Owned
+            || path.projections.as_slice() != projections
+            || !lent && receiver.access != Access::Owned
             || receiver.ty != formal.ty
             || self.value(*invocation).map_err(at_call)?.ty != *result
         {
@@ -7279,12 +7365,28 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             || !matches!(&goal.judgment, GoalJudgment::Requirement {
                 target: ordinary::RequirementTarget::Predicate(id),
                 arguments,
-            } if id.name() == "callableOnce"
+            } if id.name() == predicate
                 && matches!(arguments.as_slice(), [job, inputs, output]
-                    if *job == formal.ty && output == result
+                    if job == subject && output == result
                         && matches!(inputs.as_ref(), TypeTerm::Tuple(inputs) if inputs.is_empty())))
         {
             return Err(pending());
+        }
+        if lent {
+            let stage = self.slot(*argument, &self.value(*argument).map_err(at_call)?.ty)?;
+            let frame = self.emit(
+                node,
+                Action::InvokeDeclaredShared {
+                    argument: stage,
+                    into,
+                    callee: &header.declaration.id,
+                    formal: formal.declaration.node,
+                    invocation: *invocation,
+                },
+                Edges::Next(next),
+            )?;
+            self.declared_shared_frame = true;
+            return self.expression(*argument, Some(stage), frame, depth + 1);
         }
         let stage = self.slot(*argument, &actual.ty)?;
         let frame = self.emit(

@@ -44,6 +44,13 @@ pub enum DependencyContract<'g> {
         invocation: NodeId,
         origin: NodeId,
     },
+    /// Closed at the call by the caller's frame for a private `&F` wrapper,
+    /// which reads the lent actual and leaves it with the caller. Fields as
+    /// for `DeclaredOnceInvocation`.
+    DeclaredSharedInvocation {
+        invocation: NodeId,
+        origin: NodeId,
+    },
     /// Closed at the operation's reached commit, wait and terminal successors.
     ScopedJoin {
         bridge: &'g DeclarationId,
@@ -630,6 +637,7 @@ fn analyze<'g>(
                         edge.contract,
                         DependencyContract::CallableTransfer(_)
                             | DependencyContract::DeclaredOnceInvocation { .. }
+                            | DependencyContract::DeclaredSharedInvocation { .. }
                             | DependencyContract::SynchronousListArrows { .. }
                             | DependencyContract::ScopedJoin { .. }
                             | DependencyContract::ListI32Disposal { .. }
@@ -1152,6 +1160,19 @@ pub(super) fn visit_dependencies<'g>(
             } => emit(
                 callee,
                 DeclaredOnceInvocation {
+                    invocation: invocation.node,
+                    origin: origin.node,
+                },
+                budget,
+            )?,
+            Operation::InvokeDeclaredShared {
+                callee,
+                invocation,
+                origin,
+                ..
+            } => emit(
+                callee,
+                DeclaredSharedInvocation {
                     invocation: invocation.node,
                     origin: origin.node,
                 },

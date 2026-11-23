@@ -444,7 +444,7 @@ fn check_sources(entry: &Path) {
                     assert!(uses.discards().is_empty());
                     if name == "declared-shared-actual" {
                         check_lent_origins(&graph, &report);
-                        lent_has_no_ownership_proof(&graph, &report);
+                        lent_ownership_is_checked(&graph, &report);
                     }
                 }
                 "declared-shared-only"
@@ -668,8 +668,9 @@ fn check_lent_origins(
     assert_eq!(goal.state, GoalState::Proved);
 }
 
-/// A Result-use receipt is not an ownership proof of the borrowed invocation.
-fn lent_has_no_ownership_proof(
+/// The receipt reaches M5, whose declared shared frame checks the caller
+/// (ri-785.7; frame, caps and contrasts in `m5/captures/declared_shared.rs`).
+fn lent_ownership_is_checked(
     graph: &compiler::loader::Graph,
     report: &compiler::analysis::typed::TypedReport<'_>,
 ) {
@@ -698,10 +699,10 @@ fn lent_has_no_ownership_proof(
         target.statistics(),
         root.ordinary_completion()
     );
-    assert_eq!(target.completion(), Completion::Incomplete);
-    assert_eq!(root.ordinary_completion(), Completion::Incomplete);
-    assert!(target.mir().is_none() && target.findings().is_empty());
-    assert!(root.mir().is_none() && root.ordinary_mir().is_none());
+    assert_eq!(target.completion(), Completion::Checked);
+    assert_eq!(root.ordinary_completion(), Completion::Checked);
+    assert!(target.mir().is_some() && target.findings().is_empty());
+    assert!(root.ordinary_mir().is_some());
 }
 
 struct Cleanup(PathBuf);

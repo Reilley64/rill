@@ -12,6 +12,8 @@ use compiler::analysis::{
 mod approval_controls;
 #[path = "captures/borrowed_invocation.rs"]
 mod borrowed_invocation;
+#[path = "captures/declared_shared.rs"]
+mod declared_shared;
 
 #[test]
 fn canonical_copy_keeps_the_scalar_environment_owner_available() {

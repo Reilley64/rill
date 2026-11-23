@@ -23,8 +23,8 @@ struct Held {
     callable_owner: Option<CallableOwner>,
     /// A checked pair body acquired at this local arrow, not just a callable type.
     pair_origin: Option<(NodeId, InvocationMode)>,
-    /// The checked single-cell body of the environment currently in this slot.
-    mutable_cell: Option<MutableCell>,
+    /// The checked one-capture body of the environment currently in this slot.
+    single_body: Option<SingleBody>,
     /// The original parameter of an already-running outer disposer.
     disposal_started_at: Option<NodeId>,
     /// Provenance accompanies the value, not the slot. Retained descriptors
@@ -74,6 +74,14 @@ impl CallableOwner {
             Self::Formal(layout) | Self::Returned(layout) => Some(layout),
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum SingleBody {
+    MutableCell(MutableCell),
+    /// A read-only body that is its sole capture, acquired at this local
+    /// arrow, so an invocation copies that value.
+    Scalar(NodeId),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -247,9 +255,12 @@ fn liveness(
             Action::Call(index) => use_one(None, calls[index].into),
             Action::CopyClosure { from, into } => use_one(Some(from), Some(into)),
             Action::InvokeClosurePair { receiver, into, .. }
-            | Action::InvokeMutableI32Cell { receiver, into } => {
-                use_one(Some(receiver), Some(into))
-            }
+            | Action::InvokeMutableI32Cell { receiver, into }
+            | Action::InvokeDeclaredShared {
+                argument: receiver,
+                into,
+                ..
+            } => use_one(Some(receiver), Some(into)),
             // External contents are already live at every instruction.
             Action::CopyThrough {
                 descriptor, into, ..
@@ -2272,6 +2283,7 @@ pub(super) fn run<'a, 'g>(
     let Build {
         typed,
         copied_origins,
+        declared_shared_frame,
         module,
         body,
         mut facts,
@@ -2552,6 +2564,7 @@ pub(super) fn run<'a, 'g>(
                         | Action::CallListArrows { .. }
                         | Action::ScopedJoin { .. }
                         | Action::InvokeClosurePair { .. }
+                        | Action::InvokeDeclaredShared { .. }
                         | Action::InvokeMutableI32Cell { .. }
                 ) || unsupported_cleanup
                     .iter()
@@ -3774,11 +3787,20 @@ pub(super) fn run<'a, 'g>(
                         // An exclusive capture transfers locally but grants no
                         // invocation proof, even through a weakened interface.
                         pair_origin: (second.is_some() && !local_exclusive).then_some((node, mode)),
-                        mutable_cell: cell_addend.map(|addend| MutableCell {
-                            origin: node,
-                            field: slots[capture].node,
-                            addend,
-                        }),
+                        single_body: match cell_addend {
+                            Some(addend) => Some(SingleBody::MutableCell(MutableCell {
+                                origin: node,
+                                field: slots[capture].node,
+                                addend,
+                            })),
+                            // Only where a frame reads it: other bodies keep
+                            // joining distinct one-capture formations.
+                            None => (declared_shared_frame
+                                && second.is_none()
+                                && !local_exclusive
+                                && mode == InvocationMode::ReadOnly)
+                                .then_some(SingleBody::Scalar(node)),
+                        },
                         ..Held::default()
                     });
                     state[capture] = State::Vacant;
@@ -3891,9 +3913,11 @@ pub(super) fn run<'a, 'g>(
                     }
                 }
                 Action::InvokeMutableI32Cell { receiver, into } => {
-                    let cell = initialized(&state[receiver], node)?
-                        .mutable_cell
-                        .ok_or(Stop::Pending(node))?;
+                    let Some(SingleBody::MutableCell(cell)) =
+                        initialized(&state[receiver], node)?.single_body
+                    else {
+                        return Err(Stop::Pending(node));
+                    };
                     conflict(
                         &slots,
                         &state,
@@ -4023,6 +4047,57 @@ pub(super) fn run<'a, 'g>(
                                 into: local(into),
                             }
                         }
+                    }
+                }
+                Action::InvokeDeclaredShared {
+                    argument,
+                    into,
+                    callee,
+                    formal,
+                    invocation,
+                } => {
+                    // The argument is a plain shared loan of one local owner.
+                    let descriptor = initialized(&state[argument], node)?;
+                    if descriptor.callable_owner.is_some()
+                        || descriptor.pair_origin.is_some()
+                        || descriptor.single_body.is_some()
+                    {
+                        return Err(Stop::Pending(node));
+                    }
+                    let owner = shared_pair_owner(descriptor, node, budget)?;
+                    let held = initialized(&state[owner], node)?;
+                    // The reaching formation's body is its Bool capture: the
+                    // result copies it and nothing in it is borrowed or dropped.
+                    let Some(SingleBody::Scalar(origin)) = held.single_body else {
+                        return Err(Stop::Pending(node));
+                    };
+                    if held.capture_drops != [None, None] || !held.loans.is_empty() {
+                        return Err(Stop::Pending(node));
+                    }
+                    for slot in [argument, owner] {
+                        conflict(
+                            &slots,
+                            &state,
+                            &live[pc],
+                            slot,
+                            (node, Conflict::Access),
+                            Access::Observe,
+                            budget,
+                        )?;
+                    }
+                    state[into] = State::Initialized(empty.clone());
+                    // The formal receives the loan and its one invocation is
+                    // its last use. The owner stays with the caller.
+                    state[argument] = State::Moved(node);
+                    retire_loans(&slots, &mut state, &[argument], budget)?;
+                    Operation::InvokeDeclaredShared {
+                        callee,
+                        formal: site_at(module, formal),
+                        invocation: site_at(module, invocation),
+                        argument: local(argument),
+                        receiver: local(owner),
+                        origin: site_at(module, origin),
+                        into: local(into),
                     }
                 }
                 Action::Dispose {
