@@ -806,6 +806,76 @@ function screened(xs: List<i32>, left: i32, right: i32): i32 {
     );
 }
 
+/// Rule 2 (review ci-uaa1, ri-785.1 #3): arithmetic over a captured local in
+/// an arrow body. Both forms stop before the charged local read, at the caps
+/// measured at a2d8e05 with their blockers. The graph was 186,809/4,039/4
+/// there; the i32 equality source root (ri-785.9) adds 316 work and 134
+/// entries and sets depth 5.
+#[test]
+fn arrow_body_arithmetic_keeps_its_parent_caps() {
+    probe(
+        "o15_arithmetic::arrow_body_arithmetic_keeps_its_parent_caps",
+        r#"
+function arrowInvoked(first: i32, second: i32): i32 {
+    let f = () => first * 10i32 + second;
+    return f();
+}
+function arrowUninvoked(first: i32, second: i32): i32 {
+    let f = () => first * 10i32 + second;
+    return first;
+}
+"#,
+        |_, module, receipt| {
+            assert_eq!(
+                analyze_ownership(receipt, caps(statistics(186809, 4039, 4)).0).completion(),
+                GraphCompletion::ResourceLimit
+            );
+            let graph_stats = statistics(187125, 4173, 5);
+            let (exact, short) = caps(graph_stats);
+            let graph = analyze_ownership(receipt, exact);
+            assert_eq!(graph.completion(), GraphCompletion::Incomplete);
+            assert_eq!(graph.statistics(), graph_stats);
+            for cap in short {
+                assert_eq!(
+                    analyze_ownership(receipt, cap).completion(),
+                    GraphCompletion::ResourceLimit
+                );
+            }
+            for (name, work, entries, depth, expected) in [
+                ("arrowInvoked", 1906, 50, 3, "f()"),
+                (
+                    "arrowUninvoked",
+                    1919,
+                    51,
+                    4,
+                    "() => first * 10i32 + second",
+                ),
+            ] {
+                let decl = named(module, name);
+                let query = |cap| lower_body(receipt, module, &decl.id, cap).unwrap();
+                let stats = statistics(work, entries, depth);
+                let (exact, short) = caps(stats);
+                let target = query(exact);
+                assert_eq!(target.completion(), Completion::Incomplete, "{name}");
+                assert_eq!(target.statistics(), stats, "{name}");
+                assert!(target.mir().is_none() && target.findings().is_empty());
+                assert_eq!(
+                    target.blocked_at().unwrap().span.bytes(),
+                    expected.as_bytes()
+                );
+                let root = graph_root(&graph, module, decl.node);
+                assert_eq!(root.ordinary_completion(), Completion::Incomplete, "{name}");
+                assert_eq!(root.blocked_at().unwrap().span.bytes(), expected.as_bytes());
+                for cap in short {
+                    let limited = query(cap);
+                    assert_eq!(limited.completion(), Completion::ResourceLimit, "{name}");
+                    assert!(limited.mir().is_none() && limited.findings().is_empty());
+                }
+            }
+        },
+    );
+}
+
 #[test]
 fn mixed_widths_do_not_issue_a_typed_receipt() {
     probe_report(
