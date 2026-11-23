@@ -18,12 +18,12 @@ Module source: **RFC** means the complete module in the RFC, verbatim after the 
 
 | Case | Test | Module | Outcome today | Owning bead |
 | --- | --- | --- | --- | --- |
-| O1 | `o01_shifted_point_waits_on_exclusive_deref_storage` | RFC | Typed: Incomplete (`pending Storage` at `*value += 1i32;`) | ri-1up |
+| O1 | `o01_shifted_point_checks_through_exclusive_deref_storage` | RFC | Typed: Checked. `increment`, `shifted` and the expectation `Checked` with MIR, in the targeted query and as ordinary graph roots (ri-2s0.5) | none |
 | O2 | `o02_remembered_slot_waits_on_descriptor_slot_storage` | RFC | Typed: Incomplete (`pending Storage` at `*slot = source;` and `&mut view`) | ri-1up |
 | O3 | `o03_identity_forwards_a_reference_but_its_roots_stay_incomplete` | RFC | Typed: Checked. `identity` Incomplete at `value: T` (graph root: at the whole function). `carried` Incomplete at `identity(&owner)`. Expectation: its comparison lowers (ri-785.9); it is Incomplete at `identity(&owner)` in the `carried` body it calls | ri-55r (rigid generic root) |
 | O4 | `o04_invalid_move_is_r0200` | RFC | R0200 at `first` (related: the move into `second`) | none: matches RFC |
 | O5 | `o05_disjoint_field_loans_check_and_field_arithmetic_blocks` | RFC | Typed: Checked. `separate` Incomplete at `pair.left + pair.right`. Expectation: its comparison lowers (ri-785.9); it is Incomplete at `pair.left + pair.right` in the `separate` body it calls | ri-fmsk (field arithmetic) |
-| O6 | `o06_reborrowing_calls_wait_on_exclusive_deref_storage` | RFC | Typed: Incomplete (`pending Storage` at `*value += 1i32;`) | ri-1up |
+| O6 | `o06_reborrowing_calls_check_through_exclusive_deref_storage` | RFC | Typed: Checked. `change`, `twice`, `result` and the expectation `Checked` with MIR, in the targeted query and as ordinary graph roots (ri-2s0.5) | none: ri-2s0.5 |
 | O7 | `o07_overlapping_reference_fields_are_not_yet_rejected` | Authored | Typed: Checked. `overlap` Incomplete at `holder` | ri-pfxi (exclusive reference members; found by ri-kdi) |
 | O8 | `o08_poisoned_slot_waits_on_descriptor_slot_storage` | RFC (O2 plus `poison`) | Typed: Incomplete (`pending Storage` at `*slot = source;`, `&mut view`, `*slot = &local;`) | ri-1up |
 | O9 | `o09_retained_list_source_contract_is_incomplete_at_its_calls` | Authored | Typed: Checked. `forwarded` Incomplete at `retain(dst, source)`. `local` Incomplete at `retain(dst, &user)` | ri-ema |
