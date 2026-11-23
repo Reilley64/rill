@@ -170,14 +170,18 @@ impl Edges {
 }
 
 // This backward pass tracks possible future reads. A transfer to a slot or
-// leaving its scope kills liveness of the old version. No supported cleanup
-// operation can observe a borrowed value: droppable slots contain only strings.
+// leaving its scope kills liveness of the old version. The only cleanup that
+// can observe a borrowed value is the custom disposer of a record with a
+// reference member (`observing`). Its displacement reads the old value. Its
+// scope cleanup reads it on entry: the record stays live up to that boundary,
+// which itself retires dependents before their sources.
 fn liveness(
     slots: &[Local<'_>],
     code: &[Instruction<'_>],
     calls: &[Call<'_, '_>],
     cleanups: &[Vec<Slot>],
     retained: &BTreeMap<Slot, RetainedContents>,
+    observing: &[Slot],
     budget: &mut Budget,
 ) -> ResultOf<Vec<BTreeSet<Slot>>> {
     budget.reserve(3 * code.len())?;
@@ -188,6 +192,24 @@ fn liveness(
         for next in instruction.edges.successors() {
             budget.reserve(1)?;
             users[next].push(pc);
+        }
+    }
+    // Screened by the build: no observing root, no added work.
+    let mut cleanup_reads = Vec::new();
+    if !observing.is_empty() {
+        budget.reserve(code.len())?;
+        cleanup_reads.resize(code.len(), Vec::new());
+        for (pc, instruction) in code.iter().enumerate() {
+            let (Action::Cleanup(index) | Action::EndScope(index)) = instruction.action else {
+                continue;
+            };
+            for &root in observing {
+                budget.step(1)?;
+                if cleanups[index].binary_search(&root).is_ok() {
+                    budget.reserve(1)?;
+                    cleanup_reads[pc].push(root);
+                }
+            }
         }
     }
     let mut pending: VecDeque<_> = (0..code.len()).collect();
@@ -224,6 +246,7 @@ fn liveness(
             Action::CheckedI32Multiply { left, into, .. } => use_one(Some(left), Some(into)),
             Action::CheckedI32Add { left, right, into } => ([Some(left), Some(right)], Some(into)),
             Action::EqualI32 { left, right, into } => ([Some(left), Some(right)], Some(into)),
+            Action::FormatI32Template { into, .. } => use_one(None, Some(into)),
             Action::Reborrow { parent, into, .. } => {
                 use_one(Some(slots[parent].carried_loan_root(parent)), Some(into))
             }
@@ -274,6 +297,10 @@ fn liveness(
                 route: OriginalTwoHopBool { descriptor, .. },
                 incoming,
             } => ([Some(descriptor), Some(incoming)], None),
+            Action::InstallScalarThrough {
+                descriptor,
+                incoming,
+            } => ([Some(descriptor), Some(incoming)], None),
             Action::TestVariant { operand, .. } => use_one(Some(operand), None),
             Action::CopyOptionPayload { operand, into }
             | Action::TakeOptionPayload { operand, into } => use_one(Some(operand), Some(into)),
@@ -296,6 +323,13 @@ fn liveness(
             Action::Cleanup(index) | Action::EndScope(index) => cleanups[index].as_slice(),
             _ => &[],
         };
+        let displaced = match instruction.action {
+            Action::Displace { target, .. } if !observing.is_empty() => {
+                budget.step(1)?;
+                observing.binary_search(&target).ok().map(|_| target)
+            }
+            _ => None,
+        };
         let mut changed = false;
         for next in instruction.edges.successors() {
             // A self-edge adds no new facts to this monotone solution.
@@ -308,7 +342,9 @@ fn liveness(
             } else {
                 (&mut high[0], &low[next])
             };
-            for &slot in there {
+            let read = cleanup_reads.get(next).into_iter().flatten();
+            let read = read.flat_map(|&root| slots[root].storage(root));
+            for slot in there.iter().copied().chain(read) {
                 budget.step(1)?;
                 if !killed.is_some_and(|target| {
                     target == slot
@@ -331,6 +367,7 @@ fn liveness(
             Action::CommitList { first, count, .. } => {
                 first..first + count * slots[first].storage(first).len()
             }
+            Action::FormatI32Template { first, count, .. } => first..first + count,
             _ => 0..0,
         };
         // Caller storage can still expose its installed value until a write
@@ -340,6 +377,7 @@ fn liveness(
             .flatten()
             .chain(args.iter().copied())
             .chain(stages)
+            .chain(displaced)
             .chain(retained.values().map(|contents| contents.slot()))
         {
             for member in slots[slot].storage(slot) {
@@ -1250,6 +1288,7 @@ fn flat_action(action: Action<'_>, slots: &[Local<'_>]) -> bool {
         | Action::Install { .. }
         | Action::CopyThrough { .. }
         | Action::InstallThrough { .. }
+        | Action::InstallScalarThrough { .. }
         | Action::CheckRetained
         | Action::End(_)
         | Action::Cleanup(_)
@@ -2319,6 +2358,7 @@ pub(super) fn run<'a, 'g>(
         retains_exclusive_bool,
         incoming_exclusive_bools,
         incoming_shared_i32,
+        observing_disposers,
         budget,
         ..
     } = build;
@@ -2327,7 +2367,15 @@ pub(super) fn run<'a, 'g>(
         module,
         disposer: Some(disposer),
     };
-    let live = liveness(&slots, &code, &calls, &cleanups, &retained, budget)?;
+    let live = liveness(
+        &slots,
+        &code,
+        &calls,
+        &cleanups,
+        &retained,
+        &observing_disposers,
+        budget,
+    )?;
     let empty = Held::default();
     let mut known = KnownStates::default();
     let mut blocks = Vec::new();
@@ -2620,6 +2668,7 @@ pub(super) fn run<'a, 'g>(
                         return Err(Stop::Pending(node));
                     }
                     let width = slots[first].storage(first).len();
+                    let scalars = matches!(slots[into].cleanup, StorageCleanup::DisposeListI32(_));
                     budget.step(count * width)?;
                     budget.reserve(count)?;
                     let mut elements = Vec::with_capacity(count);
@@ -2629,12 +2678,24 @@ pub(super) fn run<'a, 'g>(
                     {
                         for slot in stage.iter_mut() {
                             initialized(slot, node)?;
-                            *slot = State::Moved(node);
+                            // A scalar stage is ended, as an equality ends its scratch.
+                            *slot = if scalars {
+                                State::Vacant
+                            } else {
+                                State::Moved(node)
+                            };
                         }
                         elements.push(local(first + index * width));
                     }
                     state[into] = State::Initialized(empty.clone());
-                    if width == 1 {
+                    if scalars {
+                        Operation::CommitListI32 {
+                            elements,
+                            into: local(into),
+                            backing,
+                            provider,
+                        }
+                    } else if width == 1 {
                         Operation::CommitListText {
                             elements,
                             into: local(into),
@@ -3417,7 +3478,9 @@ pub(super) fn run<'a, 'g>(
                         let storage = slots[arg].storage(arg);
                         if matches!(
                             call.result,
-                            CallResult::RetainsInputs | CallResult::RetainsRecordInput
+                            CallResult::RetainsInputs
+                                | CallResult::RetainsRecordInput
+                                | CallResult::RetainsExclusiveInput
                         ) && call.into.is_some()
                         {
                             // A staged record borrow holds both whole access and its
@@ -3477,6 +3540,15 @@ pub(super) fn run<'a, 'g>(
                             implementation: call.callee,
                             argument: local(*argument),
                             into: call.into.map(local),
+                        }
+                    } else if matches!(call.result, CallResult::RetainsExclusiveInput) {
+                        let [argument] = call.args.as_slice() else {
+                            return Err(Stop::Pending(node));
+                        };
+                        Operation::CallExclusiveView {
+                            callee: call.callee,
+                            argument: local(*argument),
+                            into: local(call.into.ok_or(Stop::Pending(node))?),
                         }
                     } else if matches!(call.result, CallResult::RetainsRecordInput) {
                         let [argument] = call.args.as_slice() else {
@@ -4423,6 +4495,27 @@ pub(super) fn run<'a, 'g>(
                         into: local(into),
                     }
                 }
+                Action::FormatI32Template { first, count, into } => {
+                    budget.step(count)?;
+                    budget.reserve(count)?;
+                    let mut holes = Vec::with_capacity(count);
+                    for scratch in first..first + count {
+                        require_initialized(&slots, &state, scratch, node, budget)?;
+                        holes.push(local(scratch));
+                    }
+                    if !matches!(state[into], State::Vacant) {
+                        return Err(Stop::Pending(node));
+                    }
+                    // The interpolation supplies fresh loan-free i32 scratch slots.
+                    for scratch in &mut state[first..first + count] {
+                        *scratch = State::Vacant;
+                    }
+                    state[into] = State::Initialized(empty.clone());
+                    Operation::FormatI32Template {
+                        holes,
+                        into: local(into),
+                    }
+                }
                 Action::CopyThrough { descriptor, into } => {
                     let target = exact_target(&state, descriptor, node, budget)?;
                     conflict(
@@ -4482,6 +4575,28 @@ pub(super) fn run<'a, 'g>(
                         ValueOrigin::Untracked
                     };
                     state[target.contents_slot()] = State::Initialized(value);
+                    state[incoming] = State::Vacant;
+                    Operation::InstallThrough {
+                        descriptor: local(descriptor),
+                        incoming: local(incoming),
+                    }
+                }
+                Action::InstallScalarThrough {
+                    descriptor,
+                    incoming,
+                } => {
+                    initialized(&state[descriptor], node)?;
+                    initialized(&state[incoming], node)?;
+                    conflict(
+                        &slots,
+                        &state,
+                        &live[pc],
+                        descriptor,
+                        (node, Conflict::Access),
+                        Access::Exclusive,
+                        budget,
+                    )?;
+                    // The caller keeps the scalar's backing; only the scratch ends.
                     state[incoming] = State::Vacant;
                     Operation::InstallThrough {
                         descriptor: local(descriptor),

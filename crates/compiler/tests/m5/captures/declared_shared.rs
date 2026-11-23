@@ -293,6 +293,14 @@ fn declared_shared_siblings_keep_their_parent_caps() {
             [(ResultUseBlocker::CallBoundary, "job()")].as_slice(),
             (324_009, 47_673, 12),
         ),
+        // Review ci-uaa1 (ri-785.7 #1): an owned once wrapper whose body
+        // invokes another function, not its formal.
+        (
+            "otherOwned",
+            "function other(): bool { return true; }\nfunction invokeOther<F>(job: F): bool where callableOnce(F, [], bool) { return other(); }\nfunction callerOther(flag: bool): bool { return invokeOther(() => flag); }\n".to_string(),
+            [(ResultUseBlocker::Containment, "job: F")].as_slice(),
+            (324_801, 47_618, 12),
+        ),
     ] {
         probe_report(
             "captures::declared_shared::declared_shared_siblings_keep_their_parent_caps",
@@ -331,7 +339,9 @@ fn declared_shared_siblings_keep_their_parent_caps() {
     // A `callable` wrapper that never invokes its formal is told apart only by
     // its body: one charged ordered-declaration probe (+5 work) rejects it
     // before the keyed header lookup. At a95e04e8 it stopped at the same site
-    // at 1,917/55/3 (graph 187,611/4,040/3); neither cap was published.
+    // at 1,917/55/3 (graph 187,611/4,040/3); neither cap was published. Rule 1
+    // exception (chief of staff, 2026-11-23, ri-2s0.10): no paid fact tells the
+    // sibling apart before that charge, so each parent cap gives `ResourceLimit`.
     probe(
         "captures::declared_shared::declared_shared_siblings_keep_their_parent_caps",
         "function same<T>(x: &T): bool { return true; }\nfunction plain(flag: bool): bool { return same(&flag); }\nfunction skip<F>(job: &F): bool where callable(F, [], bool) { return true; }\nfunction ignored(flag: bool): bool { let f: () => bool = () => flag; return skip(&f); }\n",
@@ -353,8 +363,41 @@ fn declared_shared_siblings_keep_their_parent_caps() {
             let limited = lower_body(receipt, module, &ignored.id, old).unwrap();
             assert_eq!(limited.completion(), Completion::ResourceLimit);
             assert!(limited.mir().is_none() && limited.findings().is_empty());
+            assert_parent_graph_cap(receipt, (187_611, 4_040, 3));
             assert_pre_equality_graph_cap(receipt, (187_616, 4_040, 3));
             assert_graph_incomplete_at_caps(receipt, &graph, (187_932, 4_174, 5));
+        },
+    );
+    // The lent wrapper whose body invokes another function, not its formal
+    // (ri-785.7 #1, rule 1 exception of 2026-11-23, ri-2s0.10). The wrapper's
+    // body is found only by the charged ordered-declaration probe, and telling
+    // `other()` from `job()` needs a charged header or node-fact probe. At
+    // a95e04e8 it stopped at the same site at 1,899/46/3 (graph
+    // 186,959/4,049/3); neither cap was published.
+    probe(
+        "captures::declared_shared::declared_shared_siblings_keep_their_parent_caps",
+        "function other(): bool { return true; }\nfunction skipOther<F>(job: &F): bool where callable(F, [], bool) { return other(); }\nfunction ignoredOther(flag: bool): bool { let f: () => bool = () => flag; return skipOther(&f); }\n",
+        |_, module, receipt| {
+            let graph = analyze_ownership(receipt, AnalysisLimits::default());
+            check_capture_blocker(module, receipt, &graph, "ignoredOther", "skipOther(&f)");
+            assert_incomplete_at_caps(
+                module,
+                receipt,
+                "ignoredOther",
+                "skipOther(&f)",
+                (2_395, 46, 3),
+            );
+            let ignored = capture_declaration(module, "ignoredOther");
+            let old = AnalysisLimits {
+                max_work: 1_899,
+                max_entries: 46,
+                max_depth: 3,
+            };
+            let limited = lower_body(receipt, module, &ignored.id, old).unwrap();
+            assert_eq!(limited.completion(), Completion::ResourceLimit);
+            assert!(limited.mir().is_none() && limited.findings().is_empty());
+            assert_parent_graph_cap(receipt, (186_959, 4_049, 3));
+            assert_graph_incomplete_at_caps(receipt, &graph, (187_771, 4_183, 5));
         },
     );
     // Local invocations of a one-capture arrow are not frames: `f()` and
@@ -374,6 +417,33 @@ fn declared_shared_siblings_keep_their_parent_caps() {
             assert_pre_equality_graph_cap(receipt, (186_671, 4_033, 5));
             assert_graph_incomplete_at_caps(receipt, &graph, (186_987, 4_167, 5));
         },
+    );
+}
+
+/// A parent whole-graph cap, measured in a scratch worktree, now gives
+/// `ResourceLimit` with no finding and no MIR in any root.
+fn assert_parent_graph_cap(
+    receipt: &TypedReceipt<'_, '_>,
+    (work, entries, depth): (usize, usize, usize),
+) {
+    let parent = AnalysisLimits {
+        max_work: work,
+        max_entries: entries,
+        max_depth: depth,
+    };
+    let limited = analyze_ownership(receipt, parent);
+    assert_eq!(
+        limited.completion(),
+        GraphCompletion::ResourceLimit,
+        "{parent:?}"
+    );
+    assert!(limited.findings().is_empty(), "{parent:?}");
+    assert!(
+        limited
+            .roots()
+            .iter()
+            .all(|root| root.mir().is_none() && root.ordinary_mir().is_none()),
+        "{parent:?}"
     );
 }
 

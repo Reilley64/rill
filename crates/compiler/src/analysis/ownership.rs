@@ -457,6 +457,15 @@ pub enum Operation<'g> {
         backing: CollectionRepresentation<'g>,
         provider: CollectionArtifact<'g>,
     },
+    /// Move the initialized i32 stages in written order into a new backing
+    /// using the linked `List::from_elements`. Each stage ends; no partial
+    /// List is published.
+    CommitListI32 {
+        elements: Vec<Place<'g>>,
+        into: Place<'g>,
+        backing: CollectionRepresentation<'g>,
+        provider: CollectionArtifact<'g>,
+    },
     /// Consume the List and initialize the sole owner of its unyielded slots.
     OpenOwnedListI32 {
         source: Place<'g>,
@@ -579,6 +588,14 @@ pub enum Operation<'g> {
         right: Place<'g>,
         into: Place<'g>,
     },
+    /// Format the initialized i32 scratch values of a template's holes in
+    /// written order through the selected primitive Show, ending each
+    /// scratch and initializing the owned string result. Text pieces are
+    /// the template's own; no owner other than the scratch values ends.
+    FormatI32Template {
+        holes: Vec<Place<'g>>,
+        into: Place<'g>,
+    },
     /// Copy a scalar through a checked descriptor into its destination.
     CopyReferent {
         from: Place<'g>,
@@ -663,6 +680,16 @@ pub enum Operation<'g> {
     /// Call with a staged shared record descriptor. The result may retain the
     /// whole record access and the sources carried by its contents.
     CallBorrowingRecord {
+        callee: &'g DeclarationId,
+        argument: Place<'g>,
+        into: Place<'g>,
+    },
+    /// Call a family's selected implementation with one staged exclusive
+    /// borrow. The caller's contract is the implementation's declared
+    /// signature (RFC 0007 line 204), not its body. The returned read-only
+    /// view keeps the exclusive restriction on the borrowed place until the
+    /// view's last use; it is not a shared downgrade.
+    CallExclusiveView {
         callee: &'g DeclarationId,
         argument: Place<'g>,
         into: Place<'g>,
@@ -1751,7 +1778,13 @@ fn lower<'a, 'g>(
         if build.slots[*slot].custom_disposer != Some(&header.declaration.id) {
             return Err(Stop::Pending(entry_site));
         }
-        let remainder = build.slot(body, &parameter.ty)?;
+        // The one parameter is the only nested record value so far. Its
+        // epilogue copies that proved region; a flat record is rebuilt.
+        let remainder = if build.nested_record_values.is_empty() {
+            build.slot(body, &parameter.ty)?
+        } else {
+            build.clone_region(*slot, body)?
+        };
         Some(DisposerFrame {
             operand: *slot,
             remainder,
@@ -2279,8 +2312,8 @@ enum Action<'g> {
         forwarding_possible: bool,
     },
     Init(Slot),
-    /// `count` equal-width stage regions starting at `first`: string leaves
-    /// or whole records of string fields.
+    /// `count` equal-width stage regions starting at `first`: string leaves,
+    /// whole records of string fields, or i32 scalars for a `List<i32>`.
     CommitList {
         first: Slot,
         count: usize,
@@ -2367,6 +2400,12 @@ enum Action<'g> {
     EqualI32 {
         left: Slot,
         right: Slot,
+        into: Slot,
+    },
+    /// `count` contiguous i32 hole scratch slots starting at `first`.
+    FormatI32Template {
+        first: Slot,
+        count: usize,
         into: Slot,
     },
     Call(usize),
@@ -2505,6 +2544,12 @@ enum Action<'g> {
         route: OriginalTwoHopBool,
         incoming: Slot,
     },
+    /// Replace the `i32` behind an incoming exclusive `&mut i32` parameter,
+    /// ending the scratch `incoming`. The caller owns the backing.
+    InstallScalarThrough {
+        descriptor: Slot,
+        incoming: Slot,
+    },
     CheckRetained,
     End(Slot),
     Cleanup(usize),
@@ -2607,6 +2652,9 @@ struct Build<'a, 'g, 'b> {
     retaining_gate_values: [bool; 2],
     /// A top-level empty/continue loop whose only decision reads a Bool formal.
     list_delivery_loop: Option<(NodeId, NodeId)>,
+    /// A statement of a `while` or `for` body is being built. A family-selected
+    /// call is admitted only outside loops (ri-2s0.6).
+    in_loop: bool,
     scalar_copy_read: Option<NodeId>,
     copied_origins: BTreeSet<NodeId>,
     /// This body lends a local descriptor to a declared shared frame, so
@@ -2616,6 +2664,8 @@ struct Build<'a, 'g, 'b> {
     return_contract: Option<(&'g DeclarationId, &'a Type<'g>)>,
     callable_frame: Option<(CallableLayout, Slot)>,
     proved_variant_cleanup: Vec<Type<'g>>,
+    /// Roots, in slot order, whose custom disposer can read a reference member.
+    observing_disposers: Vec<Slot>,
     budget: &'b mut Budget,
 }
 
@@ -2657,6 +2707,8 @@ enum CallResult<'a, 'g> {
     ScalarCopy,
     RetainsInputs,
     RetainsRecordInput,
+    /// A returned read-only view keeps the one staged exclusive input live.
+    RetainsExclusiveInput,
     RetainsOptionCarrier(&'a DeclarationFacts<'g>),
     TransfersCallable(&'a DeclarationFacts<'g>),
 }

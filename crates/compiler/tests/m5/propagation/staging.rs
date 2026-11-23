@@ -779,3 +779,94 @@ fn condition_postfix_continues_on_the_ordinary_branch() {
         },
     );
 }
+
+/// Metering rule 6 (review ci-uaa1, ri-vgz.6 #3): the same postfix tuple and
+/// condition after a `return` grant nothing. No variant test, branch, stage or
+/// cleanup is emitted for them, and the dead second use of an already disposed
+/// string is not `R0200`. The feasible controls are `tuple` and `conditionRead`
+/// above, the pruned ones `skippedSuffix` and `skippedRead`.
+#[test]
+fn dead_postfix_staging_grants_nothing() {
+    probe_with_typed(
+        "propagation::staging::dead_postfix_staging_grants_nothing",
+        r#"
+function stage(value: string): string { return value; }
+function deadTuple(first: string, gate: Option<bool>, suffix: string): Option<bool> {
+    dispose(first);
+    return Option.Some(true);
+    let value: [string, bool, string] = [stage(first), gate?, stage(suffix)];
+}
+function deadCondition(gate: Option<bool>, retired: string): Option<bool> {
+    dispose(retired);
+    return Option.Some(true);
+    if (gate?) { dispose(retired); }
+}
+"#,
+        |_, module, receipt, typed| {
+            let graph_stats = stats(193_518, 4_955, 5);
+            let graph = analyze_ownership(receipt, exact(graph_stats));
+            assert_eq!(graph.statistics(), graph_stats);
+            assert_eq!(graph.completion(), GraphCompletion::Incomplete);
+            assert!(graph.findings().is_empty());
+            for short in one_short(graph_stats) {
+                let limited = analyze_ownership(receipt, short);
+                assert_eq!(limited.completion(), GraphCompletion::ResourceLimit);
+                assert!(limited.roots().iter().all(|r| r.ordinary_mir().is_none()));
+            }
+            for (name, pinned, expected) in [
+                (
+                    "deadTuple",
+                    stats(3_358, 431, 4),
+                    &[
+                        "dispose first: string",
+                        "init dispose(first)",
+                        "init true",
+                        "Some(true) -> Option.Some(true)",
+                        "export Option.Some(true)",
+                        "cleanup [drop suffix: string, end gate: Option<bool>]",
+                    ][..],
+                ),
+                (
+                    "deadCondition",
+                    stats(3_313, 407, 4),
+                    &[
+                        "dispose retired: string",
+                        "init dispose(retired)",
+                        "init true",
+                        "Some(true) -> Option.Some(true)",
+                        "export Option.Some(true)",
+                        "cleanup [end gate: Option<bool>]",
+                    ][..],
+                ),
+            ] {
+                let d = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap();
+                let report = lower_body(receipt, module, &d.id, exact(pinned)).unwrap();
+                assert_eq!(
+                    (report.completion(), report.statistics()),
+                    (Completion::Checked, pinned),
+                    "{name}"
+                );
+                assert!(report.findings().is_empty(), "{name}");
+                let mir = report.mir().unwrap();
+                assert_eq!(linear_path(mir, typed, mir.entry), expected, "{name}");
+                for short in one_short(pinned) {
+                    let limited = lower_body(receipt, module, &d.id, short).unwrap();
+                    assert_eq!(limited.completion(), Completion::ResourceLimit, "{name}");
+                    assert!(limited.mir().is_none() && limited.findings().is_empty());
+                }
+                let root = graph
+                    .roots()
+                    .iter()
+                    .find(|r| r.owner() == BodyOwner::Declaration(&d.id))
+                    .unwrap();
+                assert_eq!(root.ordinary_completion(), Completion::Checked, "{name}");
+                let mir = root.ordinary_mir().unwrap();
+                assert_eq!(linear_path(mir, typed, mir.entry), expected, "{name}");
+            }
+        },
+    );
+}

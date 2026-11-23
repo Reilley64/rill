@@ -84,6 +84,10 @@ impl<'a, 'g> Build<'a, 'g, '_> {
                 if declaration.kind == DeclarationKind::Record
                     && declaration.module.origin == Origin::Application
                     && arguments.is_empty());
+        // A shared reference to an application record owns nothing: its
+        // element slots need no drop and its yield carries no local loan.
+        let shared_ref =
+            !text && !option_text && !record && self.is_shared_record_reference(&iteration.yielded);
         use crate::analysis::scalars::IterationBodyKind::{
             NamedBoolPostfix, Ordinary, YieldedTextPostfix,
         };
@@ -98,6 +102,7 @@ impl<'a, 'g> Build<'a, 'g, '_> {
             || (!text
                 && !option_text
                 && !record
+                && !shared_ref
                 && scalar::scalar(&iteration.yielded) != Some(Primitive::I32))
         {
             return Err(pending());
@@ -175,6 +180,11 @@ impl<'a, 'g> Build<'a, 'g, '_> {
                     && matches!(named.ty.as_ref(), TypeTerm::Nominal { declaration, arguments }
                         if self.typed.list_role().is_some_and(|role| std::ptr::eq(*declaration, &role.declaration.id))
                             && matches!(arguments.as_slice(), [element] if *element == iteration.yielded))
+            } else if shared_ref {
+                path.root.kind == DeclarationKind::Parameter
+                    && self.is_list_shared_record_reference(&named.ty)
+                    && matches!(named.ty.as_ref(), TypeTerm::Nominal { arguments, .. }
+                        if matches!(arguments.as_slice(), [element] if *element == iteration.yielded))
             } else {
                 self.is_list_i32(&named.ty)
             };
@@ -311,7 +321,9 @@ impl<'a, 'g> Build<'a, 'g, '_> {
             };
             (Some(list_backing), cleanup)
         } else {
-            self.check_i32_element_cleanup(node)?;
+            if !shared_ref {
+                self.check_i32_element_cleanup(node)?;
+            }
             (None, StorageCleanup::DisposeOwnedListIterI32(release))
         };
         let into =
@@ -355,6 +367,7 @@ impl<'a, 'g> Build<'a, 'g, '_> {
             }
             _ => self.record_field_disposal,
         };
+        let outer = std::mem::replace(&mut self.in_loop, true);
         let yes = self.statement(
             body,
             looping.continues,
@@ -364,6 +377,7 @@ impl<'a, 'g> Build<'a, 'g, '_> {
             },
             depth + 1,
         );
+        self.in_loop = outer;
         self.record_field_disposal = enclosing;
         let yes = yes?;
         self.code[head].edges = Edges::Branch { yes, no: retire };

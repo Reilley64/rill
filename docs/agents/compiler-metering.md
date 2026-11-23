@@ -11,6 +11,13 @@ A new proof path decides eligibility from facts already paid for, before its fir
 - **Check:** in every new path, no `step`, `reserve`, `charge_key` or allocation precedes the last early return that rejects an unsupported shape.
 - **Example:** `335da9f` preflights both child shapes, environments and premises before allocating isolated Result-use checks.
 
+**Exceptions (2026-11-23, chief of staff, under rule 11's authority line).** Nine unsupported siblings in four tests pay before they reject, because no paid fact can reject them earlier; an earlier screen needs new M4 facts. Each keeps its current cap, pinned exact and one short, and each parent cap is asserted to give `ResourceLimit`. They stay `Incomplete` (or `SourceRejected`) at default limits. The evidence is [`ri-2s0.10.md`](../../crates/compiler/tests/m5-acceptance/ri-2s0.10.md); the restructuring is one open bead. No other sibling has an exception.
+
+- `captures::declared_shared::declared_shared_siblings_keep_their_parent_caps`: `ignored` (`skip(&f)`, +5 work) and `ignoredOther` (a lent `return other();` wrapper, +496 work).
+- `iteration::record::record_yield_cleans_the_partial_item_then_the_suffix`: `mixed` (+3 work) and `custom` (+372 work, +61 entries).
+- `m4_8_callable_once::private_once_checks_the_actual_shared_pair`: `shared-formal-actual` (+1 work), `shared-result-capture` (+16 work, +3 entries) and `shared-unclosed` (+464 work, +14 entries).
+- `m4_8_match_boolean_snapshots::installed_boolean_matches`: `pre: mutable binder` (+11 work) and `pre: copy of another parameter` (+14 work), both before the same `R0103`.
+
 ## 2. Every new admission ships a parent-cap regression
 
 Admitting a shape adds work to the shapes next to it. Pin the nearest unsupported siblings at the caps the parent revision measured, so the test fails when the new path spends before it rejects.
@@ -24,6 +31,7 @@ A `BTreeMap` probe costs one comparison per halving and each comparison can read
 
 - **Check:** each `.get(`, `.contains_key(`, `.entry(` and `.insert(` on a map whose key holds a `ModuleKey.path` is preceded by `charge_key`, or by a call that wraps it such as `module_index`. A fixed-width key needs `budget.step(1)`.
 - **Example:** `6c9cb8c7` introduces `charge_key` and routes the graph and state-cache probes through it.
+- **Known non-conforming sites (2026-11-23):** review `ci-uaa1` found more than 25 existing probes of `DeclarationId`-keyed maps charged as fixed width or not at all, in `ownership/build.rs`, `flow.rs` and `scalar.rs`, typed `result_use` and `scalars/generics/callable_copy.rs`. By owner decision of 2026-11-23 they are deferred to `ri-qlh.3` (charged lookup wrappers and the `ri-30q` lint), whose re-pins fall under the third case of rule 11. Those existing sites are known non-conforming; a new or touched probe must conform.
 
 ## 4. Reserve before you allocate
 
@@ -76,9 +84,9 @@ A reviewer's finding is closed only by a test in the repository that fails witho
 
 ## 11. Cap changes
 
-A published cap (in a test, or in the fixed-cap manifest once H1, `ri-px1.1`, adds it) moves only in the two cases below. Raising a cap so that a change fits is neither. A diff that moves a cap in any other case fails review, and the ticket stops: its implementer closes the bead as `blocked` and reports the old and new numbers.
+A published cap (in a test, or in the fixed-cap manifest once H1, `ri-px1.1`, adds it) moves only in the three cases below. Raising a cap so that a change fits is none of them. A diff that moves a cap in any other case fails review, and the ticket stops: its implementer closes the bead as `blocked` and reports the old and new numbers. A cap movement outside the three cases is decided by the rig's chief of staff (`rill/staff.chief-of-staff`) or the owner; the chief escalates to the owner when the movement changes what M5's definition of done means.
 
-Both cases require, in one diff:
+Every case requires, in one diff:
 
 - the cap change as a single line in the fixed-cap manifest (`crates/compiler/tests/m5/legacy-caps.tsv`, once H1 has landed; before then, in the test that pins the cap);
 - a dated ledger note that states the old numbers, the new numbers and the reason;
@@ -101,4 +109,15 @@ A correctness fix may move the cap of an unsupported targeted route when the blo
 - **Check:** the commit message or ledger note names the skipped check and the old and new blocker sites.
 - **Check:** the new route reports `Incomplete` at the new cap, with the new blocker site asserted (rule 8). The old cap gives `ResourceLimit`.
 - **Check:** the cost is not avoidable. If rule 1 could place a screen earlier so the old cap still holds, the exception does not apply and the diff is refused.
-- **Example:** `003c4147` checks both captures before the parent exit, as Standards required. The old live-`Err` cap stopped at the unlowered pair binding, and now gives `ResourceLimit`. Reproducing the old blocker would need an earlier proof that keeps the capture diagnostics.
+- **Example:** `003c4147` checks both captures before the parent exit, as Standards required. The old live-`Err` cap stopped at the unlowered pair binding. `e022c80d` re-pins it under this case: `live_parent_error_reaches_the_join_at_its_repinned_cap` (`tests/m5/scoped_join/fresh_result.rs`) asserts that the old cap now gives `ResourceLimit`. Reproducing the old blocker would need an earlier proof that keeps the capture diagnostics.
+
+### A ticket's mandated flip or charge (owner decision, 2026-11-23)
+
+A ticket whose body mandates flipping a targeted outcome (for example `Incomplete` to `Checked`), or charging a lookup that a rule requires, may move the targeted caps that the flip or charge moves. Whole-graph moves in the same diff still follow D2 (b).
+
+- **Check:** the ticket body or a recorded ruling names the flip or charge before the diff.
+- **Check:** the ticket's evidence file states the old numbers, the new numbers and the reason.
+- **Check:** the old cap asserts `ResourceLimit`.
+- **Check:** the cost is not avoidable by a rule-1 screen.
+- **Note (2026-11-23, chief of staff):** when a mandated flip lowers the cost, the old cap cannot give `ResourceLimit`: it still holds. The test then asserts the new exact triple and that one unit less than the new cap on each axis gives `ResourceLimit`, and the evidence file states old, new and the reason. Example: C12 (`ri-2s0.4`), rows `pre` and `computed` in `m4_8_match_boolean_snapshots::installed_boolean_matches` (426,921/48,910/12 to 426,895/48,892/12, and 428,253/49,198/12 to 427,988/49,104/12).
+- **Example:** the owner ratified three such moves on 2026-11-23 (review `ci-uaa1`). A2 (`ri-785.1`) charges the O15 `counter` reads with `charge_key`: 2,504/329/6 to 2,562/329/6, graph 187,485 to 187,543 (`rfc_cases::o15_pre_charge_counter_caps_now_give_resource_limit`). B6 (`ri-785.9`) lowers i32 equality, so the O15 expectation flips from `Incomplete` at 1,893/32/1 to `Checked` at 4,577/425/6, and O3 and O5 move with it (`rfc_cases::equality_expectations_exceed_their_incomplete_caps`). C1 (`ri-vgz.3`) admits `callerExclusive`: `Incomplete` at 3,089/284/4 to `Checked` at 9,466/1,677/4 (`propagation::option_caller::exclusive_relay_caller_exceeds_its_parent_caps`).

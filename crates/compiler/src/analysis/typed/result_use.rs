@@ -138,7 +138,12 @@ type Alternatives<'g> = Vec<Residence<'g>>;
 enum ValueUse {
     Used,
     Statement,
-    Binding { pattern: NodeId, depth: usize },
+    /// The scrutinee of a Boolean match that has no typed source place.
+    Scrutinee,
+    Binding {
+        pattern: NodeId,
+        depth: usize,
+    },
 }
 
 #[derive(Clone, Copy)]
@@ -740,6 +745,14 @@ impl<'a, 'g> Check<'a, 'g> {
                         && syntax.kind == NodeKind::Assignment("=")
                         && path.projections.as_slice() == [PathProjection::Dereference]
                 });
+                let plain_i32_compound = path.filter(|path| {
+                    checked
+                        && syntax.kind == NodeKind::Assignment("+=")
+                        && path.projections.as_slice() == [PathProjection::Dereference]
+                        && target.is_some_and(|target| {
+                            matches!(target.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32")
+                        })
+                });
                 let mut alternatives = self.expression(right, state, depth + 1)?;
                 for state in &mut alternatives {
                     if let Some(path) = path {
@@ -788,6 +801,12 @@ impl<'a, 'g> Check<'a, 'g> {
                         && self.terminal_nested_bool_write(node, target, state, &incoming, depth)?
                     {
                         // No displaced Result-use state to update; ownership still checks the store.
+                    } else if plain_i32_compound.is_some()
+                        && matches!(&storage, PlaceStorage::Indirect(locations) if locations.is_empty())
+                    {
+                        // A compound write through an exclusive `i32` descriptor
+                        // replaces a closed scalar: no Result or Boolean fact can
+                        // reside there. The ownership pass checks the backing.
                     } else {
                         self.pending(node, ResultUseBlocker::Storage)?;
                         for address in storage.addresses() {

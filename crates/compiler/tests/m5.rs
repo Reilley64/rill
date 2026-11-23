@@ -36,6 +36,8 @@ mod legacy_caps;
 mod o05_field_arithmetic;
 #[path = "m5/o15_arithmetic.rs"]
 mod o15_arithmetic;
+#[path = "m5/o16_join_order.rs"]
+mod o16_join_order;
 #[path = "m5/patterns.rs"]
 mod patterns;
 #[path = "m5/propagation.rs"]
@@ -332,25 +334,33 @@ fn ownership_from_installed_source() {
                 matches!(mir.blocks[next].operation, Operation::Install { target, .. } if target.root.span.bytes() == b"state")
             );
 
-            let ordered = lower("ordered");
-            let mir = ordered
-                .mir()
-                .unwrap_or_else(|| panic!("{:?}", ordered.completion()));
-            assert!(mir.blocks.iter().any(|b| {
-            let Operation::Cleanup(order) = &b.operation else { return false; };
-            matches!(order.as_slice(), [Obligation::EndStorage(dependent), Obligation::Drop(source)]
-                if dependent.root.span.bytes() == b"dependent" && source.root.span.bytes() == b"source")
-        }));
-
-            let replaced = lower("reinitialized");
-            let mir = replaced.mir().unwrap();
-            assert!(
-                mir.blocks
-                    .iter()
-                    .any(|b| matches!(&b.operation, Operation::Cleanup(order)
-            if matches!(order.as_slice(), [Obligation::Drop(owner), Obligation::EndStorage(view)]
-                if owner.root.span.bytes() == b"owner" && view.root.span.bytes() == b"view")))
-            );
+            // K1 (review ci-uaa1, ri-px1.10 #1b and SP-F8): the whole lexical
+            // cleanup of each body, at exact caps and one short on each axis.
+            // `rank` replaces `a` after `b` is declared; replacement keeps the
+            // declaration rank, so `b` is still dropped first.
+            for (name, caps, cleanup) in [
+                (
+                    "ordered",
+                    (3_011, 590, 4),
+                    &[
+                        ("end", &b"dependent"[..]),
+                        ("drop", b"source"),
+                        ("end", b"seed: &string"),
+                    ][..],
+                ),
+                (
+                    "reinitialized",
+                    (3_106, 648, 4),
+                    &[
+                        ("drop", &b"owner"[..]),
+                        ("drop", b"owner"),
+                        ("end", b"view"),
+                        ("end", b"seed: &string"),
+                    ][..],
+                ),
+            ] {
+                assert_whole_cleanup(receipt, module, name, caps, cleanup);
+            }
             let caller = lower("transitivelyBad");
             assert_eq!(caller.completion(), Completion::SourceRejected);
             assert!(caller.mir().is_none());
@@ -595,6 +605,32 @@ fn installed_multi_module_borrow_join_and_early_exit() {
     );
 }
 
+/// K1, RFC 0007 "Replacement does not change a binding's declaration rank"
+/// (review ci-uaa1 SP-F8): `a` is declared first and replaced last, so a
+/// rank taken from the replacement would drop `a` before `b`.
+#[test]
+fn replacement_keeps_the_declaration_rank() {
+    probe(
+        "replacement_keeps_the_declaration_rank",
+        r#"
+            function rank(): void {
+                let mut a = "a";
+                let b = "b";
+                a = "c";
+            }
+        "#,
+        |_, module, receipt| {
+            assert_whole_cleanup(
+                receipt,
+                module,
+                "rank",
+                (2_073, 131, 3),
+                &[("drop", b"a"), ("drop", b"b"), ("drop", b"a")],
+            );
+        },
+    );
+}
+
 fn probe(
     test: &str,
     source: &str,
@@ -720,6 +756,85 @@ fn assert_pre_equality_graph_cap(
     );
 }
 
+/// Lowers `name` at exactly `(work, entries, depth)`, asserts `Checked` with
+/// that meter and the whole ordered lexical cleanup of its linear MIR, then
+/// asserts `ResourceLimit` with no MIR and no finding one short on each axis.
+fn assert_whole_cleanup(
+    receipt: &TypedReceipt<'_, '_>,
+    module: &loader::Module,
+    name: &str,
+    (work, entries, depth): (usize, usize, usize),
+    cleanup: &[(&str, &[u8])],
+) {
+    let id = &module
+        .declarations
+        .iter()
+        .find(|d| d.name.as_deref() == Some(name))
+        .unwrap()
+        .id;
+    let exact = AnalysisLimits {
+        max_work: work,
+        max_entries: entries,
+        max_depth: depth,
+    };
+    let report = lower_body(receipt, module, id, exact).unwrap();
+    assert_eq!(
+        report.completion(),
+        Completion::Checked,
+        "{name}: {report:?}"
+    );
+    let s = report.statistics();
+    assert_eq!(
+        (s.work, s.entries, s.max_depth),
+        (work, entries, depth),
+        "{name}"
+    );
+    let mir = report.mir().unwrap();
+    let text = |bytes: &[u8]| String::from_utf8_lossy(bytes).into_owned();
+    let actual: Vec<(&str, String)> = linear(mir, mir.entry)
+        .into_iter()
+        .flat_map(|operation| match operation {
+            Operation::Drop(place) => vec![("drop", text(place.root.span.bytes()))],
+            Operation::Cleanup(order) => order
+                .iter()
+                .map(|obligation| match obligation {
+                    Obligation::Drop(place) => ("drop", text(place.root.span.bytes())),
+                    Obligation::EndStorage(place) => ("end", text(place.root.span.bytes())),
+                    other => panic!("{name}: unexpected cleanup {other:?}"),
+                })
+                .collect(),
+            _ => vec![],
+        })
+        .collect();
+    let cleanup: Vec<(&str, String)> = cleanup
+        .iter()
+        .map(|(kind, place)| (*kind, text(place)))
+        .collect();
+    assert_eq!(actual, cleanup, "{name}");
+    for short in [
+        AnalysisLimits {
+            max_work: work - 1,
+            ..exact
+        },
+        AnalysisLimits {
+            max_entries: entries - 1,
+            ..exact
+        },
+        AnalysisLimits {
+            max_depth: depth - 1,
+            ..exact
+        },
+    ] {
+        let limited = lower_body(receipt, module, id, short).unwrap();
+        assert_eq!(
+            limited.completion(),
+            Completion::ResourceLimit,
+            "{name} {short:?}"
+        );
+        assert!(limited.mir().is_none() && limited.findings().is_empty());
+    }
+}
+
 fn linear<'a, 'g>(mir: &'a Mir<'g>, mut pc: usize) -> Vec<&'a Operation<'g>> {
     let mut ops = Vec::new();
     for _ in 0..mir.blocks.len() {
@@ -841,6 +956,20 @@ fn installed(test: &str, check: impl FnOnce(InstalledRequest)) {
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
     );
+    // A name that matches no test runs zero tests and still succeeds.
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        stdout.contains("running 1 test\n") && stdout.contains("test result: ok. 1 passed;"),
+        "child `{test}` ran no test or more than one:\n{stdout}"
+    );
+}
+
+/// Review ci-uaa1, ri-px1.5 #1: a child name that matches no test runs zero
+/// tests and exits successfully, so `installed` must fail on it.
+#[test]
+#[should_panic(expected = "ran no test")]
+fn installed_fails_when_the_child_runs_no_test() {
+    installed("installed_child_name_that_matches_no_test", |_| {});
 }
 
 struct Cleanup<'a>(&'a Path);

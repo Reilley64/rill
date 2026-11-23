@@ -1,0 +1,36 @@
+
+            import std::{List, Result, Err};
+            import std::channel::{Receiver, Sender};
+            import std::convert::{into, tryInto};
+            import std::error::formatError;
+            import std::iter::iterate;
+            import std::mutex::LockGuard;
+            import std::number::ParseError;
+            import std::option::{Option, map as mapOption};
+            import std::result::{isOk, map as mapResult};
+            import std::shared::Shared;
+    
+
+            import std::core::dispose as release;
+            type Plain = { plainHead: string; plainLock: LockGuard<i32>; plainTail: string; }
+            function mixedWrapper(owned: Plain, view: &Plain): &Plain { return view; }
+            function mixedGrouped(owned: Plain, view: &Plain): &Plain { return ((view)); }
+            function mixedExplicit(owned: Plain, view: &Plain): &Plain {
+                let held = owned.plainLock;
+                dispose(held);
+                return view;
+            }
+            function guardBesideView(owned: LockGuard<i32>, view: &Plain): &Plain { return view; }
+            function wrapperReferenceOnly(view: &Plain): &Plain { return view; }
+            function exclusiveWrapper(owned: Plain, view: &mut Plain): &mut Plain { return view; }
+            function guardForward(owned: Plain, view: &LockGuard<i32>): &LockGuard<i32> { return view; }
+            type Kept = { keptHead: string; keptLock: LockGuard<i32>; }
+            implement release(value: Kept): void { }
+            function disposedGuardForward(owned: Kept, view: &LockGuard<i32>): &LockGuard<i32> {
+                release(owned);
+                return view;
+            }
+            function disposedWrapperForward(owned: Kept, view: &Kept): &Kept {
+                release(owned);
+                return view;
+            }

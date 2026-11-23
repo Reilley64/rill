@@ -95,6 +95,94 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         }
     }
 
+    /// Admit `*parameter += literal` through an incoming `&mut i32`: read the
+    /// referent, add the literal with the checked scalar addition, install the
+    /// sum through the descriptor and end the scratch slots.
+    pub(super) fn add_through_exclusive_i32(
+        &mut self,
+        node: NodeId,
+        next: Pc,
+        depth: usize,
+    ) -> ResultOf<Pc> {
+        let pending = Stop::Pending(node);
+        let syntax = &self.module.syntax.nodes;
+        // Screen from the written shape before any charge.
+        let [left, right] = *syntax[node].children.as_slice() else {
+            return Err(pending);
+        };
+        if syntax[right].kind != NodeKind::Literal {
+            return Err(pending);
+        }
+        let (NodeKind::Prefix("*"), &[target]) =
+            (syntax[left].kind, syntax[left].children.as_slice())
+        else {
+            return Err(pending);
+        };
+        if syntax[target].kind != NodeKind::ValueReference {
+            return Err(pending);
+        }
+        // Facts already in hand: `value` reads them without a charge.
+        let target_facts = self.value(target)?;
+        let TypeTerm::Reference {
+            mutable: true,
+            referent,
+        } = target_facts.ty.as_ref()
+        else {
+            return Err(pending);
+        };
+        let (Some(path), true) = (
+            target_facts.path.as_ref(),
+            matches!(referent.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32"),
+        ) else {
+            return Err(pending);
+        };
+        if path.root.kind != DeclarationKind::Parameter
+            || !path.projections.is_empty()
+            || target_facts.access != Access::Owned
+            || target_facts.binding != Some(path.root)
+        {
+            return Err(pending);
+        }
+        let (place, literal) = (self.value(left)?, self.value(right)?);
+        if place.ty != *referent
+            || literal.ty != *referent
+            || place.place != TypedPlace::Writable
+            || self.arithmetic_literal(right, literal).is_none()
+        {
+            return Err(pending);
+        }
+        self.depth(depth + 1)?;
+        self.normal_value(target)?;
+        self.normal_value(left)?;
+        self.normal_value(right)?;
+        let ty = place.ty.clone();
+        let descriptor = self.place(target)?;
+        let current = self.slot(left, &ty)?;
+        let operand = self.slot(right, &ty)?;
+        let sum = self.slot(node, &ty)?;
+        let install = self.emit(
+            node,
+            Action::InstallScalarThrough {
+                descriptor,
+                incoming: sum,
+            },
+            Edges::Next(next),
+        )?;
+        let end_operand = self.emit(right, Action::End(operand), Edges::Next(install))?;
+        let end_current = self.emit(left, Action::End(current), Edges::Next(end_operand))?;
+        let add = self.emit(
+            node,
+            Action::CheckedI32Add {
+                left: current,
+                right: operand,
+                into: sum,
+            },
+            Edges::Next(end_current),
+        )?;
+        let operand_init = self.expression(right, Some(operand), add, depth + 1)?;
+        self.expression(left, Some(current), operand_init, depth + 1)
+    }
+
     /// Evaluate both `i32` operands left to right into scratch slots, which
     /// the comparison ends, then initialize the `bool` result.
     pub(super) fn i32_equality(
@@ -112,6 +200,15 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         let right_ty = &self.normal_value(right)?.ty;
         let left_slot = self.slot(left, left_ty)?;
         let right_slot = self.slot(right, right_ty)?;
+        let left_temp = self.call_field_operand(left, depth + 1)?;
+        let right_temp = self.call_field_operand(right, depth + 1)?;
+        let scratch: Vec<Slot> = left_temp
+            .iter()
+            .chain(&right_temp)
+            .map(|temp| temp.scratch)
+            .collect();
+        // The projected call results end after the comparison reads them.
+        let next = self.cleanup(node, &scratch, next)?;
         let compare = self.emit(
             node,
             Action::EqualI32 {
@@ -121,8 +218,56 @@ impl<'a, 'g> Build<'a, 'g, '_> {
             },
             Edges::Next(next),
         )?;
-        let right = self.expression(right, Some(right_slot), compare, depth + 1)?;
-        self.expression(left, Some(left_slot), right, depth + 1)
+        let right = self.stage_value(right, right_slot, compare, right_temp, depth + 1)?;
+        self.stage_value(left, left_slot, right, left_temp, depth + 1)
+    }
+
+    /// The projection of `call().field` as an equality operand, if written so.
+    fn call_field_operand(
+        &mut self,
+        operand: NodeId,
+        depth: usize,
+    ) -> ResultOf<Option<ProjectedTemporary>> {
+        // Screen on the written shape, through groups, before any charge.
+        let nodes = &self.module.syntax.nodes;
+        let mut shape = operand;
+        while nodes[shape].kind == NodeKind::Group {
+            shape = nodes[shape].children[0];
+        }
+        if nodes[shape].kind != NodeKind::Field {
+            return Ok(None);
+        }
+        let (shape, _) = self.ungroup_expression_at(operand, depth)?;
+        self.temporary_projection(shape, true)
+    }
+
+    /// `left && right` on two i32 equalities (ri-e9t8). Evaluate `left` into a
+    /// scratch `bool`, end it on both edges, then either evaluate `right`
+    /// into `into` or, when `left` is false, initialize `into` without
+    /// evaluating `right`. Both edges reach `next` with `into` initialized.
+    pub(super) fn i32_equality_conjunction(
+        &mut self,
+        node: NodeId,
+        into: Option<Slot>,
+        next: Pc,
+        depth: usize,
+    ) -> ResultOf<Pc> {
+        let into = into.ok_or(Stop::Pending(node))?;
+        let [left, right] = *self.module.syntax.nodes[node].children.as_slice() else {
+            return Err(Stop::Pending(node));
+        };
+        let left_facts = self.normal_value(left)?;
+        // A statically decided left operand has a dead edge, which grants nothing.
+        if Self::outcomes(left_facts) != (true, true) {
+            return Err(Stop::Pending(node));
+        }
+        let scratch = self.slot(left, &left_facts.ty)?;
+        let skipped = self.emit(node, Action::Init(into), Edges::Next(next))?;
+        let no = self.emit(node, Action::End(scratch), Edges::Next(skipped))?;
+        let evaluated = self.expression(right, Some(into), next, depth + 1)?;
+        let yes = self.emit(node, Action::End(scratch), Edges::Next(evaluated))?;
+        let branch = self.branch(left, yes, no)?;
+        self.expression(left, Some(scratch), branch, depth + 1)
     }
 
     fn arithmetic_literal(&self, node: NodeId, facts: &ExpressionFacts<'g>) -> Option<i32> {

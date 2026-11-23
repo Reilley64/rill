@@ -126,6 +126,9 @@ pub struct ExpressionFacts<'g> {
     /// The written shape is `left == right` on two `i32` operands. M5 still
     /// checks that each operand is normal and lowers it.
     pub(in crate::analysis) i32_equality: bool,
+    /// The written shape is `left && right` where each operand, through
+    /// groups, has the `i32_equality` shape (ri-e9t8).
+    pub(in crate::analysis) i32_equality_conjunction: bool,
 }
 pub use core::{
     ErrorConstruction, Propagation, PropagationError, PropagationTarget, RetainedError, Wrapping,
@@ -441,6 +444,8 @@ enum I32Operand {
     Literal,
     Product,
     Sum,
+    /// A read of one component of a local or parameter tuple, `pair[0]`.
+    TupleElement,
 }
 struct ExpressionResult<'g> {
     ty: Type<'g>,
@@ -531,6 +536,7 @@ struct Checker<'r, 'g> {
     installed_conversions: Option<&'r super::typed::ConversionCore<'g>>,
     collections: CollectionCore<'g>,
     native_ownership: &'r [super::typed::OwnershipProtection<'g>],
+    ownership_overlaps: &'r [super::typed::OwnershipOverlap<'g>],
     ordinary_scope: Option<super::typed::InstalledOrdinaryScope<'g>>,
     data_depth: usize,
     evidence: generics::Evidence<'g>,
@@ -568,6 +574,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             installed_conversions: None,
             collections: Default::default(),
             native_ownership: &[],
+            ownership_overlaps: &[],
             ordinary_scope: None,
             data_depth: 0,
             evidence: generics::Evidence::default(),
@@ -2710,6 +2717,26 @@ impl<'r, 'g> Checker<'r, 'g> {
                     {
                         Literal
                     }
+                    // `slot.path` is rooted at the tuple and projects one component, so the
+                    // read cannot be a List index, which can trap on its bound.
+                    (NodeKind::Index, _)
+                        if slot.access == data::Access::Owned
+                            && matches!(
+                                inference.data.get(&node).map(|prepared| &prepared.fact),
+                                Some(data::DataExpression::TupleIndex { .. })
+                            )
+                            && slot.path.as_ref().is_some_and(|path| {
+                                matches!(
+                                    path.projections.as_slice(),
+                                    [data::PathProjection::TupleElement(_)]
+                                ) && matches!(
+                                    path.root.kind,
+                                    DeclarationKind::Parameter | DeclarationKind::Binding
+                                )
+                            }) =>
+                    {
+                        TupleElement
+                    }
                     (NodeKind::Binary("*"), [left, right])
                         if matches!((operand(left), operand(right)), (Local, Literal)) =>
                     {
@@ -2827,6 +2854,34 @@ impl<'r, 'g> Checker<'r, 'g> {
                     list_literal = Some(node);
                 }
                 self.iteration_expression(module, node, slot, data.as_ref(), call.as_deref())?;
+                // Classified from the operand classes and types already inferred, so M5
+                // admits equality without a lookup of its own. Each operand, through
+                // groups, is a call or an operand that M5's checked arithmetic or tuple
+                // component read reads.
+                let i32_comparison = |node: NodeId| {
+                    module.syntax.nodes[node].kind == NodeKind::Binary("==")
+                        && inference
+                            .slots
+                            .get(&node)
+                            .and_then(|slot| slot.ty.as_ref())
+                            .and_then(primitive_name)
+                            == Some("bool")
+                        && module.syntax.nodes[node].children.iter().all(|&child| {
+                            let mut operand = child;
+                            while module.syntax.nodes[operand].kind == NodeKind::Group {
+                                operand = module.syntax.nodes[operand].children[0];
+                            }
+                            inference.slots.get(&operand).is_some_and(|slot| {
+                                slot.ty.as_ref().and_then(primitive_name) == Some("i32")
+                                    && (module.syntax.nodes[operand].kind == NodeKind::Call
+                                        || !matches!(
+                                            slot.i32_operand,
+                                            I32Operand::Other | I32Operand::Field
+                                        )
+                                        || field_of_call(&module.syntax.nodes, operand))
+                            })
+                        })
+                };
                 let facts = NodeFacts {
                     site: Self::site(module, node),
                     flow: slot.flow.clone(),
@@ -2854,24 +2909,21 @@ impl<'r, 'g> Checker<'r, 'g> {
                         // inferred, so M5 admits equality without a lookup of its
                         // own. Each operand, through groups, is a call or an
                         // operand that M5's checked arithmetic reads.
-                        i32_equality: module.syntax.nodes[node].kind == NodeKind::Binary("==")
+                        i32_equality: i32_comparison(node),
+                        // Classified from the same inferred facts: both operands, through
+                        // groups, are i32 equalities, so the check adds no lookup.
+                        i32_equality_conjunction: module.syntax.nodes[node].kind
+                            == NodeKind::Binary("&&")
                             && primitive_name(ty) == Some("bool")
+                            && module.syntax.nodes[node].children.len() == 2
                             && module.syntax.nodes[node].children.iter().all(|&child| {
                                 let mut operand = child;
                                 while module.syntax.nodes[operand].kind == NodeKind::Group {
                                     operand = module.syntax.nodes[operand].children[0];
                                 }
                                 inference.slots.get(&operand).is_some_and(|slot| {
-                                    slot.ty.as_ref().and_then(primitive_name) == Some("i32")
-                                        && (module.syntax.nodes[operand].kind == NodeKind::Call
-                                            || matches!(
-                                                slot.i32_operand,
-                                                I32Operand::Local
-                                                    | I32Operand::Literal
-                                                    | I32Operand::Product
-                                                    | I32Operand::Sum
-                                            ))
-                                })
+                                    slot.ty.as_ref().and_then(primitive_name) == Some("bool")
+                                }) && i32_comparison(operand)
                             }),
                     }),
                 };
@@ -3474,6 +3526,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         module: &'g Module,
         typed: &'r DeclarationFacts<'g>,
         pending_role: bool,
+        rejected: bool,
         enclosing: Option<(&Context<'r, 'g>, usize)>,
     ) -> Work<()> {
         let declaration = typed.declaration;
@@ -3492,7 +3545,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         if !self.source_scope_ready(module, node)? {
             return Ok(());
         }
-        if pending_role {
+        if pending_role && !rejected {
             self.defer(module, node, ScalarUnsupported::FamilySelection)?;
         }
         let before = self.marks();
@@ -3560,7 +3613,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 }
                 if declaration.id.kind == DeclarationKind::Function {
                     if let Some(typed) = self.input.facts.declarations.get(&declaration.id) {
-                        self.check_named_body(module, typed, false, None)?;
+                        self.check_named_body(module, typed, false, false, None)?;
                     } else {
                         self.defer(
                             module,
@@ -3580,14 +3633,20 @@ impl<'r, 'g> Checker<'r, 'g> {
                             .iter()
                             .filter_map(|scope| scope.provider.as_ref())
                             .any(|provider| provider.implementation.id == declaration.id);
-                        self.check_named_body(
-                            module,
-                            typed,
-                            !admitted
-                                && !delivered
-                                && !self.collections.is_wrapper(&declaration.id),
-                            None,
-                        )?;
+                        let pending = !admitted
+                            && !delivered
+                            && !self.collections.is_wrapper(&declaration.id);
+                        // Collection rejects a protected replacement (R0500), so
+                        // its family role is decided rather than pending.
+                        let mut rejected = false;
+                        if pending && !self.ownership_overlaps.is_empty() {
+                            self.elab.step(self.ownership_overlaps.len())?;
+                            rejected = self
+                                .ownership_overlaps
+                                .iter()
+                                .any(|overlap| overlap.implementation.id == declaration.id);
+                        }
+                        self.check_named_body(module, typed, pending, rejected, None)?;
                         self.clear_body_assumptions();
                     } else {
                         self.defer(module, declaration.node, ScalarUnsupported::FamilySelection)?;
@@ -3763,4 +3822,17 @@ fn check<'r, 'g>(
             statistics,
         })
     }
+}
+
+/// A field written directly on a call result, through groups: `call().field`.
+fn field_of_call(nodes: &[crate::parser::Node], node: NodeId) -> bool {
+    let syntax = &nodes[node];
+    if syntax.kind != NodeKind::Field {
+        return false;
+    }
+    let mut base = syntax.children[0];
+    while nodes[base].kind == NodeKind::Group {
+        base = nodes[base].children[0];
+    }
+    nodes[base].kind == NodeKind::Call
 }
