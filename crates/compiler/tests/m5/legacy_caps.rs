@@ -140,7 +140,10 @@ fn pre_equality_graph_caps_give_resource_limit() {
 /// manifest at today's values. Each old cap now gives `ResourceLimit` with no
 /// MIR and no finding. `None` is the whole graph; `infeasibleOuter` still
 /// reproduces its 68f3788 cap and is not listed.
-const BASE_MATRIX: [(&str, Option<&str>, (usize, usize, usize)); 7] = [
+/// Fixture, root function (`None` for the whole graph) and its 68f3788 cap.
+type BaseMatrixCap = (&'static str, Option<&'static str>, (usize, usize, usize));
+
+const BASE_MATRIX: [BaseMatrixCap; 7] = [
     ("retaining-rc", None, (246818, 14458, 11)),
     (
         "retaining-rc",
