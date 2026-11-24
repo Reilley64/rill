@@ -738,7 +738,9 @@ function probe(flag: bool, gate: bool): void { let debt = Err<bool,i32>(61i32); 
     // `computed` row costs no more. Rule 1 exception (chief of staff, 2026-11-23,
     // ri-2s0.10): `pre: copy of another parameter` (+14 work) pays before `R0103`, and its
     // parent cap (7002855e) gives `ResourceLimit`. The write twins pay nothing before
-    // their rejection that the parents did not, so they have no parent.
+    // their rejection that the parents did not: their parent numbers are the ones measured
+    // at 81d317b3, before the widened gate (review ci-b4b2 A-F1, ri-px1.11.9), and each
+    // parent cap still holds.
     for (name, source, parent, exact) in [
         (
             "pre: copy of another parameter",
@@ -749,7 +751,7 @@ function probe(flag: bool, gate: bool): void { let debt = Err<bool,i32>(61i32); 
         (
             "pre: mutable binder reassigned before the match",
             pre("let mut before = flag; before = !flag;", "before"),
-            None,
+            Some((325493, 48441, 12)),
             (325493, 48441, 12),
         ),
         (
@@ -758,8 +760,8 @@ function probe(flag: bool, gate: bool): void { let debt = Err<bool,i32>(61i32); 
                 "let before = current;",
                 "let before = current; current = !flag;",
             ),
-            None,
-            (325489, 48455, 12),
+            Some((325403, 48455, 12)),
+            (325403, 48455, 12),
         ),
         (
             "computed: alias selects another place",
@@ -813,8 +815,11 @@ function probe(flag: bool, gate: bool): void { let debt = Err<bool,i32>(61i32); 
         installed_read_only(&probe, name, &source, write, exact);
     }
 
-    // A mutable borrow of the copy or the source stays `Incomplete` at the borrow
-    // (Storage), whatever the match does, so neither can reach `Checked`.
+    // A mutable borrow of the copy or the source stays `Incomplete` (Storage) at the
+    // `*value = !*value;` write inside `flip`, with the unpaid `R0103` still published,
+    // whatever the match does, so neither can reach `Checked`. Parent numbers measured at
+    // 81d317b3 (review ci-b4b2 A-F1, ri-px1.11.9): same outcome and blocker, and the
+    // rejection costs no more than it did there.
     for (name, source, exact) in [
         (
             "pre: mutable binder lent mutably before the match",
@@ -822,7 +827,7 @@ function probe(flag: bool, gate: bool): void { let debt = Err<bool,i32>(61i32); 
                 "{FLIP}{}",
                 pre("let mut before = flag; flip(&mut before);", "before")
             ),
-            (325898, 48178, 12),
+            (325886, 48178, 12),
         ),
         (
             "pre: mutable source lent mutably after the copy",
@@ -833,10 +838,10 @@ function probe(flag: bool, gate: bool): void { let debt = Err<bool,i32>(61i32); 
                     "let before = current; flip(&mut current);",
                 )
             ),
-            (325746, 48188, 12),
+            (325702, 48188, 12),
         ),
     ] {
-        installed(&probe, name, &source, None, |report| {
+        installed(&probe, name, &source, Some(exact), |report| {
             assert_eq!(report.completion(), TypedCompletion::Incomplete, "{name}");
             assert!(report.receipt().is_none());
             let uses = report.result_use().unwrap();
@@ -844,6 +849,10 @@ function probe(flag: bool, gate: bool): void { let debt = Err<bool,i32>(61i32); 
                 panic!("{:?}", uses.pending())
             };
             assert_eq!(pending.blocker, ResultUseBlocker::Storage);
+            assert_eq!(pending.site.span.bytes(), b"*value = !*value;", "{name}");
+            let discards = report.result_use().unwrap().discards();
+            assert_eq!(discards.len(), 1, "{name}");
+            assert_eq!(discards[0].code(), "R0103", "{name}");
             let stats = report.statistics();
             assert_eq!(
                 (stats.work, stats.entries, stats.max_depth),

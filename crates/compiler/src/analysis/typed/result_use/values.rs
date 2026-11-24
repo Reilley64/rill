@@ -107,14 +107,18 @@ impl<'a, 'g> Check<'a, 'g> {
         let Root::Local(id) = from else {
             return Ok(None);
         };
+        // A local source that the body already wrote or lent is no copy source, and the scan
+        // below would find that write; deciding it here costs nothing (metering rule 1).
+        let written = self.last_written;
         if !component.is_empty()
             || id.kind != DeclarationKind::Binding
             || !self.wildcard_sources.iter().any(|(root, path)| {
                 path.is_empty()
-                    && matches!(root, Root::Local(p) if matches!(
-                        p.kind,
-                        DeclarationKind::Parameter | DeclarationKind::Binding
-                    ))
+                    && matches!(root, Root::Local(p) if match p.kind {
+                        DeclarationKind::Parameter => true,
+                        DeclarationKind::Binding => !written.is_some_and(|w| std::ptr::eq(w, *p)),
+                        _ => false,
+                    })
             })
         {
             return Ok(None);
@@ -127,6 +131,10 @@ impl<'a, 'g> Check<'a, 'g> {
         let NodeKind::Binding { mutable } = nodes[parent].kind else {
             return Ok(None);
         };
+        // A mutable copy that was written or lent already: the scan below would say so.
+        if mutable && written.is_some_and(|w| std::ptr::eq(w, id)) {
+            return Ok(None);
+        }
         let (pattern, init) = (
             nodes[parent].children[0],
             *nodes[parent].children.last().unwrap(),
