@@ -178,10 +178,7 @@ fn rows_count_the_roots_by_completion() {
             pipeline::replace_with_source(
                 &app,
                 "main.rill",
-                &format!(
-                    "{}{}",
-                    crate::IMPORTS,
-                    r#"
+                r#"
                 function moved(text: string): string {
                     let taken = text;
                     return taken;
@@ -191,8 +188,7 @@ fn rows_count_the_roots_by_completion() {
                     return text;
                 }
                 function called(): i32 { let f = () => 1i32; return f(); }
-            "#
-                ),
+            "#,
             );
             let rows: Vec<String> = pipeline::summarize(&request, &app, "main.rill")
                 .iter()
