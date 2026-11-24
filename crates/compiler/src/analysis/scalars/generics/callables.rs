@@ -26,6 +26,7 @@ pub struct InvocationFacts<'g> {
     pub access: data::Access,
     pub path: Option<data::PlacePath<'g>>,
     pub assumption: Option<GoalId>,
+    pub consumed_receiver: bool,
 }
 
 #[derive(Debug)]
@@ -933,6 +934,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             access,
             path,
             assumption,
+            consumed_receiver: false,
         }));
         self.establish(inference, node, result.clone(), false)
     }

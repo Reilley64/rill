@@ -4,7 +4,7 @@ import std::log;
 import std::result::{Result, Ok, Err, andThen, map};
 import std::error::{display, cause};
 import std::option::Option;
-import std::number::parseNumber;
+import std::convert::tryInto;
 
 type ReadFailed = { code: u32 };
 type ConfigLoadFailed = {};
@@ -88,7 +88,7 @@ implement display(error: &PortError): string {
 }
 
 function parsePort(text: string): Result<i32, PortError> {
-  let port = parseNumber<i32>(&text) ? PortError { detail: `not a port: ${text}` };
+  let port = tryInto<i32>(&text) ? PortError { detail: `not a port: ${text}` };
   guard port > 0 && port < 65536 else {
     return Err(PortError { detail: `out of range: ${port}` });
   }

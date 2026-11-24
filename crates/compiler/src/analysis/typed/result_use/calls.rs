@@ -408,10 +408,10 @@ impl<'a, 'g> Check<'a, 'g> {
                 && matches!(state.contents(local, &[], self.budget)?.as_slice(), [value]
                     if value.component.is_empty() && matches!(value.content, Content::ConsumedPair))
             {
-                // No environment remains to evaluate and there are no
-                // Result inputs or outputs. Keep checking unrelated
-                // residences; M5 diagnoses the invalid ownership use.
                 self.budget.reserve(1)?;
+                if let Some(&(index, _)) = self.nodes.get(&(&self.module.key, node)) {
+                    self.report.consumed_receivers.insert(index);
+                }
                 repeated.push(state);
                 continue;
             }

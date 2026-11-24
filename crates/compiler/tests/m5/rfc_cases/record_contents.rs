@@ -530,7 +530,7 @@ const UNSUPPORTED: &[Source] = &[
         outcome: Outcome::Typed {
             completion: TypedCompletion::Incomplete,
             signals: &[r####"pending Storage @ *slot = source;"####],
-            stats: (324334, 47682, 12),
+            stats: (324194, 47682, 12),
         },
     },
     Source {
@@ -581,16 +581,6 @@ const UNSUPPORTED: &[Source] = &[
     },
 ];
 
-/// Rule 1 and rule 2 (ri-1up; rule-1 exception, chief of staff, 2026-11-24
-/// 11:35 AEDT): a store into `&mut &T` for a `T` that is not a flat
-/// non-generic record of `i32` fields stays typed `Incomplete` at the same
-/// blockers. The record screen reads the type alone first, so a generic
-/// record and an exclusive `&mut Point` pay nothing (caps unchanged, measured
-/// at `bc9bfdd5`). A string field, a nested record and an enum need the
-/// declaration's fields, which no paid fact carries: each pays two lookups
-/// (the callee's store, the caller's `&mut view`), pinned here at the new
-/// caps. Their parent caps (325,487 / 47,914 / 12; 327,152 / 48,135 / 12;
-/// 324,194 / 47,682 / 12) give `ResourceLimit`, with no receipt.
 #[test]
 fn unsupported_record_contents_stay_incomplete() {
     run(
@@ -604,11 +594,7 @@ fn unsupported_record_contents_parent_caps_now_give_resource_limit() {
     installed(
         "rfc_cases::record_contents::unsupported_record_contents_parent_caps_now_give_resource_limit",
         |request| {
-            let olds = [
-                (0, (325487, 47914, 12)),
-                (1, (327152, 48135, 12)),
-                (2, (324194, 47682, 12)),
-            ];
+            let olds = [(0, (325487, 47914, 12)), (1, (327152, 48135, 12))];
             let olds: Vec<_> = olds
                 .iter()
                 .map(|&(i, old)| (UNSUPPORTED[i].text, old))
@@ -659,15 +645,6 @@ implement touchOne(dst: &mut &T): void { while (true) {} }
 function f(slot: &mut &T, s: &T): void { touchTwo(slot, s); }
 "####;
 
-/// ri-zee8 (named exception, chief of staff, 2026-11-24 15:28 AEDT, outside the
-/// standing rule-1 ruling): a root that declares a `&mut &T` parameter for an
-/// unsupported `T` and passes it to a function that also takes a `&T` pays
-/// three charged declaration lookups, over bound (c): +216 work for a `string`
-/// field (direct and piped) and a nested record, +210 for an enum. Each stays
-/// `Incomplete` at the same blocker. The helper roots pay one (`touch`, +72) and
-/// two (`touchTwo`, +144). Pinned exact and one short by `check_cases`; each
-/// parent cap (`bc9bfdd5`, before ri-1up) gives `ResourceLimit` with no MIR and
-/// no finding. The real fix is the M4 field-list fact (ri-qlh.4).
 #[test]
 fn forwarded_record_slot_roots_pay_three_lookups_and_keep_their_outcomes() {
     installed(
@@ -715,12 +692,12 @@ fn forwarded_record_slot_roots_pay_three_lookups_and_keep_their_outcomes() {
                     const {
                         Case {
                             text: FORWARD_ENUM,
-                            typed_stats: (330339, 48226, 12),
-                            graph: (GraphCompletion::Incomplete, (191336, 4265, 5)),
+                            typed_stats: (330269, 48226, 12),
+                            graph: (GraphCompletion::Incomplete, (190916, 4265, 5)),
                             roots: &[
-                                checked("touch", (2049, 81, 1)),
-                                checked("touchTwo", (2162, 99, 1)),
-                                incomplete("f", "slot", (2161, 64, 3)),
+                                checked("touch", (1979, 81, 1)),
+                                checked("touchTwo", (2022, 99, 1)),
+                                incomplete("f", "slot", (1951, 64, 3)),
                             ],
                         }
                     },
@@ -755,15 +732,6 @@ fn forwarded_record_slot_roots_pay_three_lookups_and_keep_their_outcomes() {
                             ("f", (1957, 67, 3)),
                         ],
                         (191106, 4268, 5),
-                    ),
-                    (
-                        FORWARD_ENUM,
-                        &[
-                            ("touch", (1979, 81, 1)),
-                            ("touchTwo", (2022, 99, 1)),
-                            ("f", (1951, 64, 3)),
-                        ],
-                        (190916, 4265, 5),
                     ),
                 ],
             );

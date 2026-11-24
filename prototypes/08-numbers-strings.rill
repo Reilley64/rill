@@ -6,10 +6,8 @@ import std::convert::{from, into, tryFrom, tryInto};
 import std::format::show;
 import std::result::Result;
 import std::error::display;
-import std::string::{slice, bytes, length as byteLength, decodeUtf8, decodeLossy};
+import std::string::{slice, length as byteLength, decodeLossy};
 import std::bytes::{Bytes, get as byteAt};
-import std::number::parseNumber as parse;
-import std::char::{codePoint, fromCodePoint};
 
 type Point = { x: i32; y: i32 };
 
@@ -92,7 +90,7 @@ function badBoundary(): bool {
 }
 
 function continuationByte(): u8 {
-  guard let value = byteAt(bytes(&"é"), 1u64) else {
+  guard let value = byteAt(into<&Bytes>(&"é"), 1u64) else {
     return 0;
   }
   return value;
@@ -165,58 +163,58 @@ function ordered(): string {
 }
 
 function scalar(): char {
-  guard let value = fromCodePoint(0xe9u32) else {
+  guard let value = tryInto<char>(0xe9u32) else {
     return '?';
   }
   return value;
 }
 
 function rejectsSurrogate(): bool {
-  guard fromCodePoint(0xd800u32) else {
+  guard tryInto<char>(0xd800u32) else {
     return true;
   }
   return false;
 }
 
 function parsed(): bool {
-  guard let value = parse<i32>(&"42") else {
+  guard let value = tryInto<i32>(&"42") else {
     return false;
   }
   return value == 42;
 }
 
 function rejectsTrailingText(): bool {
-  guard parse<i32>(&"42x") else {
+  guard tryInto<i32>(&"42x") else {
     return true;
   }
   return false;
 }
 
 function parsedNegativeZero(): string {
-  guard let value = parse<f32>(&"-0") else {
+  guard let value = tryInto<f32>(&"-0") else {
     return "bad number";
   }
   return `${value}`;
 }
 
 function decoded(): bool {
-  let bytes = Bytes([0xc3u8, 0xa9u8]);
-  guard let text = decodeUtf8(&bytes) else {
+  let bytes = into<Bytes>([0xc3u8, 0xa9u8]);
+  guard let text = tryInto<string>(&bytes) else {
     return false;
   }
   return text == "é";
 }
 
 function rejectsUtf8(): bool {
-  let bytes = Bytes([0xffu8]);
-  guard decodeUtf8(&bytes) else {
+  let bytes = into<Bytes>([0xffu8]);
+  guard tryInto<string>(&bytes) else {
     return true;
   }
   return false;
 }
 
 function lossy(): string {
-  let bytes = Bytes([0xffu8]);
+  let bytes = into<Bytes>([0xffu8]);
   return decodeLossy(&bytes);
 }
 
@@ -247,7 +245,7 @@ expect snapshots() == "before:2:after";
 expect ordered() == "12";
 expect `${Point { x: 1, y: 2 }}` == "point 1,2";
 expect `${scalar()}` == "é";
-expect codePoint(scalar()) == 0xe9u32;
+expect into<u32>(scalar()) == 0xe9u32;
 expect rejectsSurrogate();
 expect parsed();
 expect rejectsTrailingText();

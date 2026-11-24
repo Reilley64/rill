@@ -97,10 +97,6 @@ fn retained_bool_contents_type<'a, 'g>(ty: &'a TypeTerm<'g>) -> Option<&'a Type<
     })
 }
 
-// Retained contents that are a shared reference to a record: `&mut &R` with
-// `R` a non-generic application record. The type alone cannot say that every
-// field is an `i32`. This screen reads only the type and charges nothing; a
-// type it refuses is never looked up.
 fn retained_record_candidate<'a, 'g>(ty: &'a TypeTerm<'g>) -> Option<&'a Type<'g>> {
     let TypeTerm::Reference {
         mutable: true,
@@ -111,7 +107,8 @@ fn retained_record_candidate<'a, 'g>(ty: &'a TypeTerm<'g>) -> Option<&'a Type<'g
     };
     matches!(referent.as_ref(), TypeTerm::Reference { mutable: false, referent: record }
         if matches!(record.as_ref(), TypeTerm::Nominal { declaration, arguments }
-            if declaration.module.origin == crate::loader::Origin::Application
+            if declaration.kind == DeclarationKind::Record
+                && declaration.module.origin == crate::loader::Origin::Application
                 && arguments.is_empty()))
     .then_some(referent)
 }

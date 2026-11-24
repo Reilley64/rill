@@ -27,8 +27,8 @@ prototypes/11-conversions.rill	run	SourceRejected:R0400:import has no public tar
 prototypes/11-conversions.rill	test	SourceRejected:R0400:import has no public target:ConversionError	-	-	-	-	-
 prototypes/12-streaming-io.rill	run	SourceRejected:R0400:import has no public target:import std::panic;	-	-	-	-	-
 prototypes/12-streaming-io.rill	test	SourceRejected:R0400:import has no public target:import std::panic;	-	-	-	-	-
-prototypes/13-filesystem.rill	run	SourceRejected:-:Syntax { expected: ";" }:}	-	-	-	-	-
-prototypes/13-filesystem.rill	test	SourceRejected:-:Syntax { expected: ";" }:}	-	-	-	-	-
+prototypes/13-filesystem.rill	run	SourceRejected:R0400:import has no public target:import std::panic;	-	-	-	-	-
+prototypes/13-filesystem.rill	test	SourceRejected:R0400:import has no public target:import std::panic;	-	-	-	-	-
 prototypes/14-environment-inputs.rill	run	SourceRejected:R0400:import has no public target:import std::panic;	-	-	-	-	-
 prototypes/14-environment-inputs.rill	test	SourceRejected:R0400:import has no public target:import std::panic;	-	-	-	-	-
 prototypes/15-secure-random.rill	run	SourceRejected:R0400:import has no public target:randomBytes	-	-	-	-	-
