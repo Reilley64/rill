@@ -741,10 +741,14 @@ function probe(flag: bool, gate: bool): void { let debt = Err<bool,i32>(61i32); 
     // their rejection that the parents did not: their parent numbers are the ones measured
     // at 81d317b3, before the widened gate (review ci-b4b2 A-F1, ri-px1.11.9), and each
     // parent cap still holds. Named rule-1 exception (chief of staff, 2026-11-24 16:53
-    // AEDT, ri-j6fm; `compiler-metering.md` rule 1): the two `ri-j6fm` rows write or lend a
+    // AEDT, ri-j6fm; `compiler-metering.md` rule 1): the `ri-j6fm` rows write or lend a
     // different local after the source, so the free `last_written` screen no longer names
     // the source and it pays its scan before the same `R0103` (+86 and +90 work over the
-    // parents measured at 81d317b3); each parent cap gives `ResourceLimit`.
+    // parents measured at 81d317b3); each parent cap gives `ResourceLimit`. Widened by the
+    // chief of staff, 2026-11-24 17:54 AEDT (chief-rulings-21.md): the source or the copy
+    // pays its scan when another local is written or lent before the match, so the 2A-F2
+    // rows (source lent, +90; copy lent, +50) are pinned the same way. The row of 2A-F1
+    // costs its parent cap (81d317b3), so it carries no exception.
     for (name, source, parent, exact) in [
         (
             "pre: copy of another parameter",
@@ -768,6 +772,15 @@ function probe(flag: bool, gate: bool): void { let debt = Err<bool,i32>(61i32); 
             (325403, 48455, 12),
         ),
         (
+            "pre: mutable copy of the source, then lent mutably (ri-px1.11.13, 2A-F1)",
+            MUTABLE_SOURCE.replace(
+                "let before = current;",
+                "let mut before = current; let r = &mut before;",
+            ),
+            Some((324747, 48205, 12)),
+            (324747, 48205, 12),
+        ),
+        (
             "pre: mutable source written, then another local written (ri-j6fm, X2)",
             MUTABLE_SOURCE.replace(
                 "let before = current;",
@@ -784,6 +797,24 @@ function probe(flag: bool, gate: bool): void { let debt = Err<bool,i32>(61i32); 
             ),
             Some((326044, 48695, 12)),
             (326134, 48695, 12),
+        ),
+        (
+            "pre: mutable source lent, then another local written (ri-j6fm, 2A-F2 a)",
+            MUTABLE_SOURCE.replace(
+                "let before = current;",
+                "let before = current; let r = &mut current; let mut z = flag; z = !flag;",
+            ),
+            Some((326063, 48685, 12)),
+            (326153, 48685, 12),
+        ),
+        (
+            "pre: mutable copy lent, then another local written (ri-j6fm, 2A-F2 b)",
+            MUTABLE_SOURCE.replace(
+                "let before = current;",
+                "let mut before = current; let r = &mut before; let mut z = flag; z = !flag;",
+            ),
+            Some((326063, 48685, 12)),
+            (326113, 48685, 12),
         ),
         (
             "computed: alias selects another place",
