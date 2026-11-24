@@ -96,6 +96,8 @@ The sequences read as follows. A call is a mutable reborrow of `dst`, a copy of 
 
 The ruling names R0202. The loop that goes round is R0203 (the scope's end releases a loan the destination still needs, as for `early` in `stored_source_loans_reach_the_caller_view`), which is also what `local_sources_escape_through_every_route_to_the_list`'s `loopLocal` has pinned since the build. Both reject; the R0202 form is the `return` variant. The chief should confirm that R0203 for the round-going loop is the wanted code.
 
+2026-11-24: the chief of staff confirmed R0203 (required source released, docs/diagnostic-codes.md) for the round-going loop twin loopLocal (at the loop body block, related &user); R0202 stays for loopLocalReturn (ruling of 13:04 AEDT, /Users/reilley/Repositories/city/notes/m5-ownership-cleanup/review/chief-rulings-10.md).
+
 **Condition 3: the stored source outlives the call loan** (`r1_stored_source_outlives_the_call_loan`, module typed 336,144 / 49,622 / 12, graph `SourceRejected` 198,597 / 5,538 / 6). After `retain(dst, &user)` the call's own loan is over; `dst` still holds the source until the function ends.
 
 | Root | Result | Caps |
