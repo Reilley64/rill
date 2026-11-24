@@ -1,5 +1,7 @@
 # M5 ownership and cleanup evidence
 
+This record format ended with M5: from M6 on the tests are the evidence and no ticket writes such a record (`ri-0w2p`, [development guide](../../../docs/agents/development.md) item 4).
+
 M5 ri-2s0 is open. This is a scoped compiler increment. It does not satisfy the whole [M5 exit gate](../../../docs/implementation-plan.md#ordered-milestones).
 
 Each M5 ticket records its evidence in its own file in [`m5-acceptance/`](m5-acceptance/README.md), named after its ticket. Those records are part of this ledger. Sections below were added before 2026-11-23, when tickets still wrote them here.
