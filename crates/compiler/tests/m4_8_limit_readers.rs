@@ -8,7 +8,9 @@
 mod limit;
 
 use compiler::analysis::conversions::{RoleHypothesis, analyze_conversions};
-use compiler::analysis::generics::{BodyCompletion, GenericReport, analyze_generics};
+use compiler::analysis::generics::{
+    BodyCompletion, GenericReport, OutputAgreement, analyze_generics,
+};
 use compiler::analysis::ordinary::{
     Completion as OrdinaryCompletion, InputContract::Established, OrdinaryAnalysis, select_inputs,
 };
@@ -324,4 +326,112 @@ fn a_limited_selection_names_no_outcome() {
         }
         assert!(limited > 0, "{source}");
     }
+}
+
+/// Every ordinary call and value of a body report, by module and node, with
+/// its output agreement: 0 undecided, 1 agrees, 2 disagrees.
+fn agreements(graph: &Graph, report: &GenericReport<'_>) -> BTreeMap<(bool, usize, usize), u8> {
+    let rank = |agreement: &OutputAgreement<'_>| match agreement {
+        OutputAgreement::NotDetermined => 0,
+        OutputAgreement::Agrees => 1,
+        OutputAgreement::Disagrees { .. } => 2,
+    };
+    let mut found = BTreeMap::new();
+    for (index, module) in graph.modules().iter().enumerate() {
+        for node in 0..module.syntax.nodes.len() {
+            if let Some(call) = report.ordinary_call(module, node).unwrap() {
+                found.insert((true, index, node), rank(&call.output_agreement));
+            }
+            if let Some(value) = report.ordinary_value(module, node).unwrap() {
+                found.insert((false, index, node), rank(&value.output_agreement));
+            }
+        }
+    }
+    found
+}
+
+/// Ruling 24 (1): `OutputAgreement::Disagrees` of an ordinary call or value is
+/// withheld at a limit, and the withheld state reads as undecided, never as
+/// `Agrees`. At every work cap below the exact one and one short on entries and
+/// on depth, each public reader of the agreement (the typed report's bodies,
+/// `analyze_generics` and `analyze_conversions(..).bodies(..)` over the
+/// inventory) publishes no `Disagrees`, and reads `Agrees` only where the exact
+/// run does.
+#[test]
+fn a_limited_report_reads_an_output_disagreement_as_undecided_never_as_agreeing() {
+    let fixture = Fixture::new(
+        "import std::convert::into;
+         function inner<T,E>(value: T): E;
+         implement<U> inner(value: U): i32 { return 1i32; }
+         function outer<T,E>(value: T): E;
+         implement<U,E> outer(value: U): E where inner(U,E) { while (true) {} }
+         let pending: bool = outer(true);",
+    );
+    let graph = fixture.load();
+    let binding = standard_export(&graph, "into");
+    let readers = |report: &TypedReport<'_>| {
+        let limits = AnalysisLimits::default();
+        let inventory = report.inventory();
+        let conversions =
+            analyze_conversions(inventory, &[RoleHypothesis::Infallible(binding)], limits)
+                .map(|conversion| agreements(&graph, &conversion.bodies(limits)))
+                .unwrap_or_default();
+        [
+            agreements(&graph, report.bodies()),
+            agreements(&graph, &analyze_generics(inventory, limits)),
+            conversions,
+        ]
+    };
+    let full = analyze_typed(&graph, AnalysisLimits::default());
+    assert_ne!(full.completion(), TypedCompletion::ResourceLimit);
+    let exact_readers = readers(&full);
+    for (reader, exact) in exact_readers.iter().enumerate() {
+        assert!(
+            exact.values().any(|&agreement| agreement == 2),
+            "reader {reader} publishes the disagreement at the exact cap"
+        );
+    }
+    let stats = full.statistics();
+    let exact = AnalysisLimits {
+        max_work: stats.work,
+        max_entries: stats.entries,
+        max_depth: stats.max_depth,
+    };
+    let mut caps = (0..stats.work)
+        .map(|max_work| AnalysisLimits { max_work, ..exact })
+        .collect::<Vec<_>>();
+    caps.push(AnalysisLimits {
+        max_entries: exact.max_entries - 1,
+        ..exact
+    });
+    caps.push(AnalysisLimits {
+        max_depth: exact.max_depth - 1,
+        ..exact
+    });
+    let (mut limited, mut undecided) = (0, 0);
+    for cap in caps {
+        let report = analyze_typed(&graph, cap);
+        if report.completion() != TypedCompletion::ResourceLimit {
+            continue;
+        }
+        limited += 1;
+        for (reader, (found, exact)) in readers(&report).iter().zip(&exact_readers).enumerate() {
+            for (site, &agreement) in found {
+                assert_ne!(
+                    agreement, 2,
+                    "reader {reader} publishes Disagrees at {cap:?}"
+                );
+                assert!(
+                    agreement == 0 || exact.get(site) == Some(&1),
+                    "reader {reader} reads {site:?} as agreeing at {cap:?}, the exact cap does not"
+                );
+                undecided += usize::from(agreement == 0 && exact.get(site) == Some(&2));
+            }
+        }
+    }
+    assert!(limited > 0, "the sweep saw no limited report");
+    assert!(
+        undecided > 0,
+        "no limited report read the disagreement as undecided"
+    );
 }
