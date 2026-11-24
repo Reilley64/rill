@@ -2077,7 +2077,7 @@ The earlier record's children table carries no numbers for C5 and C3. They are h
 ### Exceptions in force (adds)
 
 - **The standing rule-1 exception, bound (c) in full** (re-review C-5): at most two charged declaration lookups per sibling module, under 150 work per sibling plus the entries of those lookups (ruling of 13:46 AEDT, Q5, amending 11:35 and 07:19). The text is in the rule-1 notes of [`compiler-metering.md`](../../../docs/agents/compiler-metering.md). The nested-record and enum list-parameter siblings are pinned (C-6): `rfc_cases::list_contents::list_parameter_siblings_of_nested_records_and_enums_pay_their_lookup`.
-- **Named exception, `ri-j6fm`** (ruling 20): X2 and X3 in `m4_8_match_boolean_snapshots::installed_boolean_matches`, +86 and +90 work over `81d317b3`, same outcome and blocker. A third form, X4 (lent by a call), measures +90 with a different outcome from X2 and is not pinned: it is stopped and reported to the planner for the chief (`ri-px1.11.11.md`).
+- **Named exception, `ri-j6fm`** (ruling 20): X2, X3 and X4 in `m4_8_match_boolean_snapshots::installed_boolean_matches`, +86, +90 and +90 work over `81d317b3`, same outcome and blocker.
 - **Rule 11, third case:** C13's sibling check (+1 per reaching store) and the `MEMBER_REPLACEMENT` graph +5 (ruling 20).
 
 ### Open found beads (additions and changes)
@@ -2087,7 +2087,7 @@ State checked 2026-11-24. These add to the lists in the two records above.
 | Bead | State | Gap |
 | --- | --- | --- |
 | `ri-qlh.9` | needs triage | Widened by ruling 18: also decide what a `ResourceLimit` value may carry beyond findings, the partial facts an ordinary or typed limit report keeps (declarations, headers, family facts), and whether a `ConversionReport` may publish facts there. Covers `check_scalars` and `check_data` partials (ruling 15). |
-| `ri-j6fm` | needs triage | Boolean copy screen pays the `never_written` scan when a later write or lend names another local (X2, X3; X4 stopped, reported); named exception, the fix is an M4 per-local written fact (`ri-qlh.4`). |
+| `ri-j6fm` | needs triage | Boolean copy screen pays the `never_written` scan when a later write or lend names another local (X2, X3, X4); named exception, the fix is an M4 per-local written fact (`ri-qlh.4`). |
 | `ri-i0kj` | needs triage | SP-6: report R0202 at the storing call that makes the body-local source flow (parent `ri-qlh`, relates to `ri-2s0`). |
 
 ### Stated limits recorded by this pass
@@ -2102,4 +2102,4 @@ State checked 2026-11-24. These add to the lists in the two records above.
 
 ### For the second re-review
 
-Re-run probe 2 (O7 member replacement) on the reborrow forms and on `take(holder)` in both load modes; probe `ri-j6fm`'s forms (X2, X3 pinned; X4 pending the chief) against `81d317b3`; check that `publishes_nothing_at_limit` of each report kind names every field a finding can reach. Hosted CI on the integration head has not run on this pass. Do not merge this increment or begin M6.
+Re-run probe 2 (O7 member replacement) on the reborrow forms and on `take(holder)` in both load modes; probe `ri-j6fm`'s three forms against `81d317b3`; check that `publishes_nothing_at_limit` of each report kind names every field a finding can reach. Hosted CI on the integration head has not run on this pass. Do not merge this increment or begin M6.
