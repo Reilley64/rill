@@ -366,6 +366,130 @@ function loopLocalThenParam(dst: &mut List<&User>, a: &User, flag: bool): void {
 }
 "####;
 
+const VIEW_BRANCHES: &str = r####"
+type User = { id: i32 };
+function retain<D, S>(dst: D, source: S): void;
+implement retain(dst: &mut List<&User>, source: &User): void { while (true) {} }
+function v23_viewBranches(dst: &mut List<&User>, a: &User, flag: bool): void {
+  let user = User { id: 1 };
+  let view = &user;
+  if (flag) { retain(dst, view); } else { retain(dst, view); }
+  retain(dst, a);
+}
+function v37_viewsOfTwo(dst: &mut List<&User>, a: &User, flag: bool): void {
+  let one = User { id: 1 };
+  let two = User { id: 2 };
+  let v = &two;
+  let w = &one;
+  if (flag) { retain(dst, v); } else { retain(dst, w); }
+  retain(dst, v);
+  retain(dst, w);
+  retain(dst, a);
+}
+"####;
+
+const SPLIT_STORES: &str = r####"
+function set(slot: &mut &bool, input: &bool): void { *slot = input; }
+function note(flag: bool): void {}
+function c1_splitThenRepair(slot: &mut &bool, input: &bool, c: bool): void {
+  let flag = true;
+  let view = &flag;
+  if (c) { set(slot, view); } else { set(slot, view); }
+  set(slot, input);
+  note(c);
+  note(c);
+  note(c);
+  note(c);
+  *slot = input;
+}
+function c2_split3ThenRepair(slot: &mut &bool, input: &bool, c: bool, d: bool): void {
+  let flag = true;
+  let view = &flag;
+  if (c) { set(slot, view); } else { if (d) { set(slot, view); } else { set(slot, view); } }
+  set(slot, input);
+  note(c);
+  note(c);
+  note(c);
+  note(c);
+  *slot = input;
+}
+function c3_noSplitControl(slot: &mut &bool, input: &bool, c: bool): void {
+  let flag = true;
+  let view = &flag;
+  if (c) { note(c); } else { note(c); }
+  set(slot, view);
+  set(slot, input);
+  note(c);
+  note(c);
+  note(c);
+  note(c);
+  *slot = input;
+}
+"####;
+
+const ASSIGNED_STORES: &str = r####"
+type Point = { x: i32; y: i32 };
+function set(slot: &mut &bool, input: &bool): void { *slot = input; }
+function remember(slot: &mut &Point, source: &Point): void { *slot = source; }
+function o3_assignLocalThenCall(slot: &mut &bool, input: &bool): void {
+  let flag = true;
+  *slot = &flag;
+  set(slot, input);
+}
+function r4_assignLocalThenCall(slot: &mut &Point, a: &Point): void {
+  let p = Point { x: 1, y: 2 };
+  *slot = &p;
+  remember(slot, a);
+}
+function o8_branchAssign(slot: &mut &bool, input: &bool, c: bool): void {
+  let flag = true;
+  if (c) { *slot = &flag; }
+  set(slot, input);
+}
+function o5_callLocalAssignLocalCall(slot: &mut &bool, input: &bool): void {
+  let flag = true;
+  let other = false;
+  set(slot, &flag);
+  *slot = &other;
+  set(slot, input);
+}
+function o7_assignLocalCallLocalCall(slot: &mut &bool, input: &bool): void {
+  let flag = true;
+  let other = false;
+  *slot = &flag;
+  set(slot, &other);
+  set(slot, input);
+}
+function oa_assignLocalOnly(slot: &mut &bool, input: &bool): void {
+  let flag = true;
+  *slot = &flag;
+}
+"####;
+
+const STORE_PREMISES: &str = r####"
+function set(slot: &mut &bool, input: &bool): void { *slot = input; }
+function keep(slot: &mut &bool, input: &bool): void { *slot = input; }
+function repaired(slot: &mut &bool, input: &bool): void {
+  let flag = true;
+  let view = &flag;
+  set(slot, view);
+  *slot = input;
+  keep(slot, view);
+}
+function joinedSetFirst(slot: &mut &bool, input: &bool, c: bool): void {
+  let flag = true;
+  let view = &flag;
+  if (c) { set(slot, view); } else { keep(slot, view); }
+  set(slot, input);
+}
+function joinedKeepFirst(slot: &mut &bool, input: &bool, c: bool): void {
+  let flag = true;
+  let view = &flag;
+  if (c) { keep(slot, view); } else { set(slot, view); }
+  set(slot, input);
+}
+"####;
+
 const OWNED_SOURCES: &str = r####"
 type User = { id: i32 };
 function retain<D, S>(dst: D, source: S): void;
@@ -1917,6 +2041,219 @@ fn r1_two_local_stores_report_the_first_storing_call() {
                                 "retain(dst, &user)",
                                 "&user",
                                 (6065, 1037, 8),
+                            ),
+                        ],
+                    }
+                }],
+            );
+        },
+    );
+}
+
+/// Ticket ri-i0kj, review ci-o92c F1. A view of a body-local stored on both
+/// branches of an `if` reaches the join as two states that differ only in the
+/// storing call; they stay apart so that each path names its own call. R0202
+/// is at the first branch's call (`retain(dst, view)`), not at the later valid
+/// `retain(dst, a)`. `v37_viewsOfTwo` stores a different local on each branch
+/// and reports the first branch's. Both are exact and one short.
+#[test]
+fn r1_view_stored_on_two_branches_reports_the_first_branch_call() {
+    installed(
+        "rfc_cases::list_contents::r1_view_stored_on_two_branches_reports_the_first_branch_call",
+        |request| {
+            check_cases(
+                &request,
+                &[const {
+                    Case {
+                        text: VIEW_BRANCHES,
+                        typed_stats: (336246, 50247, 12),
+                        graph: (GraphCompletion::SourceRejected, (208001, 8132, 7)),
+                        roots: &[
+                            rejected(
+                                "v23_viewBranches",
+                                "R0202",
+                                "retain(dst, view)",
+                                "&user",
+                                (7303, 1228, 7),
+                            ),
+                            rejected(
+                                "v37_viewsOfTwo",
+                                "R0202",
+                                "retain(dst, v)",
+                                "&two",
+                                (12545, 2888, 7),
+                            ),
+                        ],
+                    }
+                }],
+            );
+        },
+    );
+}
+
+/// Metering rules 7 and 11 (third case, ruling of 2026-11-24 on review
+/// ci-o92c F1), ticket ri-i0kj. `Held::local_store` is part of the state, so
+/// two branches that store the same view at different calls stay two states
+/// until a strong update retires them. `Checked` programs pay for that: the
+/// split roots below cost more than at the parent (`d85303bd`) and the control,
+/// which has no split, costs the same. Each root is pinned exact and one short
+/// and each parent cap now gives `ResourceLimit`, in both modes. The old and
+/// new numbers are in `m5-acceptance/ri-i0kj.md`.
+#[test]
+fn r1_split_stores_that_repair_cost_more_and_their_parent_caps_give_resource_limit() {
+    installed(
+        "rfc_cases::list_contents::r1_split_stores_that_repair_cost_more_and_their_parent_caps_give_resource_limit",
+        |request| {
+            check_cases(
+                &request,
+                &[const {
+                    Case {
+                        text: SPLIT_STORES,
+                        typed_stats: (341254, 50456, 12),
+                        graph: (GraphCompletion::Incomplete, (220698, 15030, 9)),
+                        roots: &[
+                            checked("c1_splitThenRepair", (12798, 3765, 7)),
+                            checked("c2_split3ThenRepair", (16847, 5686, 9)),
+                            checked("c3_noSplitControl", (11529, 3074, 7)),
+                        ],
+                    }
+                }],
+            );
+            old_root_caps(
+                &request,
+                &[
+                    (
+                        SPLIT_STORES,
+                        &[
+                            ("c1_splitThenRepair", (11439, 3030, 7)),
+                            ("c2_split3ThenRepair", (13264, 3976, 9)),
+                        ],
+                        (214952, 12549, 9),
+                    ),
+                    (
+                        VIEW_BRANCHES,
+                        &[
+                            ("v23_viewBranches", (7198, 1162, 7)),
+                            ("v37_viewsOfTwo", (11991, 2576, 7)),
+                        ],
+                        (207342, 7754, 7),
+                    ),
+                ],
+            );
+        },
+    );
+}
+
+/// Ticket ri-i0kj, review ci-o92c F2. A body-local source stored by assignment
+/// through the destination is reported at the assignment, as a store by call
+/// is reported at the call: a later valid call (`set(slot, input)`,
+/// `remember(slot, a)`) is never the site. `o5` overwrites a call's store with
+/// an assignment, so the site is the assignment that holds the local now;
+/// `o7` stores by assignment first and a second local by call, and the first
+/// store is the site. `oa` stores by assignment alone, as at the parent.
+#[test]
+fn r1_assignment_stores_report_the_assigning_statement() {
+    installed(
+        "rfc_cases::list_contents::r1_assignment_stores_report_the_assigning_statement",
+        |request| {
+            check_cases(
+                &request,
+                &[const {
+                    Case {
+                        text: ASSIGNED_STORES,
+                        typed_stats: (341282, 49757, 12),
+                        graph: (GraphCompletion::SourceRejected, (202445, 7014, 6)),
+                        roots: &[
+                            rejected(
+                                "o3_assignLocalThenCall",
+                                "R0202",
+                                "*slot = &flag;",
+                                "&flag",
+                                (2716, 436, 5),
+                            ),
+                            rejected(
+                                "r4_assignLocalThenCall",
+                                "R0202",
+                                "*slot = &p;",
+                                "&p",
+                                (3702, 596, 5),
+                            ),
+                            rejected(
+                                "o8_branchAssign",
+                                "R0202",
+                                "*slot = &flag;",
+                                "&flag",
+                                (3157, 670, 6),
+                            ),
+                            rejected(
+                                "o5_callLocalAssignLocalCall",
+                                "R0202",
+                                "*slot = &other;",
+                                "&other",
+                                (3264, 706, 6),
+                            ),
+                            rejected(
+                                "o7_assignLocalCallLocalCall",
+                                "R0202",
+                                "*slot = &flag;",
+                                "&flag",
+                                (3276, 708, 6),
+                            ),
+                            rejected(
+                                "oa_assignLocalOnly",
+                                "R0202",
+                                "*slot = &flag;",
+                                "&flag",
+                                (2398, 290, 4),
+                            ),
+                        ],
+                    }
+                }],
+            );
+        },
+    );
+}
+
+/// Metering rule 7, ticket ri-i0kj. The storing site is a premise of the
+/// state, and each root changes it between two uses of the same loans (one
+/// local view, `&flag`). `repaired` stores at `set`, overwrites the contents
+/// with a valid source and stores the same view again at `keep`: the site is
+/// `keep`, not the stale `set`. `joinedSetFirst` and `joinedKeepFirst` differ
+/// only in which call each branch makes: the first branch's call is the site
+/// in both, and the valid `set(slot, input)` after the join is not.
+#[test]
+fn r1_the_storing_call_is_a_premise_of_the_state() {
+    installed(
+        "rfc_cases::list_contents::r1_the_storing_call_is_a_premise_of_the_state",
+        |request| {
+            check_cases(
+                &request,
+                &[const {
+                    Case {
+                        text: STORE_PREMISES,
+                        typed_stats: (334533, 49127, 12),
+                        graph: (GraphCompletion::SourceRejected, (198422, 7001, 7)),
+                        roots: &[
+                            rejected(
+                                "repaired",
+                                "R0202",
+                                "keep(slot, view)",
+                                "&flag",
+                                (3190, 659, 5),
+                            ),
+                            rejected(
+                                "joinedSetFirst",
+                                "R0202",
+                                "set(slot, view)",
+                                "&flag",
+                                (4022, 1099, 7),
+                            ),
+                            rejected(
+                                "joinedKeepFirst",
+                                "R0202",
+                                "keep(slot, view)",
+                                "&flag",
+                                (4022, 1099, 7),
                             ),
                         ],
                     }

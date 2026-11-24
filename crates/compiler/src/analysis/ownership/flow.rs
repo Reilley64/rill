@@ -1288,6 +1288,18 @@ fn retire_loans(
     Ok(())
 }
 
+/// The store a strong update makes into caller contents: the assigning node
+/// and the first body-local borrow the installed value holds. The scan reads
+/// the loans of `incoming`, which the action consumes right after, so each loan
+/// set is read once, after it was charged where it was built.
+fn assigned_local_store(value: &Held, node: NodeId) -> Option<(NodeId, NodeId)> {
+    value
+        .loans
+        .iter()
+        .find(|loan| loan.kind.borrows_local_storage())
+        .map(|loan| (node, loan.site))
+}
+
 fn check_retained(
     retained: &BTreeMap<Slot, RetainedContents>,
     state: &[State],
@@ -4784,6 +4796,11 @@ pub(super) fn run<'a, 'g>(
                     } else {
                         ValueOrigin::Untracked
                     };
+                    value.local_store = if matches!(target, ExactTarget::Caller { .. }) {
+                        assigned_local_store(&value, node)
+                    } else {
+                        None
+                    };
                     state[target.contents_slot()] = State::Initialized(value);
                     state[incoming] = State::Vacant;
                     Operation::InstallThrough {
@@ -4827,6 +4844,7 @@ pub(super) fn run<'a, 'g>(
                         budget,
                     )?;
                     value.origin = ValueOrigin::RetainedStore(node);
+                    value.local_store = assigned_local_store(&value, node);
                     state[route.contents] = State::Initialized(value);
                     state[incoming] = State::Vacant;
                     Operation::InstallThroughTwoHop {

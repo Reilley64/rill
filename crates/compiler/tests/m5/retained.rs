@@ -2858,7 +2858,7 @@ fn moved_incoming_access_keeps_the_original_caller_destination() {
                 assert_eq!(finding.related.span.bytes(), related);
                 if code == "R0202" {
                     let store = if name == "escapeAfterMove" {
-                        b"remember(access, input)".as_slice()
+                        b"*slot = &flag;".as_slice()
                     } else {
                         b"remember(access, &flag)"
                     };
@@ -3981,7 +3981,7 @@ fn retaining_option_call_preserves_old_and_possible_new_backing_in_caller() {
             // returns Some, but neither fact narrows its declared contract.
             for (name, call) in [
                 ("newBacking", b"ignore(slot, &flag, gate)".as_slice()),
-                ("oldBacking", b"ignore(slot, seed, gate)".as_slice()),
+                ("oldBacking", b"*slot = &flag;".as_slice()),
             ] {
                 let report = lower(name);
                 assert_eq!(
