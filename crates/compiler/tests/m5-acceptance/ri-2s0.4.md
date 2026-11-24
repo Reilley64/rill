@@ -39,6 +39,8 @@ Two siblings, the mutable binder and the other parameter, cost 11 and 14 more wo
 
 **Second departure.** Rule 11 and the ticket expect the old cap to assert `ResourceLimit`. Both flipped rows got cheaper, so the old caps give `Checked`; the test asserts that instead.
 
+**Superseded (2026-11-24, review `ci-0mdr` ST-19, SP-7).** "Needs a ruling" above was ruled: the chief of staff granted the siblings as a rule-1 exception on 2026-11-23 (`chief-rulings-3.md`, item 2; `compiler-metering.md` rule 1). The ruling of 2026-11-24 13:46 AEDT (Q4) then fixed the mutable binder and the mutable source: both are `Checked` with a receipt and left the exception list ([`ri-px1.11.2.md`](ri-px1.11.2.md)). Only `pre: copy of another parameter` still pays before it rejects. The row "`pre`, source is `let mut current = flag;`" above is `Checked` now, not `SourceRejected`.
+
 Published caps left unchanged, all green: `m4_8_scoped_join_caps`; `m5::legacy_caps` (the M4 17-source baseline stays 372,246 / 54,059 / 12); `m5::rfc_cases`; `m5::graph::inventory`; `m4_8_callable_once`; `m4_8_result_use`; `m4_8_ownership` (the 372,246 baseline). `cargo fmt --all -- --check`, `mise run check:docs`, `git diff --check` and `cargo clippy --no-default-features -p compiler --all-targets -- -D warnings` are clean. Logs under `~/.t3/evidence/rill/m5-build-2026-11-22/ci-xt9h/`. Hosted CI was not run, by city instruction; the merger watches the integration branch.
 
 Commits: the fix and tests (see the branch `m5-ownership-cleanup/r-c12-ri-2s0.4`), merged with the base tip.

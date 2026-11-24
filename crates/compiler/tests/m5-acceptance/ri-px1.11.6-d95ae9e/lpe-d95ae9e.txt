@@ -1,0 +1,8 @@
+mode test=false typed Checked Statistics { work: 436305, entries: 50259, max_depth: 12 }
+  graph Incomplete Statistics { work: 197064, entries: 4761, max_depth: 5 } findings []
+  liveParentError: Incomplete Statistics { work: 3449, entries: 320, max_depth: 3 } blocked Some("pair") findings [] root Some((Incomplete, Incomplete))
+  retiredParentError: Incomplete Statistics { work: 3457, entries: 326, max_depth: 3 } blocked Some("join([(): Result<bool, i32> => Result.Ok(true), () => false])") findings [] root Some((Incomplete, Incomplete))
+mode test=true typed Checked Statistics { work: 436305, entries: 50259, max_depth: 12 }
+  graph Incomplete Statistics { work: 197064, entries: 4761, max_depth: 5 } findings []
+  liveParentError: Incomplete Statistics { work: 3449, entries: 320, max_depth: 3 } blocked Some("pair") findings [] root Some((Incomplete, Incomplete))
+  retiredParentError: Incomplete Statistics { work: 3457, entries: 326, max_depth: 3 } blocked Some("join([(): Result<bool, i32> => Result.Ok(true), () => false])") findings [] root Some((Incomplete, Incomplete))

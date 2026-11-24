@@ -51,6 +51,13 @@ Reordering cannot restore the parent numbers (the record screen, the signature c
 
 `i32_arithmetic.rs:202`. For a body that holds a binding written `&mut record.field` and another `&mut i32` binding that is not (`let d = p;` or `let d = &mut *p;`, then `*d += 1i32;`), `self.place(target)` resolves the path before the slot flag rejects the local descriptor. Measured against the parent of ri-fmsk (`f24d825b`, where the route did not exist): `viaOther` 2,245 / 103 / 2 at the parent and 2,246 / 103 / 2 on the base (+1 work; graph 186,741 to 186,742), `viaReborrow` 2,249 / 105 / 2 and 2,250 / 105 / 2 (+1; graph 186,865 to 186,866); the blocker stays `*d += 1i32;`. No free screen exists (the binding's initializer is not reachable from the target), so this +1 is reported, not pinned: it is the rule-1 question for the chief if a +1 matters. At `7002855e` itself both bodies are typed `Incomplete`, so that parent has no ownership cap for them.
 
+## Update (2026-11-24, chief ruling of 14:47 AEDT, recorded by `ri-px1.11.6`)
+
+Both items stopped above are granted as named rule-1 exceptions on the terms of the O7 ruling; the pins are in [`ri-px1.11.6.md`](ri-px1.11.6.md).
+
+- ST-4: `within` 1,875 / 27 / 3 to 2,252 / 90 / 6 and `bound` 1,891 / 34 / 4 to 2,263 / 97 / 4. Reason: outcome and blocker site are unchanged (`Incomplete`), rejecting needs the charged `DisposerLookup::select`, and no paid fact names a type's disposer.
+- ST-9 at `i32_arithmetic.rs:202`: `viaOther` 2,245 to 2,246 and `viaReborrow` 2,249 to 2,250 work, graph +1 each. **The type and literal checks that review 2 named after `self.place(target)` cannot fire at that site** (an out-of-range or negative literal never reaches it; see the ST-9 row above), so moving them ahead of the charge changes nothing. The re-review need not raise it again.
+
 ## MUST KILL sites in this area, for the C7 bead (chief item (a))
 
 None is restructured here: `build.rs` 7951-7975 and 8271-8273 of `81d317b3` (the screen and charge ordering in `family_retaining_shape` and `call`; ST-2 changed `family_view_shape`, a different function), `build.rs` 3028-3029 (ST-4, stopped) and `i32_arithmetic.rs` 191-197 (the local-descriptor note). Line numbers drift after merges.

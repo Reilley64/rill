@@ -1213,3 +1213,95 @@ fn conversion_bodies_publish_no_finding_at_resource_limit() {
         limit::assert_generics_limit(&limited);
     }
 }
+
+/// Metering rule 8 for `ConversionReport::type_facts` and `header_metadata`,
+/// which read the ordinary input: at a conversion `ResourceLimit` they publish
+/// no finding, though the input (the caller's own complete report) holds some.
+/// The exact cap publishes them; every cap below it, on each axis, publishes
+/// none. The second source has no generic default, so its report reads the
+/// caller's input; the first extends the nominal types and reads that.
+#[test]
+fn conversion_report_publishes_no_finding_list_at_resource_limit() {
+    let sources = [
+        (
+            "import std::convert::into;
+             type Gone = { x: Missing }; type Loop = { a: Loop }; let v: i32 = unknown;
+             function g<T = Absent>(x: Nope): T;
+             type Target = {};
+             implement into<Target>(value: i32): Target { return Target {}; }",
+            2,
+            true,
+        ),
+        (
+            "import std::convert::into;
+             type Target = {};
+             type Gone = { x: Missing };
+             implement into<Target>(value: i32): Target { return false; }",
+            1,
+            false,
+        ),
+    ];
+    for (n, (source, type_findings, header_finding)) in sources.into_iter().enumerate() {
+        let fixture = Fixture::new(source);
+        let graph = fixture.load();
+        let ordinary = analyze_ordinary(&graph, AnalysisLimits::default());
+        let roles = [RoleHypothesis::Infallible(standard_export(&graph, "into"))];
+        let full = analyze_conversions(&ordinary, &roles, AnalysisLimits::default()).unwrap();
+        assert_eq!(full.completion(), Completion::Incomplete, "source {n}");
+        let stats = full.statistics();
+        let exact = AnalysisLimits {
+            max_work: stats.work,
+            max_entries: stats.entries,
+            max_depth: stats.max_depth,
+        };
+        let replay = analyze_conversions(&ordinary, &roles, exact).unwrap();
+        assert_eq!(replay.completion(), Completion::Incomplete, "source {n}");
+        assert_eq!(replay.statistics(), stats, "source {n}");
+        assert_eq!(
+            replay.type_facts().findings().count(),
+            type_findings,
+            "source {n}"
+        );
+        assert_eq!(
+            limit::conversion_header_finding(&graph, &replay),
+            header_finding,
+            "source {n}"
+        );
+        for work in 0..stats.work {
+            let limited = analyze_conversions(
+                &ordinary,
+                &roles,
+                AnalysisLimits {
+                    max_work: work,
+                    ..exact
+                },
+            )
+            .unwrap();
+            limit::assert_conversion_limit(&graph, &limited);
+        }
+        for entries in 0..stats.entries {
+            let limited = analyze_conversions(
+                &ordinary,
+                &roles,
+                AnalysisLimits {
+                    max_entries: entries,
+                    ..exact
+                },
+            )
+            .unwrap();
+            limit::assert_conversion_limit(&graph, &limited);
+        }
+        for depth in 0..stats.max_depth {
+            let limited = analyze_conversions(
+                &ordinary,
+                &roles,
+                AnalysisLimits {
+                    max_depth: depth,
+                    ..exact
+                },
+            )
+            .unwrap();
+            limit::assert_conversion_limit(&graph, &limited);
+        }
+    }
+}
