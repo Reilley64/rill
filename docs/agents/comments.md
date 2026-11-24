@@ -26,7 +26,7 @@ Existing comments are not swept. The policy covers comments added or changed in 
 - A rule or invariant: write a test or a type that enforces it.
 - A decision: record it in a bead, RFC or ADR, and link it with form 4.
 
-Code that needs a comment to excuse it is a defect, not a documented limitation. Fix the code, or open a bead for the defect and link the bead.
+Code that needs a comment to excuse it is a defect, not a documented limitation. Fix the code.
 
 ## When it applies
 
