@@ -41,6 +41,8 @@ No published cap moved. The filtered runs below pass with no edited expectation;
 
 ## Not established
 
+- The 806-row statistics comparison swept `max_work` only (entries and depth at default); the entries and depth axes hold by construction (`metered_issues()` meters the same list as before) but were not swept.
+- `withheld_issues` is state C8 did not have; it exists only to keep `analyze_generics`' metering of an ordinary `ResourceLimit` input unchanged, and nothing publishes it.
 - `ConversionReport::type_facts()` and `header_metadata()` read the ordinary input, which is a separate report with its own completion; they were not probed at a conversion `ResourceLimit`.
 - `check_scalars` and `check_data` failure partials, `analyze_declaration_types` and `check_declarations` partials: out of scope (see above).
 - Finding lists of `FamilyFacts` (`duplicate_keys`, `comparisons`) are facts, not findings, and were not withheld.
