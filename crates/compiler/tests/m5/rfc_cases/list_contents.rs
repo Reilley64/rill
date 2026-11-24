@@ -430,9 +430,9 @@ fn family_list_destination_forms() {
                         Case {
                             text: AFTER_RETAIN,
                             typed_stats: (329745, 48653, 12),
-                            graph: (GraphCompletion::Incomplete, (193669, 4807, 5)),
+                            graph: (GraphCompletion::Incomplete, (193688, 4807, 5)),
                             roots: &[
-                                checked("reuse", (3489, 322, 5)),
+                                checked("reuse", (3508, 322, 5)),
                                 checked("reuseDst", (4630, 423, 5)),
                             ],
                         }
@@ -843,8 +843,8 @@ fn r1_source_read_after_the_call_checks_with_its_sequence() {
             Case {
                 text: AFTER_READ,
                 typed_stats: (326688, 48106, 12),
-                graph: (GraphCompletion::Incomplete, (189806, 4408, 5)),
-                roots: &[checked("reuse", (3457, 306, 5))],
+                graph: (GraphCompletion::Incomplete, (189825, 4408, 5)),
+                roots: &[checked("reuse", (3476, 306, 5))],
             }
         },
         &[(
@@ -973,7 +973,7 @@ fn r1_stored_source_outlives_the_call_loan() {
                     Case {
                         text: OUTLIVES,
                         typed_stats: (336144, 49622, 12),
-                        graph: (GraphCompletion::SourceRejected, (198597, 5538, 6)),
+                        graph: (GraphCompletion::SourceRejected, (198616, 5538, 6)),
                         roots: &[
                             rejected(
                                 "writeAfter",
@@ -996,7 +996,7 @@ fn r1_stored_source_outlives_the_call_loan() {
                                 R0202_LOCAL.2,
                                 (4006, 472, 6),
                             ),
-                            checked("viewReadThenWrite", (2761, 346, 4)),
+                            checked("viewReadThenWrite", (2780, 346, 4)),
                         ],
                     }
                 }],
@@ -1115,12 +1115,26 @@ pub(super) fn old_root_caps(request: &InstalledRequest, olds: &[OldCaps<'_>]) {
                 let declaration = module
                     .declarations
                     .iter()
-                    .find(|d| {
-                        d.id.kind == DeclarationKind::Function && d.name.as_deref() == Some(name)
+                    .find(|d| match *name {
+                        "expect" => d.id.kind == DeclarationKind::Expectation,
+                        name => {
+                            d.id.kind == DeclarationKind::Function
+                                && d.name.as_deref() == Some(name)
+                        }
                     })
                     .unwrap();
                 let (old, _) = limits(statistics(*old));
-                let limited = lower_body(&receipt, module, &declaration.id, old).unwrap();
+                let limited = if *name == "expect" {
+                    lower_root(
+                        &receipt,
+                        module,
+                        compiler::analysis::scalars::BodyOwner::Declaration(&declaration.id),
+                        old,
+                    )
+                } else {
+                    lower_body(&receipt, module, &declaration.id, old)
+                }
+                .unwrap();
                 crate::limit::assert_body_limit(&limited);
             }
         }
@@ -1225,4 +1239,74 @@ pub(super) fn sequence(mir: &Mir<'_>) -> Vec<String> {
         events.push(format!("{index}: {line}"));
     }
     events
+}
+
+/// ST-3 (review ci-0mdr, ri-px1.11.4): a `List<&Record>` parameter registers
+/// its slot in `locals`, a map keyed by a `DeclarationId` that ends in a
+/// module path, so the insert costs `path.len() + 1` per probe (metering
+/// rule 3, `charge_key`). The third parameter probes a map of two locals.
+const LIST_REFERENCE_PARAMETERS: &str = r####"
+type User = { id: i32 };
+function keep(users: List<&User>): void { }
+function keepThree(a: List<&User>, b: List<&User>, c: List<&User>): void { }
+"####;
+
+#[test]
+fn list_reference_parameter_charges_its_insert() {
+    installed(
+        "rfc_cases::list_contents::list_reference_parameter_charges_its_insert",
+        |request| {
+            check_cases(
+                &request,
+                &[const {
+                    Case {
+                        text: LIST_REFERENCE_PARAMETERS,
+                        typed_stats: (324716, 47725, 12),
+                        graph: (GraphCompletion::Incomplete, (186673, 4198, 5)),
+                        roots: &[
+                            checked("keep", (1922, 44, 1)),
+                            checked("keepThree", (2025, 68, 1)),
+                        ],
+                    }
+                }],
+            );
+            old_root_caps(
+                &request,
+                &[(
+                    LIST_REFERENCE_PARAMETERS,
+                    &[("keep", (1912, 44, 1)), ("keepThree", (1985, 68, 1))],
+                    (186623, 4198, 5),
+                )],
+            );
+        },
+    );
+}
+
+/// Metering rule 11, mandated charge (ri-px1.11.4, ST-3): the field read
+/// `source.id` after the call probes `locals` through `charge_key`, so the
+/// roots below moved. Each parent cap (`eabe14ad`) now gives `ResourceLimit`,
+/// in both modes. `m5-acceptance/ri-px1.11.4.md` holds old, new and reason.
+#[test]
+fn list_roots_pre_charge_caps_now_give_resource_limit() {
+    installed(
+        "rfc_cases::list_contents::list_roots_pre_charge_caps_now_give_resource_limit",
+        |request| {
+            old_root_caps(
+                &request,
+                &[
+                    (
+                        AFTER_RETAIN,
+                        &[("reuse", (3489, 322, 5))],
+                        (193669, 4807, 5),
+                    ),
+                    (AFTER_READ, &[("reuse", (3457, 306, 5))], (189806, 4408, 5)),
+                    (
+                        OUTLIVES,
+                        &[("viewReadThenWrite", (2761, 346, 4))],
+                        (198597, 5538, 6),
+                    ),
+                ],
+            );
+        },
+    );
 }
