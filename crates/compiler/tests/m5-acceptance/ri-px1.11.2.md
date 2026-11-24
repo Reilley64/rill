@@ -30,7 +30,9 @@ Flipped, now `Checked` with a receipt (rule 11, third case: the chief's mandated
 |---|---|---|---|
 | `pre: mutable binder` | 324,709 / 48,123 / 12 | 324,714 / 48,105 / 12 | `ResourceLimit` (work +5) |
 | `pre: mutable source` | 324,529 / 48,133 / 12 | 324,568 / 48,115 / 12 | `ResourceLimit` (work +39) |
-| `pre: immutable local source` (new row, same source with `let current`) | not measured at the parent: the old screen required a parameter source, so it was `R0103` like the mutable source | 324,518 / 48,115 / 12 | not asserted |
+| `pre: immutable local source` (new row, same source with `let current`) | 324,529 / 48,133 / 12 (measured at `a4e56651`, below) | 324,518 / 48,115 / 12 | holds: the parent cap still gives `Checked` (work and entries both lower), asserted as the row's fixed cap |
+
+Parent measurement of the third row (chief of staff condition 1, `chief-rulings-14.md`, 2026-11-24 14:50 AEDT): the fixture of `pre: immutable local source` run at `a4e56651`, C3's base, in its own `git worktree` with its own `CARGO_TARGET_DIR`, both load modes. Outcome `SourceRejected`, one discard, `R0103` at `Err<bool,i32>(61i32)`, no pending, no receipt; triple 324,529 / 48,133 / 12, the same numbers as the parent's `pre: mutable source`. This is a fix of a false `R0103`, not a change of a correct outcome. Log and raw lines: `~/.t3/evidence/rill/m5-build-2026-11-22/ci-sybf/parent-measure.log` and `parent-measure.txt`.
 
 The first two are entries lower and work higher than the rejection they replace, so the old cap asserts `ResourceLimit` (installed with `installed_over_parent`). No cap went up for a published root.
 
@@ -40,6 +42,15 @@ Rejecting twins (new rows, same source with a write between the copy and the mat
 |---|---|---|
 | `pre: mutable binder reassigned before the match` (`let mut before = flag; before = !flag;`) | `SourceRejected` `R0103` | 325,493 / 48,441 / 12 |
 | `pre: mutable source reassigned after the copy` (`current = !flag;` after `let before = current;`) | `SourceRejected` `R0103` | 325,489 / 48,455 / 12 |
+
+Twins of `pre: immutable local source` (chief of staff condition 3). The immutable local `current` copies the parameter `flag`, and neither can be written: RFC 0007 makes an owned parameter and an ordinary `let` immutable. A write of the source between the copy and the match is therefore not a Result-use rejection. It is a source error, one `ReadOnly` body finding at the assignment statement, so the screen never sees a written source (`Incomplete`, no receipt, no `R0103`, no `Checked`). Both are pinned in both load modes by `installed_read_only` with the finding, the completion and the exact numbers, replayed at the exact cap:
+
+| Row | Write | Outcome | Exact |
+|---|---|---|---|
+| `pre: immutable local source reassigned after the copy` | `current = !flag;` | `Incomplete`, `ReadOnly` at `current = !flag;` | 324,920 / 48,237 / 12 |
+| `pre: immutable local source, its parameter written after the copy` | `flag = !flag;` | `Incomplete`, `ReadOnly` at `flag = !flag;` | 324,753 / 48,171 / 12 |
+
+No one-short pin on these two: `analyze_typed` still publishes body findings at `ResourceLimit` (`ri-68mu`), and `support/limit.rs` allows no new site that keeps them (running it fails `assert_typed_limit` with "publishes a body finding"). A source that can be written is the case `pre: mutable source reassigned after the copy` above: an immutable local `before` copying the `let mut` local `current`, which is written after the copy; it is a genuine `R0103` (325,489 / 48,455 / 12). Neither twin is accepted.
 
 Mutable-borrow twins (`flip(&mut before)`, `flip(&mut current)`): `Incomplete`, one pending `Storage` at the borrow, no receipt; the borrow of a Boolean local is unsupported before this change, so these pin that the screen never turns it into `Checked`.
 

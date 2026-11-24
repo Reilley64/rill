@@ -6,6 +6,7 @@ mod limit;
 mod support;
 
 use compiler::analysis::AnalysisLimits;
+use compiler::analysis::scalars::ScalarFindingKind;
 use compiler::analysis::typed::{ResultUseBlocker, TypedCompletion, TypedReport, analyze_typed};
 use compiler::loader::{InstalledRequest, Origin, load_installed};
 use std::{fs, path::PathBuf, process::Command};
@@ -688,7 +689,9 @@ function probe(flag: bool, gate: bool): void { let debt = Err<bool,i32>(61i32); 
     // good a copy as an immutable one, so the first two rows check with a receipt. Their
     // parent numbers are the rejections measured at da5bec50 (both paid before their
     // `R0103`, rule 1 exception ri-2s0.10). The third row is the same source with an
-    // immutable local: it shares the screen, so it checks too, and it has no parent pin.
+    // immutable local: it shares the screen, so it checks too. Measured at a4e56651 (C3's
+    // base) it was the same `R0103` as the mutable source, 324529 / 48133 / 12, and it
+    // costs less now, so that parent cap still gives `Checked`.
     for (name, source, parent, exact) in [
         (
             "pre: mutable binder",
@@ -705,19 +708,28 @@ function probe(flag: bool, gate: bool): void { let debt = Err<bool,i32>(61i32); 
         (
             "pre: immutable local source",
             MUTABLE_SOURCE.replace("let mut current", "let current"),
-            None,
+            Some((324529, 48133, 12)),
             (324518, 48115, 12),
         ),
     ] {
-        installed_over_parent(&probe, name, &source, None, parent, |report| {
-            checked(report);
-            let stats = report.statistics();
-            assert_eq!(
-                (stats.work, stats.entries, stats.max_depth),
-                exact,
-                "{name}"
-            );
-        });
+        let holds = parent.is_some_and(|parent| exact.0 <= parent.0 && exact.1 <= parent.1);
+        let over_parent = parent.filter(|_| !holds);
+        installed_over_parent(
+            &probe,
+            name,
+            &source,
+            parent.filter(|_| holds),
+            over_parent,
+            |report| {
+                checked(report);
+                let stats = report.statistics();
+                assert_eq!(
+                    (stats.work, stats.entries, stats.max_depth),
+                    exact,
+                    "{name}"
+                );
+            },
+        );
     }
 
     // Genuine rejections stay R0103: the written value is not the matched source. Exact
@@ -774,6 +786,31 @@ function probe(flag: bool, gate: bool): void { let debt = Err<bool,i32>(61i32); 
                 );
             },
         );
+    }
+
+    // Review ci-0mdr Q4 (SP-7), chief of staff 2026-11-24 14:50 AEDT, condition 3. The
+    // immutable local `current` copies the parameter `flag`; neither can be written. Both
+    // writes between the copy and the match are source errors (`ReadOnly`), so the screen
+    // never sees a written source. `pre: mutable source reassigned after the copy` above
+    // covers a source that can be written.
+    for (name, edit, write, exact) in [
+        (
+            "pre: immutable local source reassigned after the copy",
+            "let before = current; current = !flag;",
+            b"current = !flag;".as_slice(),
+            (324920, 48237, 12),
+        ),
+        (
+            "pre: immutable local source, its parameter written after the copy",
+            "let before = current; flag = !flag;",
+            b"flag = !flag;".as_slice(),
+            (324753, 48171, 12),
+        ),
+    ] {
+        let source = MUTABLE_SOURCE
+            .replace("let mut current", "let current")
+            .replace("let before = current;", edit);
+        installed_read_only(&probe, name, &source, write, exact);
     }
 
     // A mutable borrow of the copy or the source stays `Incomplete` at the borrow
@@ -941,32 +978,103 @@ fn installed_over_parent(
             );
             crate::limit::assert_typed_limit(&parent);
         }
-        let stats = report.statistics();
-        let exact = AnalysisLimits {
-            max_work: stats.work,
-            max_entries: stats.entries,
-            max_depth: stats.max_depth,
+        exact_and_one_short(&graph, &report, name, &check);
+    }
+}
+
+fn exact_and_one_short(
+    graph: &compiler::loader::Graph,
+    report: &TypedReport<'_>,
+    name: &str,
+    check: &impl Fn(&TypedReport<'_>),
+) {
+    let exact = replay_exact(graph, report, name, check);
+    for cap in [
+        AnalysisLimits {
+            max_work: exact.max_work - 1,
+            ..exact
+        },
+        AnalysisLimits {
+            max_entries: exact.max_entries - 1,
+            ..exact
+        },
+        AnalysisLimits {
+            max_depth: exact.max_depth - 1,
+            ..exact
+        },
+    ] {
+        let stopped = analyze_typed(graph, cap);
+        crate::limit::assert_typed_limit(&stopped);
+    }
+}
+
+fn replay_exact(
+    graph: &compiler::loader::Graph,
+    report: &TypedReport<'_>,
+    name: &str,
+    check: &impl Fn(&TypedReport<'_>),
+) -> AnalysisLimits {
+    let stats = report.statistics();
+    let exact = AnalysisLimits {
+        max_work: stats.work,
+        max_entries: stats.entries,
+        max_depth: stats.max_depth,
+    };
+    let replay = analyze_typed(graph, exact);
+    assert_eq!(replay.statistics(), stats, "{name}");
+    check(&replay);
+    exact
+}
+
+/// A write the source language forbids is rejected before Result use: one `ReadOnly`
+/// finding at the statement `write`, `Incomplete`, no receipt, the same numbers on replay at
+/// the exact cap, in both load modes. No one-short pin: `analyze_typed` still publishes body
+/// findings at `ResourceLimit` (`ri-68mu`), and `limit.rs` allows no new site that keeps them.
+fn installed_read_only(
+    probe: &std::path::Path,
+    name: &str,
+    source: &str,
+    write: &[u8],
+    exact: (usize, usize, usize),
+) {
+    let entry = probe
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("app/main.rill");
+    fs::write(&entry, format!("{IMPORTS}{source}")).unwrap();
+    for test_mode in [false, true] {
+        let graph = load_installed(InstalledRequest {
+            entry: entry.clone(),
+            target: "aarch64-apple-darwin".into(),
+            test_mode,
+            limits: Default::default(),
+            options: Default::default(),
+        })
+        .unwrap();
+        let report = analyze_typed(&graph, AnalysisLimits::default());
+        eprintln!("{name}, test={test_mode}: {:?}", report.statistics());
+        let check = |report: &TypedReport<'_>| {
+            let found: Vec<_> = report
+                .bodies()
+                .findings()
+                .iter()
+                .filter(|f| f.site.module.origin == Origin::Application)
+                .map(|f| (f.kind, f.site.span.bytes()))
+                .collect();
+            assert_eq!(found, [(ScalarFindingKind::ReadOnly, write)], "{name}");
+            assert_eq!(report.completion(), TypedCompletion::Incomplete, "{name}");
+            assert!(report.receipt().is_none(), "{name}");
+            let stats = report.statistics();
+            assert_eq!(
+                (stats.work, stats.entries, stats.max_depth),
+                exact,
+                "{name}"
+            );
         };
-        let replay = analyze_typed(&graph, exact);
-        assert_eq!(replay.statistics(), stats);
-        check(&replay);
-        for cap in [
-            AnalysisLimits {
-                max_work: exact.max_work - 1,
-                ..exact
-            },
-            AnalysisLimits {
-                max_entries: exact.max_entries - 1,
-                ..exact
-            },
-            AnalysisLimits {
-                max_depth: exact.max_depth - 1,
-                ..exact
-            },
-        ] {
-            let stopped = analyze_typed(&graph, cap);
-            crate::limit::assert_typed_limit(&stopped);
-        }
+        check(&report);
+        replay_exact(&graph, &report, name, &check);
     }
 }
 
