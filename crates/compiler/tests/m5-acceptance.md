@@ -1841,48 +1841,107 @@ For the review's ruling on `003c414`: apart from the cap above, that commit repl
 
 No other cap or expectation moved. This is LLVM-free host ownership analysis. No Rill program ran.
 
-## Final record: deferred obligations (2026-11-23, ri-px1.11)
+## Final record (2026-11-24, ri-px1.11, R-D6b)
 
-This section replaces "Open acceptance obligations". It lists what M5 does not deliver and the bead that owns each item. The evidence for the rows that M5 does deliver is in [`m5-acceptance/`](m5-acceptance/README.md); the three closeout audits replay the K, C and P rows in both installed load modes: [`ri-785.10.md`](m5-acceptance/ri-785.10.md) (C rows, B5), [`ri-vgz.8.md`](m5-acceptance/ri-vgz.8.md) (P rows, C6) and [`ri-px1.10.md`](m5-acceptance/ri-px1.10.md) (K rows, D5). The case-by-case status is [`m5-status.md`](m5-status.md).
+This section replaces the first final record of 2026-11-23 (`ed783d26`) and rewrites it for everything merged since `7002855e`. Review `ci-uaa1` of that commit led to the owner's decision of 2026-11-23 19:18 AEDT: every Required row that the first record deferred is built in M5. The record is the base `implementation/m5-ownership-cleanup` at `c6b2cc98` (the K3 propagation exit, `ri-2s0.13`, is its last build merge). Bead states were checked with `gc bd show <id> --rig rill` on 2026-11-24.
 
-Obligations of gap-analysis §1.6 that M5 cannot deliver (one bead each):
+The evidence of each ticket is in [`m5-acceptance/`](m5-acceptance/README.md). The three closeout audits replay the K, C and P rows in both installed load modes: [`ri-785.10.md`](m5-acceptance/ri-785.10.md) (C rows, B5), [`ri-vgz.8.md`](m5-acceptance/ri-vgz.8.md) (P rows, C6) and [`ri-px1.10.md`](m5-acceptance/ri-px1.10.md) (K rows, D5). The case-by-case status is [`m5-status.md`](m5-status.md). All of it is compiler judgment over MIR and typed facts. No Rill program ran.
 
-| Obligation | Bead | Note |
-| --- | --- | --- |
-| C3 value `12`, any `expect` outcome | `ri-qlh.1` | Needs execution (M6). M5 publishes MIR for the O15 root only. |
-| C9 erased callable invocation | `ri-9ja` | Owner decision D4 (a). |
-| K6 cleanup-cycle rejection | `ri-1jk` | Owner decision D9: needs a diagnostic code and rule. |
-| K9 native completion | `ri-qlh.2` | M6: providers and a scheduler. |
-| P7 cancellation at a `for` with a live cursor | `ri-xat` | Owner decision D7. |
-| U6 complete graph ownership receipt | `ri-un6` | Successor work under D1 (b); related `ri-55r`. |
-| Hosted "Test: Native acceptance" jobs | `ri-yih` (closed) | Resolved by `ri-2q7` on rill `main` (`58befb9d`): the native workflow asserts the `test:runtime` stub and the job reports neutral. |
+### Rows built after the first record
 
-Other deferrals recorded in the ticket index (`tickets/INDEX.md` of the planner's notes):
+None of these is deferred. Each has a per-ticket evidence file and a closing comment on its rill bead. `ri-2s0.13` was merged by the rig merger at `c6b2cc98` and its bead still reads ready-for-agent; the rest are closed.
 
-| Deferred item | Bead | Decision |
-| --- | --- | --- |
-| Heterogeneous error wrap with canonical display (gated C7) | `ri-ink` | D7 |
-| P2: a wrap that builds a new wrapper has no graph-root MIR, including the scalar `input ? 3i32` (`closeout::wraps_after_rhs_has_no_graph_root_mir_only_because_of_the_retained_display_edge`) | `ri-ink` | D7, by owner decision of 2026-11-23 (review `ci-uaa1`, O6) |
-| Borrowed `Result` payloads (gated C8) | `ri-ijq` | D7 |
-| Borrowed iteration, M4 `Storage` handoff and M5 exit (gated C9, C10) | `ri-9z0` | D7 |
-| Explicit `dispose(Option<string>)` (gated D7) | `ri-082` | D8 |
-| Rigid generic `chooseOne<T>` root | `ri-55r` | D2, stays parked |
-| `replay:installed` task | `ri-fu8` | none |
-| Base-versus-candidate differential for M5 caps | `ri-jp5` | none |
-| `tools/check_metering.py` lint for uncharged keyed lookups | `ri-30q` | none |
-| Metering rule 3 at the existing path-keyed probes (charged lookup wrappers; review `ci-uaa1` S1-F1..F4, S2-F1..F3, S2-F5, ri-vgz.7 #2); its re-pins fall under rule 11's third case | `ri-qlh.3` | Owner decision of 2026-11-23 (review `ci-uaa1`, O2) |
+| Row | Outcome now | Bead | Evidence |
+| --- | --- | --- | --- |
+| K3/O21 | `SourceRejected`, R0500 at the guard-release replacement | `ri-8qlm` | [`ri-8qlm.md`](m5-acceptance/ri-8qlm.md) |
+| K3/O20 | `Checked`, the guard released once | `ri-w0g` | [`ri-w0g.md`](m5-acceptance/ri-w0g.md) |
+| K1/O19 | `Checked`, the holder's disposer before `Drop(source)` | `ri-kdi` | [`ri-kdi.md`](m5-acceptance/ri-kdi.md) |
+| K2, non-primitive fields | A nested owned record field of a custom disposer; the written `dispose(value.field)` in an active disposer is a verified graph edge | `ri-4lq` | [`ri-4lq.md`](m5-acceptance/ri-4lq.md) |
+| C4/O16 expectation | `joinedOrder` and the expectation `Checked` | `ri-e9t8` | [`ri-e9t8.md`](m5-acceptance/ri-e9t8.md) |
+| O5 field arithmetic | `Checked` | `ri-fmsk` | [`ri-fmsk.md`](m5-acceptance/ri-fmsk.md) |
+| C12 | The Boolean match programs `pre` and `computed` `Checked` with a receipt, no false `R0103` | `ri-2s0.4` | [`ri-2s0.4.md`](m5-acceptance/ri-2s0.4.md) |
+| O1, O6 | `Checked` through exclusive `i32` derefs and reborrowing calls | `ri-2s0.5` | [`ri-2s0.5.md`](m5-acceptance/ri-2s0.5.md) |
+| O11 | R0201 for the early whole read; `ordered` `Checked` (family call checked against the selected implementation's signature) | `ri-2s0.6` | [`ri-2s0.6.md`](m5-acceptance/ri-2s0.6.md) |
+| O10 | `extract` `Checked`; `slot` and `indexed` R0202 | `ri-2s0.7`, `ri-2s0.7.1`, `ri-2s0.7.2` | [`ri-2s0.7.md`](m5-acceptance/ri-2s0.7.md), [`ri-2s0.7.1.md`](m5-acceptance/ri-2s0.7.1.md), [`ri-2s0.7.2.md`](m5-acceptance/ri-2s0.7.2.md) |
+| O12 | Borrowed temporary within its statement `Checked`; `stored` R0203 (chosen by ruling; RFC 0007 names no code) | `ri-2s0.8` | [`ri-2s0.8.md`](m5-acceptance/ri-2s0.8.md) |
+| O22 | `dispose(view)` of a `&string` ends only that descriptor; `dispose(owner)` under a live copy R0203 | `ri-2s0.9` | [`ri-2s0.9.md`](m5-acceptance/ri-2s0.9.md) |
+| Rule-1 exceptions (nine siblings) | Pinned exact and one short; a record, not a row | `ri-2s0.10` | [`ri-2s0.10.md`](m5-acceptance/ri-2s0.10.md) |
+| O13 | R0203 for joined retained sources released early | `ri-2s0.11` | [`ri-2s0.11.md`](m5-acceptance/ri-2s0.11.md) |
+| O2, O8 | `Checked`; O8's `poison` R0202 | `ri-1up` | [`ri-1up.md`](m5-acceptance/ri-1up.md) |
+| O7 | `overlap` R0201; admitted `&mut i32` member forms | `ri-pfxi` | [`ri-pfxi.md`](m5-acceptance/ri-pfxi.md) |
+| R1 in RFC 0007 | Rule R1 (type-compatible flow into element contents) recorded; documentation only | `ri-2s0.12` | [`ri-2s0.12.md`](m5-acceptance/ri-2s0.12.md) |
+| O9 | `forwarded` `Checked`, `local` R0202, under R1 | `ri-ema` | [`ri-ema.md`](m5-acceptance/ri-ema.md) |
+| K3 on a propagation exit | A bare `LockGuard<i32>` parameter released once on each `?` exit | `ri-2s0.13` | [`ri-2s0.13.md`](m5-acceptance/ri-2s0.13.md) |
+| Review `ci-uaa1` fixes | Fixed caps, cleanup lists, rule 11's third case | `ri-px1.11` | [`ri-px1.11.md`](m5-acceptance/ri-px1.11.md) |
 
-Found beads still open, each pinned at its current outcome in the audits (state checked 2026-11-23):
+### Deferrals that still hold
+
+Gap-analysis §1.6 obligations that M5 cannot deliver, one bead each. Each is deferred by owner decision and none is an M5 row.
+
+| Obligation | Bead | State | Note |
+| --- | --- | --- | --- |
+| C3 value `12`, any `expect` outcome | `ri-qlh.1` | needs triage | Needs execution (M6). M5 publishes MIR for the O15 root only. |
+| C9 erased callable invocation | `ri-9ja` | needs triage | Owner decision D4 (a). |
+| K6 cleanup-cycle rejection | `ri-1jk` | needs triage | Owner decision D9: needs a diagnostic code and rule. |
+| K9 native completion | `ri-qlh.2` | needs triage | M6: providers and a scheduler. |
+| P7 cancellation at a `for` with a live cursor | `ri-xat` | needs triage | Owner decision D7. |
+| U6 complete graph ownership receipt | `ri-un6` | needs triage | Successor work under D1 (b); related `ri-55r`. |
+| Hosted "Test: Native acceptance" jobs | `ri-yih` | closed | Resolved by `ri-2q7` on rill `main` (`58befb9d`): the native workflow asserts the `test:runtime` stub and the job reports neutral. |
+
+Items of the D7 and D8 decisions and the other deferrals of the ticket index:
+
+| Deferred item | Bead | State | Decision |
+| --- | --- | --- | --- |
+| Heterogeneous error wrap with canonical display (gated C7) | `ri-ink` | needs triage | D7 |
+| P2: a wrap that builds a new wrapper has no graph-root MIR, including the scalar `input ? 3i32` (`closeout::wraps_after_rhs_has_no_graph_root_mir_only_because_of_the_retained_display_edge`) | `ri-ink` | needs triage | D7, by owner decision of 2026-11-23 (review `ci-uaa1`, O6) |
+| Borrowed `Result` payloads (gated C8) | `ri-ijq` | needs triage | D7 |
+| Borrowed iteration, M4 `Storage` handoff and M5 exit (gated C9, C10) | `ri-9z0` | needs triage | D7 |
+| Explicit `dispose(Option<string>)` (gated D7) | `ri-082` | needs triage | D8 |
+| Rigid generic `chooseOne<T>` root | `ri-55r` | needs triage | D2, stays parked |
+| `replay:installed` task | `ri-fu8` | needs triage | none |
+| Base-versus-candidate differential for M5 caps | `ri-jp5` | needs triage | none |
+| `tools/check_metering.py` lint for uncharged keyed lookups | `ri-30q` | closed | Superseded by the owner's decision of 2026-11-24: rule 3 is enforced structurally, recorded on `ri-qlh.3` |
+
+### Open found beads (found work after M5)
+
+Each is open work found while building M5. None is an M5 row and none changes a pinned outcome: each gap stays `Incomplete` (or at its published cap) and is pinned in the tests the bead names. The state is the one found on 2026-11-24.
 
 | Bead | State | Gap |
 | --- | --- | --- |
-| `ri-ce4` | open | A grouped actual, call or receiver loses the M4 private `callableOnce` receipt (C8). |
-| `ri-e9t8` | needs triage | O16 `joinedOrder` and its expectation need `&&` lowering and index operands. |
+| `ri-qlh.3` | needs triage | Rule 3: charge path-keyed lookups at the existing probes (review `ci-uaa1` S1-F1..F4, S2-F1..F3, S2-F5, ri-vgz.7 #2, and the baseline smells). Its re-pins fall under rule 11's third case. |
+| `ri-qlh.4` | needs triage | Restructure the rule-1 screens that charge before rejecting (the exception list below). Needs M4 facts that carry record field and enum variant lists. |
+| `ri-qlh.8` | needs triage | Statechart gaps (experiment `ri-h4ec`): lock guard release witnesses are missing on delivered exits with two guards or a wrapper, on a replacement whose old or installed value is a guard, and on exits suppressed by a wrapper. For M6. |
+| `ri-can9` | needs triage | `get(&users, 0u64)` on any named owned List other than `List<&Record>` stops at `FamilySelection` (pinned by `rfc_cases::o10_get_siblings_keep_their_parent_caps`). |
+| `ri-9qnr` | needs triage | Explicit or canonical disposal of a whole nested record with a custom disposer is `Incomplete` at its operand. |
+| `ri-7az5` | needs triage | A written `dispose(x.field)` outside an active disposer is not a verified graph edge. |
+| `ri-imx8` | needs triage | A record with an `Option` field is `Incomplete` at its parameter. |
+| `ri-grwx` | needs triage | `analyze_ownership` keeps findings published with `ResourceLimit` (metering rule 8). |
 | `ri-o62c` | needs triage | A grouped List literal of records loses the M4 receipt (P6). |
-| `ri-4lq` | needs triage | A written `dispose(value.field)` in an active disposer is not a verified graph edge (K2 and O14 graph roots). |
-| `ri-kdi` | open | Records with reference fields are Incomplete at construction (O7, O19). |
-| `ri-grwx` | needs triage | `analyze_ownership` keeps findings published with `ResourceLimit` (metering rule 8); found by the review `ci-uaa1` fixes. |
+| `ri-ce4` | open | A grouped actual, call or receiver loses the M4 private `callableOnce` receipt (C8). |
 
-Also open and named by `m5-status.md` rows: `ri-w0g` (borrowed temporaries, `List<&T>` extraction, descriptor disposal, guard interpolation: O10, O12, O20, O22), `ri-ema` (user-declared retaining contracts: O9, O11, O13) and `ri-1up` (M4 `Storage` blocker on writes through `&mut`: O1, O2, O6, O8).
+Closed since the first record: `ri-e9t8`, `ri-4lq`, `ri-kdi`, `ri-w0g`, `ri-ema`, `ri-1up`, `ri-pfxi`, `ri-8qlm` and `ri-fmsk` (rows above), and `ri-30q` (superseded).
 
-M5 is not complete against the whole of RFC 0007. Whole-graph completion is not claimed: the pinned ordinary graph roots are `Incomplete` or `SourceRejected` by roots outside the delivered rows (`ri-un6`). No Rill program ran. Runtime, native/Wasm support, backend, CLI and client acceptance remain separate (M6, `ri-qlh`). Do not merge this increment or begin M6.
+### Rule exceptions in force
+
+All are written in [`compiler-metering.md`](../../../docs/agents/compiler-metering.md), each with the ruling that granted it and its evidence file.
+
+- **Rule 11, third case (a ticket's mandated flip or charge).** Rule 11 names the three moves the owner ratified on 2026-11-23 (A2's O15 `counter`, B6's O15 expectation, C1's `callerExclusive`). Its cheaper-flip note covers a mandated flip that lowers the cost: the test asserts the new exact triple and that one unit less gives `ResourceLimit`, because the old cap still holds (C12 `pre` and `computed`, `ri-2s0.4`). The chief of staff or the owner decides any other cap movement.
+- **Rule 1 exception list.** Nine siblings in four tests (`ri-2s0.10`): `captures::declared_shared::declared_shared_siblings_keep_their_parent_caps` (`ignored`, `ignoredOther`), `iteration::record::record_yield_cleans_the_partial_item_then_the_suffix` (`mixed`, `custom`), `m4_8_callable_once::private_once_checks_the_actual_shared_pair` (`shared-formal-actual`, `shared-result-capture`, `shared-unclosed`) and `m4_8_match_boolean_snapshots::installed_boolean_matches` (`pre: mutable binder`, `pre: copy of another parameter`). Two more for O12 (`ri-2s0.8`): `(&named()).x` and `let view = &named();` in `rfc_cases::o12::text_record_results_stay_incomplete`. Three for the `&mut &Record` contents screen (`ri-1up`): a record with a `string` field, a nested record and an enum, in `rfc_cases::record_contents::unsupported_record_contents_stay_incomplete`. Each stays at its outcome and blocker site, pinned exact and one short, with its parent cap asserted to give `ResourceLimit`. Restructuring is `ri-qlh.4`.
+- **The chief's standing rule-1 exception** (rulings of 2026-11-24 07:19 AEDT, amended 11:35). When a new screen needs a record or enum declaration's field or variant list and no paid fact carries it, the exception is granted without asking, provided (a) the lookup comes after every screen the paid facts allow, (b) each sibling keeps its outcome and blocker site, (c) each sibling pays at most two charged declaration lookups and under 150 work in total, (d) the evidence file lists old and new per sibling, and (e) each use is listed in the handoff. Outcome flips and typed admissions outside a ticket's done-when still go to the chief. Uses: `ri-1up` (the three siblings above, +140 and +144 typed work) and `ri-ema` (four siblings of the `&mut List<&Record>` destination screen: a `string` field record +148, a nested record +148, an enum +144, an extra `bool` +74; `rfc_cases::list_contents::list_destination_siblings_keep_their_outcomes_and_blockers`).
+- **Rule 3 note.** The existing path-keyed probes are known non-conforming and deferred to `ri-qlh.3`; a new or touched probe must conform.
+
+### Stated limits recorded by tickets
+
+These are what the delivered rows do not reach. Each is pinned in the test its evidence file names.
+
+- **O9, caller-provided source (`ri-ema`).** The judgment that a stored source outlives the call loan is reached through a body-local owner only. A use that needs a caller-provided source released or exclusively borrowed while `dst` is live is not expressible: a `&mut User` source is typed `Incomplete` (`rfc_cases::list_contents::r1_caller_provided_exclusive_source_stops_typed`), and a caller-owned list is `Incomplete` at its name. The round-going loop twin `loopLocal` is R0203 by the chief's ruling of 2026-11-24 13:04 AEDT. RFC 0007's conformance table (line 542) still says "NotChecked" for O9 and is the owner's text.
+- **R1's known conservative rejection (`ri-2s0.12`, `ri-ema`).** R1 reads the declared signature only, so a callee that stores nothing is rejected like one that stores (`rfc_cases::list_contents::r1_known_conservative_rejection_of_a_callee_that_stores_nothing`).
+- **O7, tuple and nested-reference shapes (`ri-pfxi`).** Only an `&mut i32` member of a record without a custom disposer is admitted. The tuple and the nested-reference shapes stay `Incomplete`, pinned at exact and one-short caps in `m5/rfc_cases/o07_forms.rs`. Writes through the member other than `*record.field += literal` stay `Incomplete`.
+- **O10, untested `LookupListElement` MIR form (`ri-2s0.7.2`).** The lookup always reaches R0202 on its one route, so no checked root exercises `Operation::LookupListElement`. Its MIR form is tested only as far as compiling and the shared flow checks.
+- **K3, the `movedLocal` graph root (`ri-2s0.13`).** `let held = lock;` first: the targeted query is `Checked` and releases `held` on both exits, but the graph root stays `Incomplete` with no MIR (3,914 / 703 / 4), D3's local-binding gap. A guard in a record field or a wrapper, a guard passed into a call and a shared view of the guard across the `?` remain without a propagation proof (`ri-qlh.8`).
+
+### For the second review
+
+Probe two admissions for a wrong acceptance (chief's conditions, `ri-ema` and `ri-pfxi`): R1's admitted forms (direct-function retain, two calls, call in a loop, pair of `&User` sources, lone destination, source read after the call), and the `&mut i32` record member forms `withText`, the record parameter read and passed to a call, and the function returning one. The Comments policy (`docs/agents/comments.md`) does not apply to the M5 branch or its reviews.
+
+M5 is not complete against the whole of RFC 0007. Whole-graph completion is not claimed: the pinned ordinary graph roots are `Incomplete` or `SourceRejected` by roots outside the delivered rows (`ri-un6`). No Rill program ran. Runtime, native/Wasm support, backend, CLI and client acceptance remain separate (M6, `ri-qlh`). The hosted checks on the final head and the second review are not part of this record. Do not merge this increment or begin M6.
