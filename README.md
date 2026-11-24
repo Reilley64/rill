@@ -2,7 +2,7 @@
 
 # Rill
 
-Rill is an experimental, functional-first language with TypeScript-style syntax, explicit ownership and goroutines. Its intended targets are native code and WebAssembly through LLVM.
+Rill is an experimental, functional-first language with TypeScript-style syntax, explicit ownership and goroutines. Its intended targets are native code and WebAssembly through LLVM. It is memory safe without a tracing garbage collector or hidden reference counting: [ownership written in types](docs/adr/0002-visible-ownership-without-lifetimes.md) decides when each value is cleaned up.
 
 This repository contains the language design, standard-library contracts, Rill source examples, standalone backend/provider experiments and an initial Rust toolchain scaffold. The scaffold implements CLI help and version output, not a working Rill compiler, standard library or language server.
 
