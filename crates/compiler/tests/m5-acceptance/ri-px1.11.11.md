@@ -13,7 +13,7 @@ Ticket `ri-px1.11.11` for spec `ri-2s0`, the last child of the fix pass for the 
 | 5 | A-F4 | renamed, no number changed | `o10_lookup_siblings_stay_incomplete_at_their_pinned_caps`, `record_contents::unsupported_record_reads_pin_current_caps_and_blockers` |
 | 6 | ruling 19 (1) | `Overlap` at the exact cap, `Pending` one short, pinned | `m4_8_ownership::installed_ownership_requires_the_built_archive`, `m4_8_list::installed_list` |
 | 7 | ruling 19 (2) | exhaustive destructuring per report kind, called by the helpers | below |
-| 10 | ruling 20, `ri-j6fm` | X2, X3 and X4 pinned, named exception | `m4_8_match_boolean_snapshots::installed_boolean_matches`, below |
+| 10 | ruling 20, `ri-j6fm` | X2 and X3 pinned, named exception; X4 stopped and reported | `m4_8_match_boolean_snapshots::installed_boolean_matches`, below |
 | 11 | ruling 20, C13 neighbours | D-F2 already pinned by C13; `take(holder)` pinned | `rfc_cases::o07::a_record_holding_a_sibling_reborrow_rejects_at_the_replacement_before_it_is_taken` |
 
 ## Item 2: SP-6
@@ -114,9 +114,12 @@ Measured in the probe of C12 (`px119_probe.rs.txt`, extended with X3 to X6) at t
 |---|---|---|---|---|---|
 | X2 | `current = !flag; let mut z = flag; z = !flag;` | 326,097 / 48,707 / 12 | 326,183 / 48,707 / 12 | +86 / 0 | `SourceRejected`, `R0103` at `Err<bool,i32>(61i32)`, no pending, both |
 | X3 (a different local lent) | `current = !flag; let mut z = flag; let w = &mut z;` | 326,044 / 48,695 / 12 | 326,134 / 48,695 / 12 | +90 / 0 | the same |
-| X4 (lent by a call, `flip` declared) | `current = !flag; let mut z = flag; flip(&mut z);` | 326,822 / 48,582 / 12 | 326,912 / 48,582 / 12 | +90 / 0 | `Incomplete`, `Storage` at `*value = !*value;`, one `R0103` discard, both |
 
-All three are pinned exact and one short on work, entries and depth (`installed_over_parent`, `ResourceLimit` through `assert_typed_limit`) in `installed_boolean_matches`, each parent cap asserted to give `ResourceLimit`; X2 and X3 beside the genuine rejections (`unpaid`), X4 with the lent rows. The brief's "if its outcome differs from X2's, stop" is read as the outcome flipping against the parent, which it does not: X3 is X2's outcome, and X4 is `Incomplete` at both the parent and now, with the parent's blocker. X4 differs from X2's outcome only because the lent write sits inside `flip`; it is reported here for the chief to confirm. Cost: one `never_written` scan of the source (the free `last_written` screen of C12 names the other local), the same cause as X2. Not exceptions: X5 (a different local lent first, then the source written) equals its parent, 325,791 / 48,578 / 12; X6 (a different local written, the source never written) is `Checked` now (the Q4 flip), 325,755 / 48,507 / 12, parent 325,741 / 48,582 / 12 `SourceRejected`. Comment on `ri-qlh.4` links `ri-j6fm` ("per-local written fact"); the rule-1 notes name the three rows by test name.
+X2 and X3 are pinned exact and one short on work, entries and depth in `installed_boolean_matches` (beside the genuine rejections: `installed_over_parent`, `unpaid`, `ResourceLimit` through `assert_typed_limit`), each parent cap (326,097 / 48,707 / 12 and 326,044 / 48,695 / 12) asserted to give `ResourceLimit`. Both are the same cause: the free `last_written` screen of C12 names the other local, so the source pays one `never_written` scan before the same `R0103`. The ruling asked for the lend variant "a later `&mut` of another local" if its cost differs from X2: X3 is that, its cost differs (+90), its outcome is X2's. The comment on `ri-qlh.4` links `ri-j6fm` ("per-local written fact"); the rule-1 notes name both rows by test name.
+
+### Stopped: X4, outcome differs, reported
+
+X4 is the lend by a call: `current = !flag; let mut z = flag; flip(&mut z);` with `function flip(value: &mut bool): void { *value = !*value; }` declared. Parent 326,822 / 48,582 / 12, now 326,912 / 48,582 / 12 (+90 work, no entries), `Incomplete` with `Storage` pending at `*value = !*value;` and the `R0103` discard published, at the parent and now (both load modes). Its outcome differs from X2's (`Incomplete`, not `SourceRejected`), and the brief says to stop in that case, so it is **not pinned and not in the rule-1 notes**. It does not flip against its own parent. The planner is asked whether to pin it under the `ri-j6fm` exception. Same measurement of two siblings that are not exceptions: X5 (a different local lent first, then the source written) equals its parent, 325,791 / 48,578 / 12; X6 (a different local written, the source never written) is `Checked` now (the Q4 flip), 325,755 / 48,507 / 12, parent 325,741 / 48,582 / 12 `SourceRejected`.
 
 ## Item 11: C13's neighbours
 

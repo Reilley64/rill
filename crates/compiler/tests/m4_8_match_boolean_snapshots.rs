@@ -841,10 +841,8 @@ function probe(flag: bool, gate: bool): void { let debt = Err<bool,i32>(61i32); 
     // `*value = !*value;` write inside `flip`, with the unpaid `R0103` still published,
     // whatever the match does, so neither can reach `Checked`. Parent numbers measured at
     // 81d317b3 (review ci-b4b2 A-F1, ri-px1.11.9): same outcome and blocker, and the
-    // rejection costs no more than it did there. The last row is the third `ri-j6fm` form
-    // (the named exception of the rejections above): the same outcome and blocker as its
-    // parent, `flip(&mut z)` of another local after the source was written, +90 work.
-    for (name, source, exact, over_parent) in [
+    // rejection costs no more than it did there.
+    for (name, source, exact) in [
         (
             "pre: mutable binder lent mutably before the match",
             format!(
@@ -852,7 +850,6 @@ function probe(flag: bool, gate: bool): void { let debt = Err<bool,i32>(61i32); 
                 pre("let mut before = flag; flip(&mut before);", "before")
             ),
             (325886, 48178, 12),
-            None,
         ),
         (
             "pre: mutable source lent mutably after the copy",
@@ -864,22 +861,9 @@ function probe(flag: bool, gate: bool): void { let debt = Err<bool,i32>(61i32); 
                 )
             ),
             (325702, 48188, 12),
-            None,
-        ),
-        (
-            "pre: mutable source written, then another local lent by a call (ri-j6fm, X4)",
-            format!(
-                "{FLIP}{}",
-                MUTABLE_SOURCE.replace(
-                    "let before = current;",
-                    "let before = current; current = !flag; let mut z = flag; flip(&mut z);",
-                )
-            ),
-            (326912, 48582, 12),
-            Some((326822, 48582, 12)),
         ),
     ] {
-        installed_over_parent(&probe, name, &source, Some(exact), over_parent, |report| {
+        installed(&probe, name, &source, Some(exact), |report| {
             assert_eq!(report.completion(), TypedCompletion::Incomplete, "{name}");
             assert!(report.receipt().is_none());
             let uses = report.result_use().unwrap();
