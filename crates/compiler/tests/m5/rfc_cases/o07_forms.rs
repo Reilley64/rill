@@ -72,6 +72,9 @@ fn sequence(module: &loader::Module, mir: &Mir<'_>) -> Vec<String> {
                 descriptor,
                 incoming,
             } => format!("install {} <- {}", place(descriptor), place(incoming)),
+            Operation::Install { target, incoming } => {
+                format!("replace {} <- {}", place(target), place(incoming))
+            }
             Operation::Call(callee) => {
                 let callee = module.declarations.iter().find(|d| &d.id == *callee);
                 format!("call {}", callee.unwrap().name.as_deref().unwrap())
@@ -570,5 +573,228 @@ function tupleForm(): i32 {
                 );
             }
         },
+    );
+}
+
+/// Review ci-0mdr SP-3 and Q3: member replacement, `holder.y = &mut c;`. The
+/// store stages the new loan, replaces the member and leaves the others as
+/// they were. `replaceMember` and `replaceNoUse` replace with a loan of a third
+/// owner (`replaceNoUse` is the valid twin of the overlap that
+/// `o07::member_replacement_overlap_without_later_use` rejects, with no later
+/// use). `sameOwnerAgain` replaces a member with a loan of the owner it
+/// already borrows: the store releases the old loan, so it does not overlap
+/// itself. `sharedReplace` replaces a shared member. Rejecting twins:
+/// `overlapThenUse` is R0201 at the new `&mut a`, related the loan of `a` in
+/// the construction; `localReferent` is R0203 at the block that ends `c` while
+/// `holder.y` still reads it, related the borrow `&mut c`.
+const MEMBER_REPLACEMENT: Form = Form {
+    text: r#"
+type Pair = { x: &mut i32; y: &mut i32 };
+type Holder = { first: &mut i32; second: &i32 };
+function replaceMember(): i32 {
+  let mut a = 1i32;
+  let mut b = 2i32;
+  let mut c = 3i32;
+  let mut holder = Pair { x: &mut a, y: &mut b };
+  holder.y = &mut c;
+  *holder.x += 1i32;
+  return 0i32;
+}
+function replaceNoUse(): i32 {
+  let mut a = 1i32;
+  let mut b = 2i32;
+  let mut c = 3i32;
+  let mut holder = Pair { x: &mut a, y: &mut b };
+  holder.y = &mut c;
+  return 0i32;
+}
+function sameOwnerAgain(): i32 {
+  let mut a = 1i32;
+  let mut b = 2i32;
+  let mut holder = Pair { x: &mut a, y: &mut b };
+  holder.y = &mut b;
+  *holder.y += 1i32;
+  return 0i32;
+}
+function sharedReplace(): i32 {
+  let mut a = 1i32;
+  let b = 2i32;
+  let c = 3i32;
+  let mut holder = Holder { first: &mut a, second: &b };
+  holder.second = &c;
+  *holder.first += 1i32;
+  return *holder.second;
+}
+function overlapThenUse(): i32 {
+  let mut a = 1i32;
+  let mut b = 2i32;
+  let mut holder = Pair { x: &mut a, y: &mut b };
+  holder.y = &mut a;
+  *holder.x += 1i32;
+  return 0i32;
+}
+function localReferent(): i32 {
+  let mut a = 1i32;
+  let mut b = 2i32;
+  let mut holder = Pair { x: &mut a, y: &mut b };
+  if (true) { let mut c = 3i32; holder.y = &mut c; }
+  *holder.y += 1i32;
+  return 0i32;
+}
+"#,
+    typed_stats: (339728, 50254, 12),
+    graph: (GraphCompletion::SourceRejected, (204371, 7771, 6)),
+    roots: &[
+        Root {
+            name: "replaceMember",
+            want: Want::Checked,
+            graph: None,
+            stats: (3834, 884, 5),
+        },
+        Root {
+            name: "replaceNoUse",
+            want: Want::Checked,
+            graph: None,
+            stats: (3283, 602, 5),
+        },
+        Root {
+            name: "sameOwnerAgain",
+            want: Want::Checked,
+            graph: None,
+            stats: (3691, 805, 5),
+        },
+        Root {
+            name: "sharedReplace",
+            want: Want::Checked,
+            graph: None,
+            stats: (3906, 898, 5),
+        },
+        Root {
+            name: "overlapThenUse",
+            want: Want::Rejected {
+                code: "R0201",
+                site: r####"&mut a"####,
+                related: r####"&mut a"####,
+            },
+            graph: None,
+            stats: (3122, 530, 5),
+        },
+        Root {
+            name: "localReferent",
+            want: Want::Rejected {
+                code: "R0203",
+                site: r####"{ let mut c = 3i32; holder.y = &mut c; }"####,
+                related: r####"&mut c"####,
+            },
+            graph: None,
+            stats: (3491, 735, 6),
+        },
+    ],
+    sequences: &[
+        (
+            "replaceMember",
+            &[
+                "init a",
+                "init b",
+                "init c",
+                "borrow mut a -> holder.x",
+                "borrow mut b -> holder.y",
+                "init holder",
+                "borrow mut c -> &mut c",
+                "replace holder.y <- &mut c",
+                "deref holder.x",
+                "init 1i32",
+                "add *holder.x 1i32 -> *holder.x += 1i32;",
+                "install holder.x <- *holder.x += 1i32;",
+                "init 0i32",
+                "export 0i32",
+                "cleanup [end holder.y, end holder.x, end holder, end c, end b, end a]",
+            ],
+        ),
+        (
+            "replaceNoUse",
+            &[
+                "init a",
+                "init b",
+                "init c",
+                "borrow mut a -> holder.x",
+                "borrow mut b -> holder.y",
+                "init holder",
+                "borrow mut c -> &mut c",
+                "replace holder.y <- &mut c",
+                "init 0i32",
+                "export 0i32",
+                "cleanup [end holder.y, end holder.x, end holder, end c, end b, end a]",
+            ],
+        ),
+        (
+            "sameOwnerAgain",
+            &[
+                "init a",
+                "init b",
+                "borrow mut a -> holder.x",
+                "borrow mut b -> holder.y",
+                "init holder",
+                "borrow mut b -> &mut b",
+                "replace holder.y <- &mut b",
+                "deref holder.y",
+                "init 1i32",
+                "add *holder.y 1i32 -> *holder.y += 1i32;",
+                "install holder.y <- *holder.y += 1i32;",
+                "init 0i32",
+                "export 0i32",
+                "cleanup [end holder.y, end holder.x, end holder, end b, end a]",
+            ],
+        ),
+        (
+            "sharedReplace",
+            &[
+                "init a",
+                "init b",
+                "init c",
+                "borrow mut a -> holder.first",
+                "borrow b -> holder.second",
+                "init holder",
+                "borrow c -> &c",
+                "replace holder.second <- &c",
+                "deref holder.first",
+                "init 1i32",
+                "add *holder.first 1i32 -> *holder.first += 1i32;",
+                "install holder.first <- *holder.first += 1i32;",
+                "deref holder.second",
+                "export *holder.second",
+                "cleanup [end holder.second, end holder.first, end holder, end c, end b, end a]",
+            ],
+        ),
+    ],
+};
+
+#[test]
+fn member_replacement_pins_its_sequence_and_twins() {
+    check(
+        "rfc_cases::o07_forms::member_replacement_pins_its_sequence_and_twins",
+        &MEMBER_REPLACEMENT,
+    );
+}
+
+/// Metering rule 11 (review ci-0mdr Q3): the replacement keeps the record's
+/// other members live, so each `MEMBER_REPLACEMENT` root costs a little more
+/// than at the parent `da5bec50`, and the whole graph does too. The parent
+/// caps below now give `ResourceLimit`.
+#[test]
+fn member_replacement_parent_caps_now_give_resource_limit() {
+    super::o07::at_parent_caps(
+        "rfc_cases::o07_forms::member_replacement_parent_caps_now_give_resource_limit",
+        MEMBER_REPLACEMENT.text,
+        (204349, 7769, 6),
+        &[
+            ("replaceMember", (3832, 884, 5)),
+            ("replaceNoUse", (3271, 600, 5)),
+            ("sameOwnerAgain", (3689, 805, 5)),
+            ("sharedReplace", (3904, 898, 5)),
+            ("overlapThenUse", (3120, 530, 5)),
+            ("localReferent", (3489, 735, 6)),
+        ],
+        super::o07::Parent::Exceeds,
     );
 }
