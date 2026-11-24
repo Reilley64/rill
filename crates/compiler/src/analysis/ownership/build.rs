@@ -27,6 +27,7 @@ mod i32_arithmetic;
 mod interpolation;
 mod iteration;
 mod list_arrows;
+mod list_get;
 mod list_i32_literal;
 mod list_source;
 mod option_calls;
@@ -2683,7 +2684,8 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                         // Local List disposal does not prove a returned backing transfer.
                         return Err(Stop::Pending(value));
                     }
-                    if facts.call.is_some() && self.reference_option(&facts.ty) {
+                    let lookup = self.list_element_lookup(facts).is_some();
+                    if !lookup && facts.call.is_some() && self.reference_option(&facts.ty) {
                         // The producer has no checked caller-backing contract.
                         // Do not allocate or prove return storage for its value.
                         return Err(Stop::Pending(value));
@@ -2702,6 +2704,8 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                         // Screened from paid facts: a `string`-error Result whose
                         // producer can itself return gets no return storage proof.
                         return Err(Stop::Pending(value));
+                    } else if lookup {
+                        self.list_element_option_slot(value, &ty)?
                     } else {
                         self.slot(value, &ty)?
                     };
@@ -8100,6 +8104,14 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             if let Some(route) = route {
                 return self.call_two_list_arrows(node, route, into, next, depth);
             }
+        }
+        if checked_carrier.is_none()
+            && into.is_some_and(|slot| {
+                self.slots[slot].reference_option == Some(ReferenceOption::Shared)
+            })
+            && let Some(lookup) = self.list_element_lookup(facts)
+        {
+            return self.call_list_element_reference(node, lookup, into, next);
         }
         if checked_carrier.is_none() && !call.substitution.is_empty() {
             if self.family_view_shape(facts, call, into) {
