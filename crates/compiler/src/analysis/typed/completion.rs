@@ -58,7 +58,12 @@ pub(super) fn finish(report: &TypedReport<'_>, budget: &mut Budget) -> Work<Type
             rejected = true;
         }
     }
-    if !accounted_for(report.inventory.graph(), bodies, budget)? {
+    if !accounted_for(
+        report.inventory.graph(),
+        bodies,
+        &report.ownership.overlaps,
+        budget,
+    )? {
         return Ok(Incomplete);
     }
     Ok(if rejected { SourceRejected } else { Checked })
@@ -97,7 +102,12 @@ fn body_root(kind: DeclarationKind) -> bool {
     )
 }
 
-fn accounted_for(graph: &Graph, bodies: &GenericReport<'_>, budget: &mut Budget) -> Work<bool> {
+fn accounted_for(
+    graph: &Graph,
+    bodies: &GenericReport<'_>,
+    overlaps: &[OwnershipOverlap<'_>],
+    budget: &mut Budget,
+) -> Work<bool> {
     let mut checked = BTreeSet::new();
     for body in bodies.checked_bodies() {
         budget.reserve(1)?;
@@ -117,12 +127,28 @@ fn accounted_for(graph: &Graph, bodies: &GenericReport<'_>, budget: &mut Budget)
             if body_root(declaration.id.kind)
                 && !checked.contains(&(&module.key, BodyOwner::Declaration(&declaration.id)))
                 && !has_finding(bodies, module, Some(declaration.node), budget)?
+                && !overlap_rejected(overlaps, &declaration.id, budget)?
             {
                 return Ok(false);
             }
         }
     }
     Ok(true)
+}
+
+/// Collection rejected this implementation as a protected replacement (R0500).
+fn overlap_rejected(
+    overlaps: &[OwnershipOverlap<'_>],
+    declaration: &crate::loader::DeclarationId,
+    budget: &mut Budget,
+) -> Work<bool> {
+    if overlaps.is_empty() {
+        return Ok(false);
+    }
+    budget.step(overlaps.len())?;
+    Ok(overlaps
+        .iter()
+        .any(|overlap| &overlap.implementation.id == declaration))
 }
 
 fn has_finding(

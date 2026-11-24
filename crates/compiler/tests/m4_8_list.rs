@@ -1,4 +1,7 @@
 //! Installed collection analysis through the public loader and shared checker.
+#[path = "support/limit.rs"]
+mod limit;
+
 use compiler::analysis::scalars::{
     BodyOwner, NodeFactKind, Place, ScalarFindingKind, ScalarUnsupported,
 };
@@ -333,10 +336,7 @@ fn installed_list() {
                 max_work: exact.max_work - 1,
                 ..exact
             };
-            assert_eq!(
-                analyze_typed(&graph, short).completion(),
-                compiler::analysis::typed::TypedCompletion::ResourceLimit
-            );
+            limit::assert_typed_limit(&analyze_typed(&graph, short));
             for ((node, syntax), (name, borrow, transfer)) in loops.into_iter().zip([
                 ("OwnedListIter", None, NodeKind::Break),
                 ("ListIter", Some(false), NodeKind::Return),
@@ -566,6 +566,23 @@ fn installed_list() {
             assert_eq!(overlap.code(), "R0500");
             assert_eq!(overlap.implementation.id.module, app.key);
             assert_eq!(*overlap.family, region.family.id);
+            limit::assert_typed_limits_below(&graph, &report);
+            // Ruling 19 (1): `Overlap` at the exact cap, `Pending` one work short.
+            let exact = report.statistics();
+            let short = analyze_typed(
+                &graph,
+                AnalysisLimits {
+                    max_work: exact.work - 1,
+                    max_entries: exact.entries,
+                    max_depth: exact.max_depth,
+                },
+            );
+            limit::assert_typed_limit(&short);
+            let pending = short
+                .collection_protection()
+                .find(|p| p.operation == CollectionOperation::Iterate(ListTraversal::Owned))
+                .expect("the owned iteration's protection at one work short");
+            assert_eq!(pending.coverage, OwnershipCoverage::Pending);
             let loops: Vec<_> = app
                 .syntax
                 .nodes

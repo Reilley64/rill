@@ -125,6 +125,9 @@ pub struct OrdinaryAnalysis<'g> {
     families: BTreeMap<&'g DeclarationId, FamilyFacts<'g>>,
     types: PartialFacts<'g>,
     declaration_issues: Vec<DeclarationIssue<'g>>,
+    /// Issues a `ResourceLimit` report no longer publishes. `analyze_generics`
+    /// still meters them, so its statistics on this input do not move.
+    withheld_issues: Vec<DeclarationIssue<'g>>,
     unusable: BTreeSet<&'g DeclarationId>,
     headers: metadata::Headers<'g>,
     statistics: Statistics,
@@ -133,6 +136,52 @@ pub struct OrdinaryAnalysis<'g> {
 }
 
 impl<'g> OrdinaryAnalysis<'g> {
+    /// Whether the analysis publishes no finding (metering rule 8): the type
+    /// facts' findings, the declaration issues and every header's type
+    /// findings. Every field is named, so adding one fails to compile until it
+    /// is decided here. Test support for `tests/support/limit.rs`.
+    #[doc(hidden)]
+    pub fn publishes_nothing_at_limit(&self) -> bool {
+        let Self {
+            types,
+            declaration_issues,
+            headers,
+            // Metered, not published (`withheld_issues`), or facts, identity
+            // and counters.
+            graph: _graph,
+            lexical: _lexical,
+            families: _families,
+            withheld_issues: _withheld_issues,
+            unusable: _unusable,
+            statistics: _statistics,
+            completion: _completion,
+            reached_validation: _reached_validation,
+        } = self;
+        types.publishes_nothing_at_limit()
+            && declaration_issues.is_empty()
+            && headers
+                .values()
+                .all(metadata::HeaderMetadata::publishes_nothing_at_limit)
+    }
+
+    /// Empties what the analysis publishes and says so: a withheld inventory
+    /// reads `ResourceLimit`, so no consumer takes the emptied findings for a
+    /// complete, clean inventory (`select_inputs`, `analyze_generics`,
+    /// `analyze_conversions` check the completion).
+    pub(super) fn withhold_findings(&mut self) {
+        self.completion = Completion::ResourceLimit;
+        self.types.withhold_findings();
+        self.withheld_issues = std::mem::take(&mut self.declaration_issues);
+        for header in self.headers.values_mut() {
+            header.withhold_findings();
+        }
+    }
+
+    /// Every issue the analysis found, published or withheld, for metering.
+    pub(super) fn metered_issues(&self) -> impl Iterator<Item = &DeclarationIssue<'g>> {
+        self.declaration_issues.iter().chain(&self.withheld_issues)
+    }
+
     pub(super) fn graph(&self) -> &'g Graph {
         self.graph
     }
@@ -153,6 +202,10 @@ impl<'g> OrdinaryAnalysis<'g> {
         &self.headers
     }
 
+    pub(super) fn family_probes(&self) -> usize {
+        self.families.len()
+    }
+
     pub(super) fn captured_family(&self, id: &DeclarationId) -> Option<&FamilyFacts<'g>> {
         self.families.get(id)
     }
@@ -167,6 +220,83 @@ impl<'g> OrdinaryAnalysis<'g> {
 
     pub fn statistics(&self) -> Statistics {
         self.statistics
+    }
+
+    pub(super) fn mark_text_iteration_sources(
+        &mut self,
+        mut marks: Vec<(&'g DeclarationId, usize)>,
+        budget: &mut Budget,
+    ) -> Work<()> {
+        let n = marks.len();
+        if n == 0 {
+            return Ok(());
+        }
+        budget.step(n.checked_mul(n.ilog2() as usize + 3).ok_or(())?)?;
+        marks.sort_unstable_by_key(|&(owner, i)| (std::ptr::from_ref(owner), i));
+        marks.dedup_by(|a, b| std::ptr::eq(a.0, b.0) && a.1 == b.1);
+        for group in marks.chunk_by(|a, b| std::ptr::eq(a.0, b.0)) {
+            let (owner, first) = group[0];
+            let width = owner.module.path.len().checked_add(4).ok_or(())?;
+            budget.step(
+                width
+                    .checked_mul(self.types.declarations.len() + 1)
+                    .ok_or(())?,
+            )?;
+            let header = self
+                .types
+                .declarations
+                .get_mut(owner)
+                .expect("checked named function");
+            let DeclarationShape::Function { parameters, .. } = &mut header.shape else {
+                unreachable!("checked formal")
+            };
+            // A partially marked signature would make the first parameter pay
+            // for storage that an unrelated sibling cannot finish checking.
+            let TypeTerm::Nominal {
+                declaration: list, ..
+            } = parameters[first].ty.as_ref()
+            else {
+                unreachable!("typed List source")
+            };
+            budget.step(parameters.len() + group.len())?;
+            let required=parameters.iter().filter(|p| matches!(p.ty.as_ref(),TypeTerm::Nominal{declaration,arguments} if std::ptr::eq(*declaration,*list) && matches!(arguments.as_slice(),[t] if matches!(t.as_ref(),TypeTerm::Primitive(p) if p.name()=="string")))).count();
+            if required == group.len() {
+                for &(_, i) in group {
+                    parameters[i].text_iteration_source = true;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn mark_option_iterator(
+        &mut self,
+        function: &'g DeclarationId,
+        formal: &'g DeclarationId,
+        site: NodeId,
+        budget: &mut Budget,
+    ) -> Work<()> {
+        let width = function.module.path.len().checked_add(4).ok_or(())?;
+        budget.step(
+            width
+                .checked_mul(self.types.declarations.len() + 1)
+                .ok_or(())?,
+        )?;
+        let header = self
+            .types
+            .declarations
+            .get_mut(function)
+            .expect("checked function");
+        let DeclarationShape::Function { parameters, .. } = &mut header.shape else {
+            unreachable!("checked formal")
+        };
+        budget.step(parameters.len())?;
+        let parameter = parameters
+            .iter_mut()
+            .find(|p| std::ptr::eq(&p.declaration.id, formal))
+            .expect("source formal");
+        parameter.option_iteration_source = Some(site);
+        Ok(())
     }
 
     pub fn type_facts(&self) -> &PartialFacts<'g> {
@@ -625,8 +755,13 @@ impl<'g> OrdinaryAnalysis<'g> {
 
 /// Analyze an actual M3 capture. M3 does not carry core role/protection admission.
 /// Results remain partial, never a checked ordinary collection or source call.
+/// A `ResourceLimit` report publishes no finding (metering rule 8).
 pub fn analyze_ordinary(graph: &Graph, limits: AnalysisLimits) -> OrdinaryAnalysis<'_> {
-    analyze_ordinary_types(graph, limits, Statistics::default(), false, false)
+    let mut report = analyze_ordinary_types(graph, limits, Statistics::default(), false, false);
+    if report.completion == Completion::ResourceLimit {
+        report.withhold_findings();
+    }
+    report
 }
 
 pub(super) fn analyze_typed_inventory(
@@ -684,6 +819,7 @@ fn analyze_ordinary_types(
         lexical: analyzer.lexical,
         types: analyzer.facts,
         declaration_issues: Vec::new(),
+        withheld_issues: Vec::new(),
         unusable: BTreeSet::new(),
         headers,
         statistics: analyzer.statistics,

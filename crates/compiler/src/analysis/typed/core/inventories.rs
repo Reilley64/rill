@@ -11,21 +11,34 @@ pub(in crate::analysis::typed) struct InventoryCompleteness {
     pub protected_violation: bool,
 }
 
-/// Empty required-winner and prohibition sets for application-defined families
-/// in one closed installed capture. The pinned catalogue keys all protected
-/// actions by their canonical standard family, including actions on app types.
+/// Families eligible for ordinary source comparison in the installed capture.
+/// This does not select a provider or clear a protected standard operation.
 #[derive(Clone)]
-pub(in crate::analysis) struct ApplicationOrdinaryScope(GraphId);
+pub(in crate::analysis) struct InstalledOrdinaryScope<'g> {
+    context: GraphId,
+    routine: Option<super::routine::RoutineRole<'g>>,
+}
 
-impl ApplicationOrdinaryScope {
-    pub(in crate::analysis::typed) fn from_closed_roles(graph: &Graph) -> Self {
-        Self(graph.id())
+impl<'g> InstalledOrdinaryScope<'g> {
+    pub(in crate::analysis::typed) fn from_closed_roles(
+        graph: &Graph,
+        routine: Option<super::routine::RoutineRole<'g>>,
+    ) -> Self {
+        Self {
+            context: graph.id(),
+            routine,
+        }
     }
 
     pub(in crate::analysis) fn contains(&self, family: &DeclarationId) -> bool {
-        family.context == self.0
+        family.context == self.context
             && family.kind == DeclarationKind::Family
-            && family.module.origin == Origin::Application
+            && (family.module.origin == Origin::Application
+                || self.routine.is_some_and(|role| &role.family.id == family))
+    }
+
+    pub(in crate::analysis) fn routine(&self) -> Option<super::routine::RoutineRole<'g>> {
+        self.routine
     }
 }
 

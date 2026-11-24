@@ -86,6 +86,21 @@ pub struct ConversionFamily<'g> {
     pub issues: Vec<RegistrationIssue<'g>>,
 }
 
+impl ConversionFamily<'_> {
+    /// No registration issue (R0310 to R0312). Every field is named, so a new
+    /// one fails to compile until it is decided here (metering rule 8).
+    pub(in crate::analysis) fn publishes_nothing_at_limit(&self) -> bool {
+        let Self {
+            issues,
+            // The premise, routes and registrations: facts, not findings.
+            premise: _premise,
+            routes: _routes,
+            registrations: _registrations,
+        } = self;
+        issues.is_empty()
+    }
+}
+
 #[derive(Debug)]
 pub struct ConversionReport<'r, 'g> {
     input: &'r OrdinaryAnalysis<'g>,
@@ -93,6 +108,8 @@ pub struct ConversionReport<'r, 'g> {
     pub(in crate::analysis) families: BTreeMap<&'g DeclarationId, ConversionFamily<'g>>,
     completion: ordinary::Completion,
     statistics: Statistics,
+    /// What `type_facts` publishes at `ResourceLimit` (metering rule 8).
+    withheld: PartialFacts<'g>,
 }
 
 impl<'g> ConversionReport<'_, 'g> {
@@ -102,6 +119,33 @@ impl<'g> ConversionReport<'_, 'g> {
 
     pub fn completion(&self) -> ordinary::Completion {
         self.completion
+    }
+
+    /// Whether the report publishes no finding through `type_facts`,
+    /// `header_metadata` and `family` (metering rule 8). At `ResourceLimit`
+    /// those return the withheld facts, no header and no family, so the stored
+    /// issues of the families and the input are not published. Every field is
+    /// named, so adding one fails to compile until it is decided here. Test
+    /// support for `tests/support/limit.rs`; `bodies` is a `GenericReport`.
+    #[doc(hidden)]
+    pub fn publishes_nothing_at_limit(&self) -> bool {
+        let Self {
+            input: _input,
+            extended: _extended,
+            families,
+            completion,
+            // Stored findings and facts, published only through the accessors
+            // read below; a counter.
+            statistics: _statistics,
+            withheld: _withheld,
+        } = self;
+        let limited = *completion == ordinary::Completion::ResourceLimit;
+        self.type_facts().publishes_nothing_at_limit()
+            && (limited
+                || (self.input().publishes_nothing_at_limit()
+                    && families
+                        .values()
+                        .all(ConversionFamily::publishes_nothing_at_limit)))
     }
 
     /// Inspect all supported captured bodies using this conversion inventory.
@@ -114,20 +158,34 @@ impl<'g> ConversionReport<'_, 'g> {
     }
 
     /// Canonical annotation terms and source-binding routes used by this inventory.
+    /// A `ResourceLimit` report publishes none, as it publishes no finding.
     pub fn type_facts(&self) -> &PartialFacts<'g> {
+        if self.completion == ordinary::Completion::ResourceLimit {
+            return &self.withheld;
+        }
         self.input().type_facts()
     }
 
+    /// A `ResourceLimit` report publishes no header, as it publishes no finding.
+    /// `Ok(None)` also means the declaration has no header: check `completion()` first.
     pub fn header_metadata(
         &self,
         id: &DeclarationId,
     ) -> Result<Option<&ordinary::HeaderMetadata<'g>>, QueryError> {
-        self.input().header_metadata(id)
+        let header = self.input().header_metadata(id)?;
+        Ok(header.filter(|_| self.completion != ordinary::Completion::ResourceLimit))
     }
 
+    /// A `ResourceLimit` report publishes no family and so no registration issue
+    /// (metering rule 8): `Ok(None)` also means the declaration has no family,
+    /// so check `completion()` first. The stored families keep their issues:
+    /// `bodies` reads them.
     pub fn family(&self, id: &DeclarationId) -> Result<Option<&ConversionFamily<'g>>, QueryError> {
         self.input().family(id)?;
-        Ok(self.families.get(id))
+        Ok(self
+            .families
+            .get(id)
+            .filter(|_| self.completion != ordinary::Completion::ResourceLimit))
     }
 }
 
@@ -387,6 +445,7 @@ pub fn analyze_conversions<'r, 'g>(
             complete.completion()
         },
         statistics: Statistics::default(),
+        withheld: PartialFacts::default(),
     };
     for &premise in roles {
         let (binding, result) = premise.bindings();

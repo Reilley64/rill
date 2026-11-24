@@ -67,6 +67,31 @@ pub struct SelectionReport<'g> {
     pub statistics: Statistics,
 }
 
+impl SelectionReport<'_> {
+    /// No outcome at `ResourceLimit` (metering rule 8; ruling 19 (2)). The
+    /// query assigns `outcome` only at its two returns, after its last metered
+    /// step, so a limited query never has one: `SelectionReport` needs no clearing
+    /// as `PairReport` does (`a_limited_selection_names_no_outcome` sweeps it).
+    /// Every field is named, so a new one fails to compile until it is decided
+    /// here. Test support for `tests/support/limit.rs`.
+    #[doc(hidden)]
+    pub fn publishes_nothing_at_limit(&self) -> bool {
+        let Self {
+            completion,
+            outcome,
+            // The premise, the partial matches and comparisons, the blocker (a
+            // reason, not a verdict), pending arguments and counters: facts.
+            premise: _premise,
+            blocker: _blocker,
+            matches: _matches,
+            comparisons: _comparisons,
+            pending_output_arguments: _pending_output_arguments,
+            statistics: _statistics,
+        } = self;
+        *completion != Completion::ResourceLimit || outcome.is_none()
+    }
+}
+
 pub(in crate::analysis) fn declaration<'g>(
     graph: &'g Graph,
     id: &DeclarationId,
@@ -364,6 +389,7 @@ pub(super) fn eligible_captured_family<'a, 'g>(
     id: &DeclarationId,
     budget: &mut Budget,
 ) -> Work<Result<&'a FamilyFacts<'g>, SelectionBlocker>> {
+    budget.step(1)?;
     let Some(family) = analysis.families.get(id) else {
         return Ok(Err(SelectionBlocker::HeaderOrPlacement));
     };

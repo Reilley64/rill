@@ -31,6 +31,22 @@ pub struct HeaderMetadata<'g> {
 }
 
 impl<'g> HeaderMetadata<'g> {
+    /// No type finding in the header's metadata. Every field is named, so a new
+    /// one fails to compile until it is decided here (metering rule 8).
+    pub(in crate::analysis) fn publishes_nothing_at_limit(&self) -> bool {
+        let Self {
+            type_metadata,
+            // Defaults and requirements: facts, not findings.
+            defaults: _defaults,
+            requirements: _requirements,
+        } = self;
+        type_metadata.publishes_nothing_at_limit()
+    }
+
+    pub(in crate::analysis) fn withhold_findings(&mut self) {
+        self.type_metadata.withhold_findings();
+    }
+
     pub fn type_metadata(&self) -> &PartialFacts<'g> {
         &self.type_metadata
     }

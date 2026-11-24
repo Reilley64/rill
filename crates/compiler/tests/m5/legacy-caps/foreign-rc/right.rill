@@ -1,0 +1,2 @@
+export function bad(enter: bool): void { let text = "ordinary"; }
+export function unavailable(enter: bool): void { let values = [13i32, 29i32]; }

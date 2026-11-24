@@ -1,4 +1,7 @@
 //! Conditional conversion analysis over real M3 captures. Fixtures grant no core admission.
+#[path = "support/limit.rs"]
+mod limit;
+
 use compiler::analysis::conversions::{RegistrationIssueKind, RoleHypothesis, analyze_conversions};
 use compiler::analysis::ordinary::{Completion, analyze_ordinary};
 use compiler::analysis::{AnalysisLimits, QueryError};
@@ -266,8 +269,18 @@ fn pair_queries_keep_destination_bound_variables_exact_and_filter_receivers() {
             },
         )
         .unwrap();
-    assert_eq!(low.completion, Completion::ResourceLimit);
-    assert!(low.outcome.is_none());
+    limit::assert_pair_limit(&low);
+    // Every work cap below the exact one: a limited pair report names no
+    // outcome and no disagreement, and the exact answer is unchanged.
+    let exact = report.query_pair(id, request, limits).unwrap();
+    for max_work in 0..exact.statistics.work {
+        let short = report
+            .query_pair(id, request, AnalysisLimits { max_work, ..limits })
+            .unwrap();
+        if short.completion == Completion::ResourceLimit {
+            limit::assert_pair_limit(&short);
+        }
+    }
 
     request.destination = &fields[2].ty;
     request.source = &fields[2].ty;
@@ -586,8 +599,7 @@ fn a_selected_nested_pair_determines_error_and_a_cycle_cannot_guess_it() {
             },
         )
         .unwrap();
-    assert_eq!(growing.completion, Completion::ResourceLimit);
-    assert!(growing.outcome.is_none() && growing.selected_error.is_none());
+    limit::assert_pair_limit(&growing);
     assert!(growing.goals().iter().all(|g| g.cycle.is_empty()));
 }
 
@@ -972,7 +984,7 @@ fn invalid_conversion_role_and_exhausted_inventory_do_not_supply_evidence() {
         },
     )
     .unwrap();
-    assert_eq!(exhausted.completion(), Completion::ResourceLimit);
+    limit::assert_conversion_limit(&graph, &exhausted);
 }
 
 #[test]
@@ -1157,4 +1169,248 @@ fn aliases_collect_one_family_with_distinct_destination_keys() {
         .unwrap_err(),
         QueryError::InvalidRequest
     );
+}
+
+/// Metering rule 8 for `ConversionReport::bodies`, which returns the same
+/// report as `analyze_generics`: the exact cap publishes the body finding;
+/// every cap below it, on each axis, publishes none.
+#[test]
+fn conversion_bodies_publish_no_finding_at_resource_limit() {
+    let fixture = Fixture::new(
+        "import std::convert::into;
+         type Target = {};
+         implement into<Target>(value: i32): Target { return false; }",
+    );
+    let graph = fixture.load();
+    let limits = AnalysisLimits::default();
+    let ordinary = analyze_ordinary(&graph, limits);
+    let inventory = analyze_conversions(
+        &ordinary,
+        &[RoleHypothesis::Infallible(standard_export(&graph, "into"))],
+        limits,
+    )
+    .unwrap();
+    let report = inventory.bodies(limits);
+    let stats = report.statistics();
+    let exact = AnalysisLimits {
+        max_work: stats.work,
+        max_entries: stats.entries,
+        max_depth: stats.max_depth,
+    };
+    let replay = inventory.bodies(exact);
+    assert_eq!(replay.statistics(), stats);
+    assert!(!replay.findings().is_empty());
+    for work in 0..stats.work {
+        let limited = inventory.bodies(AnalysisLimits {
+            max_work: work,
+            ..exact
+        });
+        limit::assert_generics_limit(&limited);
+    }
+    for entries in 0..stats.entries {
+        let limited = inventory.bodies(AnalysisLimits {
+            max_entries: entries,
+            ..exact
+        });
+        limit::assert_generics_limit(&limited);
+    }
+    for depth in 0..stats.max_depth {
+        let limited = inventory.bodies(AnalysisLimits {
+            max_depth: depth,
+            ..exact
+        });
+        limit::assert_generics_limit(&limited);
+    }
+}
+
+/// Metering rule 8 for `ConversionReport::family`: at `ResourceLimit` it
+/// publishes no registration issue (it returns `Ok(None)`, as `header_metadata`
+/// does). The exact cap publishes the four issues; every cap below it, on each
+/// axis, publishes none (`assert_conversion_limit`).
+#[test]
+fn conversion_family_publishes_no_issue_at_resource_limit() {
+    let fixture = Fixture::new(
+        "import std::convert::into;
+         import std::aliases::from;
+         type Local = {};
+         implement into<Local>(value: bool): Local { return Local {}; }
+         implement from<Local>(value: bool): Local { return Local {}; }
+         implement into<Local>(value: Local): Local { return value; }
+         implement into<u8>(value: u16): u8 { return 0u8; }",
+    );
+    let graph = fixture.load();
+    let ordinary = analyze_ordinary(&graph, AnalysisLimits::default());
+    let binding = standard_export(&graph, "into");
+    let Target::Declaration(id) = &binding.target else {
+        panic!("captured family")
+    };
+    let roles = [RoleHypothesis::Infallible(binding)];
+    let full = analyze_conversions(&ordinary, &roles, AnalysisLimits::default()).unwrap();
+    assert_ne!(full.completion(), Completion::ResourceLimit);
+    let stats = full.statistics();
+    let issues = full.family(id).unwrap().unwrap().issues.len();
+    assert!(issues > 0);
+    let exact = AnalysisLimits {
+        max_work: stats.work,
+        max_entries: stats.entries,
+        max_depth: stats.max_depth,
+    };
+    let replay = analyze_conversions(&ordinary, &roles, exact).unwrap();
+    assert_eq!(replay.statistics(), stats);
+    assert_eq!(replay.family(id).unwrap().unwrap().issues.len(), issues);
+    for work in 0..stats.work {
+        let limited = analyze_conversions(
+            &ordinary,
+            &roles,
+            AnalysisLimits {
+                max_work: work,
+                ..exact
+            },
+        )
+        .unwrap();
+        limit::assert_conversion_limit(&graph, &limited);
+        assert!(limited.family(id).unwrap().is_none());
+    }
+    for entries in 0..stats.entries {
+        let limited = analyze_conversions(
+            &ordinary,
+            &roles,
+            AnalysisLimits {
+                max_entries: entries,
+                ..exact
+            },
+        )
+        .unwrap();
+        limit::assert_conversion_limit(&graph, &limited);
+    }
+    for depth in 0..stats.max_depth {
+        let limited = analyze_conversions(
+            &ordinary,
+            &roles,
+            AnalysisLimits {
+                max_depth: depth,
+                ..exact
+            },
+        )
+        .unwrap();
+        limit::assert_conversion_limit(&graph, &limited);
+    }
+}
+
+/// Metering rule 8 for `ConversionReport::type_facts` and `header_metadata`,
+/// which read the ordinary input: at a conversion `ResourceLimit` they publish
+/// no finding, though the input (the caller's own complete report) holds some.
+/// The exact cap publishes them; every cap below it, on each axis, publishes
+/// none. Rule 8 also covers the facts and the headers (2026-11-24 ruling): the
+/// exact cap publishes declarations, uses and some headers, and every cap below
+/// it publishes no fact and no header (`assert_conversion_limit`). The second source has no generic default, so its report reads the
+/// caller's input; the first extends the nominal types and reads that.
+#[test]
+fn conversion_report_publishes_no_finding_list_at_resource_limit() {
+    let sources = [
+        (
+            "import std::convert::into;
+             type Gone = { x: Missing }; type Loop = { a: Loop }; let v: i32 = unknown;
+             function g<T = Absent>(x: Nope): T;
+             type Target = {};
+             implement into<Target>(value: i32): Target { return Target {}; }",
+            2,
+            true,
+        ),
+        (
+            "import std::convert::into;
+             type Target = {};
+             type Gone = { x: Missing };
+             implement into<Target>(value: i32): Target { return false; }",
+            1,
+            false,
+        ),
+    ];
+    for (n, (source, type_findings, header_finding)) in sources.into_iter().enumerate() {
+        let fixture = Fixture::new(source);
+        let graph = fixture.load();
+        let ordinary = analyze_ordinary(&graph, AnalysisLimits::default());
+        let roles = [RoleHypothesis::Infallible(standard_export(&graph, "into"))];
+        let full = analyze_conversions(&ordinary, &roles, AnalysisLimits::default()).unwrap();
+        assert_eq!(full.completion(), Completion::Incomplete, "source {n}");
+        let stats = full.statistics();
+        let exact = AnalysisLimits {
+            max_work: stats.work,
+            max_entries: stats.entries,
+            max_depth: stats.max_depth,
+        };
+        let replay = analyze_conversions(&ordinary, &roles, exact).unwrap();
+        assert_eq!(replay.completion(), Completion::Incomplete, "source {n}");
+        assert_eq!(replay.statistics(), stats, "source {n}");
+        assert_eq!(
+            replay.type_facts().findings().count(),
+            type_findings,
+            "source {n}"
+        );
+        assert_eq!(
+            limit::conversion_header_finding(&graph, &replay),
+            header_finding,
+            "source {n}"
+        );
+        assert!(
+            replay.type_facts().declarations().next().is_some(),
+            "source {n}"
+        );
+        assert!(
+            replay.type_facts().type_uses().next().is_some(),
+            "source {n}"
+        );
+        let headers = limit::conversion_headers(&graph, &replay);
+        assert!(headers > 0, "source {n}");
+        assert!(
+            headers
+                < graph
+                    .modules()
+                    .iter()
+                    .map(|module| module.declarations.len())
+                    .sum::<usize>(),
+            "source {n}: `Ok(None)` also means no header"
+        );
+        let implementation = &graph.implementations()[0].declaration;
+        assert!(
+            replay.header_metadata(implementation).unwrap().is_some(),
+            "source {n}"
+        );
+        for work in 0..stats.work {
+            let limited = analyze_conversions(
+                &ordinary,
+                &roles,
+                AnalysisLimits {
+                    max_work: work,
+                    ..exact
+                },
+            )
+            .unwrap();
+            limit::assert_conversion_limit(&graph, &limited);
+        }
+        for entries in 0..stats.entries {
+            let limited = analyze_conversions(
+                &ordinary,
+                &roles,
+                AnalysisLimits {
+                    max_entries: entries,
+                    ..exact
+                },
+            )
+            .unwrap();
+            limit::assert_conversion_limit(&graph, &limited);
+        }
+        for depth in 0..stats.max_depth {
+            let limited = analyze_conversions(
+                &ordinary,
+                &roles,
+                AnalysisLimits {
+                    max_depth: depth,
+                    ..exact
+                },
+            )
+            .unwrap();
+            limit::assert_conversion_limit(&graph, &limited);
+        }
+    }
 }

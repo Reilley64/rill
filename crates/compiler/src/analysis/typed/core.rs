@@ -8,8 +8,9 @@ use crate::loader::{DeclarationKind, Module, Namespace, Target};
 
 mod inventories;
 mod result;
+pub(super) mod routine;
 mod scalar;
-pub(in crate::analysis) use inventories::ApplicationOrdinaryScope;
+pub(in crate::analysis) use inventories::InstalledOrdinaryScope;
 pub(super) use inventories::{InventoryCompleteness, check_inventories};
 pub(super) use result::check_result;
 pub use result::{
@@ -38,6 +39,23 @@ pub(super) struct InstalledCore<'g> {
     pub(super) show: Option<&'g Declaration>,
     pub(super) primitives: PrimitiveCore<'g>,
     pub(super) conversions: numeric::ConversionCore<'g>,
+}
+
+impl InstalledCore<'_> {
+    /// No registration issue and no primitive overlap (metering rule 8).
+    pub(super) fn publishes_nothing_at_limit(&self) -> bool {
+        let Self {
+            primitives,
+            conversions,
+            // Pinned role declarations: facts, not findings.
+            option: _option,
+            option_inspection: _option_inspection,
+            result: _result,
+            result_inspection: _result_inspection,
+            show: _show,
+        } = self;
+        primitives.publishes_nothing_at_limit() && conversions.publishes_nothing_at_limit()
+    }
 }
 
 /// Check the full installed role inventory without validating provider availability.

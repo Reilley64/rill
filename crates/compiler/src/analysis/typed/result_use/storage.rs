@@ -1,7 +1,7 @@
 //! Exact residences on one control-flow alternative.
 use crate::analysis::{DeclarationId, Work, declarations::Budget, scalars::data::Constructor};
 use crate::parser::NodeId;
-use std::sync::Arc;
+use std::{cmp::Ordering, sync::Arc};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub enum ResultComponent<'g> {
@@ -29,16 +29,93 @@ pub(super) struct Occurrence<'g> {
 
 pub(super) type Address<'g> = (Root<'g>, Vec<ResultComponent<'g>>);
 
+/// Identity of an unknown scalar value, not the address of mutable storage.
+#[derive(Clone, Debug, Eq)]
+pub(super) struct BooleanCopy(Arc<()>);
+
+// Arc orders and compares its contents, so use a pointer comparison instead.
+impl PartialEq for BooleanCopy {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Ord for BooleanCopy {
+    fn cmp(&self, other: &Self) -> Ordering {
+        Arc::as_ptr(&self.0).cmp(&Arc::as_ptr(&other.0))
+    }
+}
+
+impl PartialOrd for BooleanCopy {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+type ClassPair<'a> = (&'a BooleanCopy, &'a BooleanCopy);
+
+#[derive(Default)]
+struct BooleanClasses<'a> {
+    first: Option<ClassPair<'a>>,
+    rest: Vec<ClassPair<'a>>,
+}
+
+impl<'a> BooleanClasses<'a> {
+    fn agree(
+        &mut self,
+        left: &'a BooleanCopy,
+        right: &'a BooleanCopy,
+        budget: &mut Budget,
+    ) -> Work<bool> {
+        let Some(first) = self.first else {
+            self.first = Some((left, right));
+            return Ok(true);
+        };
+        budget.step(1 + self.rest.len())?;
+        if let Some((x, y)) = std::iter::once(first)
+            .chain(self.rest.iter().copied())
+            .find(|&(x, y)| left == x || right == y)
+        {
+            return Ok(left == x && right == y);
+        }
+        budget.reserve(1)?;
+        self.rest.push((left, right));
+        Ok(true)
+    }
+}
+
+pub(super) enum BooleanValue {
+    Known(bool),
+    Copy(BooleanCopy),
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub(super) enum Content<'g> {
     Result(Occurrence<'g>),
     Test(Arc<Constructor<'g>>, bool),
+    /// A yielded canonical Option<string>, materialized on its first test.
+    OptionItem {
+        some: &'g DeclarationId,
+        none: &'g DeclarationId,
+    },
+    BooleanCopy(BooleanCopy),
     Alias(Address<'g>),
     PossibleAlias(Address<'g>),
+    /// A borrowed Bool descriptor from a named function's incoming parameter.
+    CallerBoolOrigin(&'g DeclarationId),
     /// Typed source origin of the callable stored at this exact residence.
     Callable(NodeId),
+    /// An exact, Result-free local pair was consumed by a checked once call.
+    ConsumedPair,
     /// Containment is unresolved at this origin, not known empty.
     Unclassified(NodeId),
+}
+
+impl Content<'_> {
+    fn is_boolean_hint(&self) -> bool {
+        matches!(self, Self::BooleanCopy(_))
+            || matches!(self, Self::Test(tag, _) if matches!(tag.as_ref(), Constructor::Boolean(_)))
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
@@ -54,7 +131,12 @@ impl Located<'_> {
                 Content::Result(value) => value.component.len(),
                 Content::Test(tag, _) => tag_size(tag),
                 Content::Alias((_, path)) | Content::PossibleAlias((_, path)) => path.len(),
-                Content::Callable(_) | Content::Unclassified(_) => 0,
+                Content::OptionItem { .. }
+                | Content::BooleanCopy(_)
+                | Content::CallerBoolOrigin(_)
+                | Content::Callable(_)
+                | Content::ConsumedPair
+                | Content::Unclassified(_) => 0,
             }
     }
 }
@@ -66,9 +148,19 @@ fn tag_size(tag: &Constructor<'_>) -> usize {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum OptionListSource {
+    Fresh,
+    GuardInspection { guard: NodeId, borrow: NodeId },
+}
+
 #[derive(Clone, Default, Debug, Eq, PartialEq)]
 pub(super) struct Residence<'g> {
     locations: Vec<(Root<'g>, Located<'g>)>,
+    // Entry evidence belongs to the formal in this frame, not to the value
+    // being moved or borrowed. Never install it in a temporary or capture.
+    option_lists: Vec<(&'g DeclarationId, OptionListSource)>,
+    boolean_copies: usize,
 }
 
 impl<'g> Residence<'g> {
@@ -76,7 +168,78 @@ impl<'g> Residence<'g> {
         for (_, value) in &self.locations {
             budget.reserve(value.size())?;
         }
+        budget.reserve(self.option_lists.len())?;
         Ok(self.clone())
+    }
+
+    pub(super) fn add_option_list(
+        &mut self,
+        parameter: &'g DeclarationId,
+        budget: &mut Budget,
+    ) -> Work<()> {
+        budget.reserve(1)?;
+        self.option_lists.push((parameter, OptionListSource::Fresh));
+        Ok(())
+    }
+
+    pub(super) fn has_option_lists(&self) -> bool {
+        !self.option_lists.is_empty()
+    }
+
+    fn option_list_index(&self, id: &DeclarationId, budget: &mut Budget) -> Work<Option<usize>> {
+        if id.kind == crate::loader::DeclarationKind::Parameter {
+            for (index, (parameter, _)) in self.option_lists.iter().enumerate() {
+                budget.step(1)?;
+                if std::ptr::eq(*parameter, id) {
+                    return Ok(Some(index));
+                }
+            }
+        }
+        Ok(None)
+    }
+
+    pub(super) fn option_list_source(
+        &self,
+        id: &DeclarationId,
+        budget: &mut Budget,
+    ) -> Work<Option<OptionListSource>> {
+        Ok(self
+            .option_list_index(id, budget)?
+            .map(|i| self.option_lists[i].1))
+    }
+
+    pub(super) fn access_option_list(
+        &mut self,
+        id: &DeclarationId,
+        inspection: Option<OptionListSource>,
+        budget: &mut Budget,
+    ) -> Work<()> {
+        if let Some(index) = self.option_list_index(id, budget)? {
+            if let Some(inspection) = inspection
+                && self.option_lists[index].1 == OptionListSource::Fresh
+            {
+                self.option_lists[index].1 = inspection;
+            } else {
+                // Keep entry order stable for worklist comparisons.
+                budget.step(self.option_lists.len() - index - 1)?;
+                self.option_lists.remove(index);
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn contains_local(
+        &self,
+        local: &'g DeclarationId,
+        budget: &mut Budget,
+    ) -> Work<bool> {
+        for (root, _) in &self.locations {
+            budget.step(1)?;
+            if matches!(root,Root::Local(id) if std::ptr::eq(*id,local)) {
+                return Ok(true);
+            }
+        }
+        Ok(false)
     }
 
     pub(super) fn may_owe_result(&self, budget: &mut Budget) -> Work<bool> {
@@ -100,20 +263,112 @@ impl<'g> Residence<'g> {
             .checked_mul(1 + n.checked_ilog2().unwrap_or(0) as usize)
             .ok_or(())?;
         budget.step(comparisons.checked_mul(deepest).ok_or(())?)?;
-        self.locations.sort_unstable();
+        self.locations.sort_unstable_by(|(a_root, a), (b_root, b)| {
+            a_root
+                .cmp(b_root)
+                .then_with(|| match (&a.content, &b.content) {
+                    // The labels name values, not positions. Order symbolic
+                    // fields by their stable locations, never by allocation.
+                    (Content::BooleanCopy(_), Content::BooleanCopy(_)) => {
+                        a.component.cmp(&b.component)
+                    }
+                    _ => a.cmp(b),
+                })
+        });
         Ok(())
+    }
+
+    // Any alternative join must preserve this evidence as well as values.
+    fn same_option_lists(&self, other: &Self, budget: &mut Budget) -> Work<bool> {
+        if self.option_lists.len() != other.option_lists.len() {
+            return Ok(false);
+        }
+        for ((a, a_source), (b, b_source)) in self.option_lists.iter().zip(&other.option_lists) {
+            budget.step(1)?;
+            if !std::ptr::eq(*a, *b) || a_source != b_source {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 
     pub(super) fn same_as(&self, other: &Self, budget: &mut Budget) -> Work<bool> {
         budget.step(1)?;
-        if self.locations.len() != other.locations.len() {
+        if self.locations.len() != other.locations.len()
+            || !self.same_option_lists(other, budget)?
+        {
             return Ok(false);
         }
+        let mut copies = BooleanClasses::default();
         for (a, b) in self.locations.iter().zip(&other.locations) {
             budget.step(a.1.size() + b.1.size())?;
-            if a != b {
+            if !Self::same_location(a, b, &mut copies, budget)? {
                 return Ok(false);
             }
+        }
+        Ok(true)
+    }
+
+    fn same_location<'a>(
+        a: &'a (Root<'g>, Located<'g>),
+        b: &'a (Root<'g>, Located<'g>),
+        copies: &mut BooleanClasses<'a>,
+        budget: &mut Budget,
+    ) -> Work<bool> {
+        if let (Content::BooleanCopy(left), Content::BooleanCopy(right)) =
+            (&a.1.content, &b.1.content)
+        {
+            // Compare the entire partition, including pairs with the same
+            // label; otherwise another pair could split or identify a class.
+            return Ok(a.0 == b.0
+                && a.1.component == b.1.component
+                && copies.agree(left, right, budget)?);
+        }
+        Ok(a == b)
+    }
+
+    /// Join two fallthrough alternatives only when the ordered residences
+    /// have identical facts (up to copy labels), except for complementary
+    /// truth at the matched source. Different ordering can miss a join.
+    pub(super) fn join_boolean(
+        &mut self,
+        other: &Self,
+        source: &Address<'g>,
+        budget: &mut Budget,
+    ) -> Work<bool> {
+        budget.step(1)?;
+        if self.locations.len() != other.locations.len()
+            || !self.same_option_lists(other, budget)?
+        {
+            return Ok(false);
+        }
+        let mut remove = None;
+        let mut copies = BooleanClasses::default();
+        for (i, (a, b)) in self.locations.iter().zip(&other.locations).enumerate() {
+            budget.step(a.1.size() + b.1.size())?;
+            if Self::same_location(a, b, &mut copies, budget)? {
+                continue;
+            }
+            budget.step(1 + source.1.len())?;
+            if remove.is_some()
+                || a.0 != source.0
+                || b.0 != source.0
+                || a.1.component != source.1
+                || b.1.component != source.1
+                || !matches!(
+                    (&a.1.content, &b.1.content),
+                    (Content::Test(a, positive_a), Content::Test(b, positive_b))
+                        if matches!((a.as_ref(), b.as_ref()),
+                            (Constructor::Boolean(a), Constructor::Boolean(b))
+                                if (a == positive_a) != (b == positive_b))
+                )
+            {
+                return Ok(false);
+            }
+            remove = Some(i);
+        }
+        if let Some(index) = remove {
+            self.locations.swap_remove(index);
         }
         Ok(true)
     }
@@ -129,7 +384,10 @@ impl<'g> Residence<'g> {
             budget.step(1)?;
             if belongs(*root) {
                 budget.reserve(1)?;
-                removed.push(self.locations.swap_remove(i));
+                let entry = self.locations.swap_remove(i);
+                self.boolean_copies -=
+                    usize::from(matches!(entry.1.content, Content::BooleanCopy(_)));
+                removed.push(entry);
             } else {
                 i += 1;
             }
@@ -155,6 +413,7 @@ impl<'g> Residence<'g> {
         budget: &mut Budget,
     ) -> Work<()> {
         budget.reserve(1 + component.len())?;
+        self.boolean_copies += usize::from(matches!(content, Content::BooleanCopy(_)));
         self.locations.push((
             root,
             Located {
@@ -172,28 +431,224 @@ impl<'g> Residence<'g> {
         tag: &Constructor<'g>,
         budget: &mut Budget,
     ) -> Work<Option<bool>> {
+        let mut excluded = None;
+        let mut complement = None;
         for (candidate, value) in &self.locations {
             budget.step(1 + component.len())?;
             if *candidate != root || value.component != component {
                 continue;
             }
-            if let Content::Test(known, positive) = &value.content {
-                budget.step(tag_size(known) + tag_size(tag))?;
-                if known.as_ref() == tag {
-                    return Ok(Some(*positive));
+            match &value.content {
+                Content::Test(known, positive) => {
+                    budget.step(tag_size(known) + tag_size(tag))?;
+                    if known.as_ref() == tag {
+                        return Ok(Some(*positive));
+                    }
+                    if *positive {
+                        return Ok(Some(false));
+                    }
+                    match (known.as_ref(), tag) {
+                        (Constructor::Boolean(_), Constructor::Boolean(_)) => {
+                            return Ok(Some(true));
+                        }
+                        (Constructor::Variant(other), Constructor::Variant(_)) => {
+                            excluded = Some(*other)
+                        }
+                        _ => {}
+                    }
                 }
-                if *positive {
-                    return Ok(Some(false));
+                Content::OptionItem { some, none } => {
+                    if let Constructor::Variant(id) = tag {
+                        complement = if std::ptr::eq(*id, *some) {
+                            Some(*none)
+                        } else if std::ptr::eq(*id, *none) {
+                            Some(*some)
+                        } else {
+                            return Ok(Some(false));
+                        };
+                    }
                 }
-                if matches!(
-                    (known.as_ref(), tag),
-                    (Constructor::Boolean(_), Constructor::Boolean(_))
-                ) {
-                    return Ok(Some(true));
+                _ => {}
+            }
+        }
+        Ok(complement
+            .zip(excluded)
+            .and_then(|(a, b)| std::ptr::eq(a, b).then_some(true)))
+    }
+
+    pub(super) fn boolean_value(
+        &self,
+        root: Root<'g>,
+        path: &[ResultComponent<'g>],
+        budget: &mut Budget,
+    ) -> Work<Option<BooleanValue>> {
+        for (candidate, value) in &self.locations {
+            budget.step(1 + path.len())?;
+            if *candidate != root || value.component != path {
+                continue;
+            }
+            match &value.content {
+                Content::Test(tag, positive) => {
+                    budget.step(tag_size(tag) + 1)?;
+                    if let Constructor::Boolean(truth) = tag.as_ref() {
+                        return Ok(Some(BooleanValue::Known(truth == positive)));
+                    }
                 }
+                Content::BooleanCopy(copy) => return Ok(Some(BooleanValue::Copy(copy.clone()))),
+                _ => {}
             }
         }
         Ok(None)
+    }
+
+    pub(super) fn has_boolean_copies(&self) -> bool {
+        self.boolean_copies != 0
+    }
+
+    pub(super) fn boolean_copy_at(
+        &self,
+        root: Root<'g>,
+        path: &[ResultComponent<'g>],
+        budget: &mut Budget,
+    ) -> Work<Option<BooleanCopy>> {
+        if self.boolean_copies != 0
+            && let Some(BooleanValue::Copy(copy)) = self.boolean_value(root, path, budget)?
+        {
+            return Ok(Some(copy));
+        }
+        Ok(None)
+    }
+
+    /// Re-root a scalar copy in the existing residence vector. An exact
+    /// replacement can also drop a displaced Boolean hint, but never debt
+    /// or other storage evidence. Leave mixed residences to the caller.
+    pub(super) fn transfer_boolean_copy(
+        &mut self,
+        from: Root<'g>,
+        to: Root<'g>,
+        replace: bool,
+        budget: &mut Budget,
+    ) -> Work<bool> {
+        if self.boolean_copies == 0 || from == to {
+            return Ok(false);
+        }
+        let mut incoming = None;
+        let mut displaced = None;
+        for (i, (root, value)) in self.locations.iter().enumerate() {
+            budget.step(1)?;
+            if *root == from {
+                if incoming.is_some()
+                    || !value.component.is_empty()
+                    || !matches!(value.content, Content::BooleanCopy(_))
+                {
+                    return Ok(false);
+                }
+                incoming = Some(i);
+            } else if replace && *root == to {
+                if displaced.is_some()
+                    || !value.component.is_empty()
+                    || !value.content.is_boolean_hint()
+                {
+                    return Ok(false);
+                }
+                displaced = Some(i);
+            }
+        }
+        let Some(index) = incoming else {
+            return Ok(false);
+        };
+        let (_, value) = self.locations.swap_remove(index);
+        if let Some(mut old) = displaced {
+            if old == self.locations.len() {
+                old = index;
+            }
+            let (_, replaced) = self.locations.swap_remove(old);
+            self.boolean_copies -= usize::from(matches!(replaced.content, Content::BooleanCopy(_)));
+        }
+        self.locations.push((to, value));
+        Ok(true)
+    }
+
+    pub(super) fn move_boolean(
+        &mut self,
+        from: Root<'g>,
+        to: Root<'g>,
+        budget: &mut Budget,
+    ) -> Work<()> {
+        for (root, value) in &mut self.locations {
+            budget.step(1)?;
+            if *root == from && value.component.is_empty() {
+                let boolean = match &value.content {
+                    Content::BooleanCopy(_) => true,
+                    Content::Test(tag, _) => matches!(tag.as_ref(), Constructor::Boolean(_)),
+                    _ => false,
+                };
+                if boolean {
+                    *root = to;
+                    break;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn new_boolean_copy(
+        &mut self,
+        root: Root<'g>,
+        path: &[ResultComponent<'g>],
+        budget: &mut Budget,
+    ) -> Work<BooleanCopy> {
+        budget.reserve(1)?;
+        let copy = BooleanCopy(Arc::new(()));
+        self.store(root, path, Content::BooleanCopy(copy.clone()), budget)?;
+        Ok(copy)
+    }
+
+    /// A source or snapshot with no surviving copies has no equality to retain.
+    pub(super) fn remove_single_boolean_copy(
+        &mut self,
+        copy: &BooleanCopy,
+        budget: &mut Budget,
+    ) -> Work<()> {
+        if self.boolean_copies == 0 {
+            return Ok(());
+        }
+        let mut only = None;
+        for (index, (_, value)) in self.locations.iter().enumerate() {
+            budget.step(1)?;
+            if matches!(&value.content, Content::BooleanCopy(known) if known == copy) {
+                if only.is_some() {
+                    return Ok(());
+                }
+                only = Some(index);
+            }
+        }
+        if let Some(index) = only {
+            self.locations.swap_remove(index);
+            self.boolean_copies -= 1;
+        }
+        Ok(())
+    }
+
+    pub(super) fn refine_boolean_copy(
+        &mut self,
+        copy: &BooleanCopy,
+        truth: bool,
+        budget: &mut Budget,
+    ) -> Work<()> {
+        if self.boolean_copies == 0 {
+            return Ok(());
+        }
+        budget.reserve(1)?;
+        let tag = Arc::new(Constructor::Boolean(truth));
+        for (_, value) in &mut self.locations {
+            budget.step(1)?;
+            if matches!(&value.content, Content::BooleanCopy(known) if known == copy) {
+                value.content = Content::Test(tag.clone(), true);
+                self.boolean_copies -= 1;
+            }
+        }
+        Ok(())
     }
 
     pub(super) fn alias(
@@ -210,6 +665,23 @@ impl<'g> Residence<'g> {
             {
                 budget.reserve(address.1.len())?;
                 return Ok(Some(address.clone()));
+            }
+        }
+        Ok(None)
+    }
+
+    pub(super) fn caller_bool_origin(
+        &self,
+        root: Root<'g>,
+        budget: &mut Budget,
+    ) -> Work<Option<&'g DeclarationId>> {
+        for (candidate, value) in &self.locations {
+            budget.step(1)?;
+            if *candidate == root
+                && value.component.is_empty()
+                && let Content::CallerBoolOrigin(parameter) = value.content
+            {
+                return Ok(Some(parameter));
             }
         }
         Ok(None)
@@ -289,6 +761,8 @@ impl<'g> Residence<'g> {
                     budget.reserve(1)?;
                     budget.step(located.component.len())?;
                     let (_, mut located) = self.locations.swap_remove(i);
+                    self.boolean_copies -=
+                        usize::from(matches!(located.content, Content::BooleanCopy(_)));
                     located.component.drain(..component.len());
                     removed.push(located);
                     continue;
@@ -307,12 +781,18 @@ impl<'g> Residence<'g> {
         budget: &mut Budget,
     ) -> Work<()> {
         for mut value in values {
+            if matches!(value.content, Content::ConsumedPair) {
+                // Consumption describes the storage version, not a value in it.
+                budget.step(1)?;
+                continue;
+            }
             budget.reserve(1 + component.len())?;
             // Rebase only the current location, not the diagnostic's origin path.
             if !component.is_empty() {
                 budget.step(value.component.len())?;
                 value.component.splice(..0, component.iter().copied());
             }
+            self.boolean_copies += usize::from(matches!(value.content, Content::BooleanCopy(_)));
             self.locations.push((root, value));
         }
         Ok(())

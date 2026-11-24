@@ -9,8 +9,10 @@ use crate::analysis::conversions::ConversionReport;
 pub use conversion_uses::ConversionUse;
 pub(super) use evidence::ConversionWork;
 pub(in crate::analysis) use evidence::check_pair_candidates;
+mod callable_copy;
 mod ordinary_callbacks;
 mod ordinary_calls;
+pub use callable_copy::{CallableCopy, CaptureCopy, CaptureCopyAction};
 pub use ordinary_callbacks::OrdinaryCallbackContext;
 pub use ordinary_calls::{
     ConditionalFinding, OrdinaryCall, OrdinaryCandidate, OrdinaryValue, OutputAgreement,
@@ -74,6 +76,92 @@ impl<'g> GenericReport<'g> {
 
     pub fn findings(&self) -> &[ScalarFinding<'g>] {
         &self.facts.findings
+    }
+
+    /// Whether the report publishes no finding (metering rule 8). Every field
+    /// is named, so adding one fails to compile until it is decided here. Test
+    /// support for `tests/support/limit.rs`.
+    #[doc(hidden)]
+    pub fn publishes_nothing_at_limit(&self) -> bool {
+        let Self {
+            facts,
+            conditional_findings,
+            declaration_issues,
+            // Node facts: not findings (the lists above carry the diagnostics).
+            // The rest is identity and counters.
+            graph: _graph,
+            evidence,
+            statistics: _statistics,
+            completion: _completion,
+            integrated: _integrated,
+            not_reached: _not_reached,
+            ordinary_calls,
+            ordinary_values,
+            conversion_uses,
+            // Facts about conditional nodes, under a premise: not findings.
+            conditional_conversion_nodes: _conditional_conversion_nodes,
+        } = self;
+        let ScalarFacts {
+            findings,
+            annotations,
+            // Body and node facts, obligations (blockers) and arrows: not findings.
+            text_iteration_sources: _text_iteration_sources,
+            bodies: _bodies,
+            nodes: _nodes,
+            obligations: _obligations,
+            arrows: _arrows,
+        } = facts;
+        findings.is_empty()
+            && annotations.publishes_nothing_at_limit()
+            && conditional_findings.is_empty()
+            && declaration_issues.is_empty()
+            && evidence.publishes_nothing_at_limit(&self.conversion_use_goals())
+            && ordinary_calls
+                .values()
+                .all(OrdinaryCall::publishes_nothing_at_limit)
+            && ordinary_values
+                .values()
+                .all(OrdinaryValue::publishes_nothing_at_limit)
+            && conversion_uses
+                .values()
+                .all(ConversionUse::publishes_nothing_at_limit)
+    }
+
+    /// The goals of the conversion uses with no premise, whose verdict is a
+    /// finding when it says the pair is missing, rejected or disagrees.
+    fn conversion_use_goals(&self) -> Vec<&GoalId> {
+        self.conversion_uses
+            .values()
+            .filter(|use_| use_.premise.is_none())
+            .filter_map(|use_| use_.goal.as_ref())
+            .collect()
+    }
+
+    /// A `ResourceLimit` report publishes no finding (metering rule 8), and a
+    /// report that withheld its findings reads `ResourceLimit` (the typed
+    /// report's bodies can have another completion until here).
+    pub(in crate::analysis) fn withhold_findings(&mut self) {
+        self.completion = ScalarFailureKind::ResourceLimit;
+        let goals = self
+            .conversion_use_goals()
+            .into_iter()
+            .cloned()
+            .collect::<Vec<_>>();
+        self.evidence
+            .withhold_findings(&goals.iter().collect::<Vec<_>>());
+        for call in self.ordinary_calls.values_mut() {
+            call.withhold_findings();
+        }
+        for value in self.ordinary_values.values_mut() {
+            value.withhold_findings();
+        }
+        for use_ in self.conversion_uses.values_mut() {
+            use_.withhold_findings();
+        }
+        self.facts.findings.clear();
+        self.facts.annotations.withhold_findings();
+        self.conditional_findings.clear();
+        self.declaration_issues.clear();
     }
 
     pub fn conditional_findings(&self) -> &[ConditionalFinding<'g>] {
@@ -231,6 +319,16 @@ impl<'g> GenericReport<'g> {
         &self.facts.nodes
     }
 
+    pub(in crate::analysis) fn take_text_iteration_sources(
+        &mut self,
+    ) -> Vec<(&'g DeclarationId, usize)> {
+        std::mem::take(&mut self.facts.text_iteration_sources)
+    }
+
+    pub(in crate::analysis) fn typed_node_mut(&mut self, index: usize) -> &mut NodeFacts<'g> {
+        &mut self.facts.nodes[index]
+    }
+
     pub(in crate::analysis) fn checked_bodies(&self) -> &[BodyFacts<'g>] {
         &self.facts.bodies
     }
@@ -345,7 +443,11 @@ pub(in crate::analysis) fn analyze_with_conversions<'g>(
         limits,
         statistics: Statistics::default(),
     };
-    analyze_bodies(input, conversions, budget, None)
+    let mut report = analyze_bodies(input, conversions, budget, None);
+    if report.completion == ScalarFailureKind::ResourceLimit {
+        report.withhold_findings();
+    }
+    report
 }
 
 #[derive(Default)]
@@ -357,7 +459,9 @@ pub(in crate::analysis) struct IntegratedInputs<'r, 'g> {
     pub conversions: Option<&'r crate::analysis::typed::ConversionCore<'g>>,
     pub collections: crate::analysis::typed::CollectionCore<'g>,
     pub native_ownership: &'r [crate::analysis::typed::OwnershipProtection<'g>],
-    pub ordinary_scope: Option<crate::analysis::typed::ApplicationOrdinaryScope>,
+    /// Protected replacements that collection rejects (R0500).
+    pub ownership_overlaps: &'r [crate::analysis::typed::OwnershipOverlap<'g>],
+    pub ordinary_scope: Option<crate::analysis::typed::InstalledOrdinaryScope<'g>>,
     pub exhausted: bool,
 }
 
@@ -414,6 +518,9 @@ fn analyze_bodies<'g>(
     checker.native_ownership = integration
         .as_ref()
         .map_or(&[], |core| core.native_ownership);
+    checker.ownership_overlaps = integration
+        .as_ref()
+        .map_or(&[], |core| core.ownership_overlaps);
     checker.ordinary_scope = integration
         .as_ref()
         .and_then(|core| core.ordinary_scope.clone());
@@ -425,7 +532,7 @@ fn analyze_bodies<'g>(
     let mut declaration_issues = Vec::new();
     let exhausted = (|| -> Work<()> {
         use ordinary::DeclarationIssue;
-        for issue in input.declaration_issues() {
+        for issue in input.metered_issues() {
             let extra = match issue {
                 DeclarationIssue::DuplicateMembers { members, .. } => members.len(),
                 DeclarationIssue::InlineCycle { steps } => steps.len(),

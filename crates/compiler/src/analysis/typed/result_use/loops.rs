@@ -1,6 +1,15 @@
 //! Loop worklist and transfer targets. A jump leaves only its target's iteration scopes.
 use super::*;
+use crate::analysis::{
+    scalars::{Iteration, IterationBodyKind, data::Pattern, generics::GoalState},
+    typed::{CollectionOperation, ListTraversal},
+};
 use std::collections::VecDeque;
+
+enum OptionCursor<'g> {
+    Empty,
+    Unknown(&'g DeclarationId),
+}
 
 pub(super) struct LoopExits<'g> {
     pub(super) node: NodeId,
@@ -145,26 +154,71 @@ impl<'a, 'g> Check<'a, 'g> {
         let &[_, source, body] = self.module.syntax.nodes[node].children.as_slice() else {
             unreachable!()
         };
-        let iteration = self.facts(node)?.and_then(|facts| match &facts.kind {
+        let facts = self.facts(node)?;
+        let iteration = facts.and_then(|facts| match &facts.kind {
             NodeFactKind::Iteration(iteration) => Some(iteration),
             _ => None,
         });
-        if let Some(iteration) = iteration
-            && iteration.traversal == Some(crate::analysis::typed::ListTraversal::Owned)
-            && self
-                .expression_facts(iteration.source)?
-                .is_some_and(|source| matches!(source.data, Some(DataExpression::List { .. })))
+        let source_fact = if let Some(iteration) = iteration
+            && iteration.traversal == Some(ListTraversal::Owned)
+        {
+            self.expression_facts(iteration.source)?
+        } else {
+            None
+        };
+        if source_fact
+            .is_some_and(|source| matches!(source.data, Some(DataExpression::List { .. })))
         {
             return self.owned_literal_iteration(node, state, depth);
         }
         if let Some(iteration) = iteration
             && iteration.traversal == Some(crate::analysis::typed::ListTraversal::Owned)
-            && matches!(iteration.yielded.as_ref(), TypeTerm::Primitive(p) if p.name() != "never")
+            && match iteration.yielded.as_ref() {
+                TypeTerm::Primitive(p) => p.name() != "never",
+                // A shared reference to an application record owes no Result
+                // and holds no cleanup.
+                TypeTerm::Reference {
+                    mutable: false,
+                    referent,
+                } => matches!(referent.as_ref(), TypeTerm::Nominal { declaration, arguments }
+                    if declaration.kind == DeclarationKind::Record
+                        && declaration.module.origin == crate::loader::Origin::Application
+                        && arguments.is_empty()),
+                _ => false,
+            }
             && self
                 .facts(iteration.pattern)?
                 .is_some_and(|fact| matches!(fact.kind, NodeFactKind::Pattern(_)))
         {
             return self.owned_scalar_iteration(node, iteration.source, body, state, depth);
+        }
+        if let Some(iteration) = iteration
+            && facts.is_some_and(|facts| !facts.flow.pending)
+            && let Some(source) = source_fact
+            && let Some(cursor) =
+                self.owned_option_iteration_facts(iteration, source, &state, depth)?
+        {
+            return match cursor {
+                OptionCursor::Empty => {
+                    self.empty_option_iteration(iteration.source, body, state, depth)
+                }
+                OptionCursor::Unknown(item) => {
+                    if let Some((direct, candidate)) = &mut self.option_iterator
+                        && *direct == depth
+                        && matches!(
+                            iteration.body,
+                            Some(
+                                IterationBodyKind::Ordinary | IterationBodyKind::YieldedTextPostfix
+                            )
+                        )
+                        && let Some(path) = source.path.as_ref()
+                        && path.root.kind == DeclarationKind::Parameter
+                    {
+                        *candidate = Some((path.root, node));
+                    }
+                    self.owned_option_iteration(node, item, state, depth)
+                }
+            };
         }
         self.pending(
             node,
@@ -213,6 +267,253 @@ impl<'a, 'g> Check<'a, 'g> {
             exits.push(state.fork(self.budget)?);
             let jumped = self.with_loop(node, |check| {
                 queue.extend(check.statement(body, state, depth + 1)?);
+                Ok(())
+            })?;
+            queue.extend(jumped.continues);
+            exits.extend(jumped.breaks);
+        }
+        Ok(exits)
+    }
+
+    fn owned_option_iteration_facts(
+        &mut self,
+        iteration: &Iteration<'g>,
+        source: &ExpressionFacts<'g>,
+        state: &Residence<'g>,
+        depth: usize,
+    ) -> Work<Option<OptionCursor<'g>>> {
+        let Some(option) = self.core.option else {
+            return Ok(None);
+        };
+        let syntax = &self.module.syntax.nodes;
+        let Some(path) = source
+            .path
+            .as_ref()
+            .filter(|path| path.projections.is_empty())
+        else {
+            return Ok(None);
+        };
+        // Keep the bounded handoff out of enclosing iteration worklists.
+        // There is no cursor evidence for lexical (rather than live) visits.
+        if self.dead_depth != 0
+            || !self.loops.is_empty()
+            || source.access != Access::Owned
+            || !matches!(
+                syntax[iteration.source].kind,
+                NodeKind::ValueReference | NodeKind::Group
+            )
+            || !matches!(
+                syntax[iteration.pattern].kind,
+                NodeKind::NamePattern | NodeKind::GroupPattern
+            )
+            || !shape::text_option(&iteration.yielded, option.declaration)
+            || !self.text_option_list(&source.ty)
+        {
+            return Ok(None);
+        }
+        let Some(availability) = state.option_list_source(path.root, self.budget)? else {
+            return Ok(None);
+        };
+        let Some(NodeFactKind::Pattern(pattern)) = self.facts(iteration.pattern)?.map(|f| &f.kind)
+        else {
+            return Ok(None);
+        };
+        let [binder] = pattern.binders.as_slice() else {
+            return Ok(None);
+        };
+        if pattern.access != Access::Owned
+            || !matches!(pattern.pattern.as_ref(), Pattern::Any)
+            || !binder.projections.is_empty()
+            || self.address(state, Some(path))? != Some((Root::Local(path.root), Vec::new()))
+        {
+            return Ok(None);
+        }
+
+        let Some(cursor) = (match availability {
+            OptionListSource::Fresh => Some(OptionCursor::Unknown(binder.declaration)),
+            OptionListSource::GuardInspection { guard, borrow } => self
+                .first_guard_proves_empty(guard, borrow, iteration.source)?
+                .then_some(OptionCursor::Empty),
+        }) else {
+            return Ok(None);
+        };
+
+        let (source, _) = self.value_root_at(iteration.source, depth + 1)?;
+        if syntax[source].kind != NodeKind::ValueReference {
+            return Ok(None);
+        }
+        let mut binder = iteration.pattern;
+        let mut binder_depth = depth + 1;
+        loop {
+            self.depth(binder_depth)?;
+            match syntax[binder].kind {
+                NodeKind::NamePattern => return Ok(Some(cursor)),
+                NodeKind::GroupPattern => {
+                    binder = syntax[binder].children[0];
+                    binder_depth += 1;
+                }
+                _ => return Ok(None),
+            }
+        }
+    }
+
+    pub(super) fn option_list_inspection(&self, borrow: NodeId) -> Option<OptionListSource> {
+        let guard = self.current_option_guard?;
+        let syntax = &self.module.syntax.nodes;
+        let [binding, _] = syntax[guard].children[..] else {
+            return None;
+        };
+        if syntax[binding].kind != NodeKind::GuardBinding {
+            return None;
+        }
+        let operand = *syntax[binding].children.last()?;
+        (syntax[operand].kind == NodeKind::Call
+            && matches!(syntax[operand].children.as_slice(), [_, argument] if *argument == borrow))
+        .then_some(OptionListSource::GuardInspection { guard, borrow })
+    }
+
+    fn first_guard_proves_empty(
+        &mut self,
+        guard: NodeId,
+        argument: NodeId,
+        source: NodeId,
+    ) -> Work<bool> {
+        let syntax = &self.module.syntax.nodes;
+        let [binding, failure] = syntax[guard].children[..] else {
+            unreachable!("inspection is tied to a binding guard");
+        };
+        let failure = &syntax[failure].span;
+        let source = &syntax[source].span;
+        if failure.start() > source.start() || source.end() > failure.end() {
+            return Ok(false);
+        }
+        let operand = *syntax[binding].children.last().unwrap();
+        let Some(first) = self
+            .core
+            .collections
+            .protection
+            .iter()
+            .flatten()
+            .find(|p| p.operation == CollectionOperation::First)
+            .copied()
+        else {
+            return Ok(false);
+        };
+        let Some(winner) = first.winner() else {
+            return Ok(false);
+        };
+        let Some(call) = self
+            .expression_facts(operand)?
+            .and_then(|value| value.call.as_ref())
+        else {
+            return Ok(false);
+        };
+        if call.callee != &first.family.id || call.arguments.as_slice() != [argument] {
+            return Ok(false);
+        }
+        self.budget.step(self.inventory.graph().modules().len())?;
+        let Some(ordinary) = self
+            .bodies
+            .ordinary_call(self.module, operand)
+            .ok()
+            .flatten()
+        else {
+            return Ok(false);
+        };
+        self.budget.step(1)?;
+        let Some(goal) = ordinary
+            .goal
+            .as_ref()
+            .and_then(|id| self.bodies.goal(id).ok())
+        else {
+            return Ok(false);
+        };
+        // The ordinary comparison can retain a role premise. The proved
+        // goal and the protected, Clear First winner discharge it here.
+        if !ordinary.checked
+            || ordinary
+                .premise
+                .is_some_and(crate::analysis::ordinary::InputPremise::has_conversion)
+            || ordinary.instantiation.is_some()
+            || ordinary.family != call.callee
+            || goal.state != GoalState::Proved
+            || goal.premise.is_some()
+            || !goal
+                .selection
+                .as_ref()
+                .is_some_and(|selected| selected.implementation == winner)
+        {
+            return Ok(false);
+        }
+        // An irrefutable payload cannot take the failure arm of a Some.
+        Ok(self
+            .facts(syntax[binding].children[0])?
+            .is_some_and(|facts| {
+                matches!(&facts.kind, NodeFactKind::Pattern(pattern)
+                if matches!(pattern.pattern.as_ref(), Pattern::Any | Pattern::Wildcard)
+                    && pattern.coverage.exhaustive())
+            }))
+    }
+
+    fn empty_option_iteration(
+        &mut self,
+        source: NodeId,
+        body: NodeId,
+        state: Residence<'g>,
+        depth: usize,
+    ) -> Work<Alternatives<'g>> {
+        let mut paths = self.expression(source, state, depth + 1)?;
+        self.dead_statement(body, Residence::default(), depth + 1)?;
+        for state in &mut paths {
+            state.take(Root::Temporary(source), &[], self.budget)?;
+        }
+        Ok(paths)
+    }
+
+    fn owned_option_iteration(
+        &mut self,
+        node: NodeId,
+        binder: &'g DeclarationId,
+        state: Residence<'g>,
+        depth: usize,
+    ) -> Work<Alternatives<'g>> {
+        let [_, source, body] = self.module.syntax.nodes[node].children[..] else {
+            unreachable!()
+        };
+        let initial = self.expression(source, state, depth + 1)?;
+        if initial.is_empty() {
+            self.dead_statement(body, Residence::default(), depth + 1)?;
+            return Ok(initial);
+        }
+        let option = self.core.option.unwrap();
+        let item = Root::Local(binder);
+        // The selected next result is Option<Option<string>>. The outer None
+        // ends iteration; on outer Some the item has either inner tag. Split
+        // those tags only if the body tests them: neither carries a Result.
+        let mut queue = VecDeque::from(initial);
+        let mut seen = Vec::new();
+        let mut exits = Vec::new();
+        while let Some(mut state) = queue.pop_front() {
+            if !self.first_visit(&mut state, &mut seen)? {
+                continue;
+            }
+            self.budget.reserve(1)?;
+            exits.push(state.fork(self.budget)?);
+            state.store(
+                item,
+                &[],
+                Content::OptionItem {
+                    some: option.success,
+                    none: option.failure,
+                },
+                self.budget,
+            )?;
+            let jumped = self.with_loop(node, |check| {
+                for mut state in check.statement(body, state, depth + 1)? {
+                    let remaining = state.take(item, &[], check.budget)?;
+                    check.discard(remaining, item, body, ResultDiscardKind::ScopeExit)?;
+                    queue.extend(check.singleton(state)?);
+                }
                 Ok(())
             })?;
             queue.extend(jumped.continues);

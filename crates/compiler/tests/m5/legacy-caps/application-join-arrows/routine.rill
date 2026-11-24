@@ -1,0 +1,2 @@
+export function join<W, R>(items: W): R;
+implement<F, G> join(items: [F, G]): [F, G] { return items; }

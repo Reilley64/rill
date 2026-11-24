@@ -9,15 +9,42 @@ use crate::analysis::{
 use crate::loader::{self, Limits, Prelude, Request, Selector};
 use std::fs;
 
-#[test]
-fn typed_sources_preserve_origins_across_rename_projection_replacement_and_paths() {
-    let root = std::env::temp_dir().join(format!("rill-result-use-flow-{}", std::process::id()));
+fn load_test_graph(tag: &str, source: &str) -> loader::Graph {
+    let root = std::env::temp_dir().join(format!("rill-result-use-{tag}-{}", std::process::id()));
     let app = root.join("app");
     let standard = root.join("std");
     fs::create_dir_all(&app).unwrap();
     fs::create_dir_all(&standard).unwrap();
     let entry = app.join("main.rill");
-    fs::write(&entry, "
+    fs::write(&entry, source).unwrap();
+    fs::write(
+        standard.join("core.rill"),
+        "export function copy<T>(value: &T): T; export function dispose<T>(value: T): void;",
+    )
+    .unwrap();
+    let select = |name: &str| Selector {
+        module: "core.rill".into(),
+        name: name.into(),
+    };
+    let loaded = loader::load(Request {
+        entry,
+        standard_root: standard,
+        prelude: Prelude {
+            copy: select("copy"),
+            dispose: select("dispose"),
+        },
+        target: "aarch64-apple-darwin".into(),
+        options: Default::default(),
+        test_mode: false,
+        limits: Limits::default(),
+    });
+    fs::remove_dir_all(root).unwrap();
+    loaded.unwrap()
+}
+
+#[test]
+fn typed_sources_preserve_origins_across_rename_projection_replacement_and_paths() {
+    let graph = load_test_graph("flow", "
         enum Watched { Good(bool), Bad(bool) }
         function renamed(input: Watched): void { let renamed = input; }
         function projected(left: Watched, right: Watched): Watched {
@@ -41,30 +68,7 @@ fn typed_sources_preserve_origins_across_rename_projection_replacement_and_paths
         function loopBreak(run: bool): void { while (run) { let held = generated(); break; } }
         function loopContinue(run: bool): void { while (run) { let held = generated(); continue; } }
         function diverges(infinite: Watched): never { while (true) {} }
-    ").unwrap();
-    fs::write(
-        standard.join("core.rill"),
-        "export function copy<T>(value: &T): T; export function dispose<T>(value: T): void;",
-    )
-    .unwrap();
-    let select = |name: &str| Selector {
-        module: "core.rill".into(),
-        name: name.into(),
-    };
-    let loaded = loader::load(Request {
-        entry,
-        standard_root: standard,
-        prelude: Prelude {
-            copy: select("copy"),
-            dispose: select("dispose"),
-        },
-        target: "aarch64-apple-darwin".into(),
-        options: Default::default(),
-        test_mode: false,
-        limits: Limits::default(),
-    });
-    fs::remove_dir_all(root).unwrap();
-    let graph = loaded.unwrap();
+    ");
     let limits = AnalysisLimits::default();
     let inventory = analyze_typed_inventory(&graph, limits);
     let budget = Budget {
@@ -108,6 +112,7 @@ fn typed_sources_preserve_origins_across_rename_projection_replacement_and_paths
             collections: Default::default(),
             native: &Default::default(),
             outcome_observer: None,
+            routine: None,
         },
         &mut budget,
         &mut report,
@@ -161,4 +166,79 @@ fn typed_sources_preserve_origins_across_rename_projection_replacement_and_paths
         .find(|witness| witness.kind == ResultDiscardKind::Replacement)
         .unwrap();
     assert_eq!(replacement.discard.span.bytes(), b"local = new;");
+}
+
+#[test]
+fn result_use_depth_reaches_the_root_of_both_explicit_dereferences() {
+    // Precompute typing with ordinary limits. Only the Result-use walk is
+    // constrained here, independently of the installed standard library.
+    let run = |statement: &str, max_depth| {
+        let graph = load_test_graph(
+            "nested-depth",
+            &format!(
+                "enum Watched {{ Good(bool), Bad(bool) }}\nfunction keep(slot: &mut &mut &bool, input: &bool): void {{ {statement} }}"
+            ),
+        );
+        let limits = AnalysisLimits::default();
+        let inventory = analyze_typed_inventory(&graph, limits);
+        let bodies = analyze_integrated_bodies(
+            &inventory,
+            Budget {
+                limits,
+                statistics: inventory.statistics(),
+            },
+            IntegratedInputs::default(),
+        );
+        assert!(bodies.findings().is_empty());
+        let id = |name| {
+            &graph
+                .modules()
+                .iter()
+                .flat_map(|module| &module.declarations)
+                .find(|d| d.name.as_deref() == Some(name))
+                .unwrap()
+                .id
+        };
+        let mut budget = Budget {
+            limits: AnalysisLimits {
+                max_depth,
+                ..limits
+            },
+            statistics: Default::default(),
+        };
+        let mut report = ResultUseReport::default();
+        let checked = check(
+            &inventory,
+            &bodies,
+            Inputs {
+                result: Container {
+                    declaration: id("Watched"),
+                    success: id("Good"),
+                    failure: id("Bad"),
+                },
+                option: None,
+                opaque_cause: None,
+                owned_bytes: None,
+                collections: Default::default(),
+                native: &Default::default(),
+                outcome_observer: None,
+                routine: None,
+            },
+            &mut budget,
+            &mut report,
+        );
+        if checked.is_ok() {
+            assert!(report.pending().is_empty() && report.discards().is_empty());
+        }
+        (checked, budget.statistics.max_depth)
+    };
+    let store = "**slot = input;";
+    let (checked, depth) = run(store, AnalysisLimits::default().max_depth);
+    assert!(checked.is_ok());
+    assert!(run(store, depth).0.is_ok());
+    assert!(run(store, depth - 1).0.is_err());
+    assert!(
+        run("", depth - 1).0.is_ok(),
+        "same parameter types without the destination walk fit"
+    );
 }

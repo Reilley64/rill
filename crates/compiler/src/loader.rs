@@ -322,6 +322,7 @@ pub struct Graph {
     id: GraphId,
     request: Request,
     modules: Vec<Module>,
+    routine_index: Option<usize>,
     prelude: PreludeIdentities,
     bindings: Vec<Binding>,
     imports: Vec<ImportOutcome>,
@@ -344,6 +345,11 @@ impl Graph {
         self.ownership_archive.as_deref()
     }
 
+    /// Modules carry the loader's private capture identity, even for empty startup.
+    pub(crate) fn owns_module(&self, module: &Module) -> bool {
+        module.context == self.id
+    }
+
     /// This does not admit roles, implementations or representations.
     pub(crate) fn is_pinned_standard_source(&self, module: &Module) -> bool {
         module.context == self.id
@@ -354,7 +360,12 @@ impl Graph {
                 .is_some()
     }
 
-    /// The source keys in the selected installed profile, not a discovery request.
+    /// This group is required only when captured by ordinary import discovery.
+    pub(crate) fn installed_routine_source(&self) -> Option<&Module> {
+        self.routine_index.map(|index| &self.modules[index])
+    }
+
+    /// The baseline source keys, not a discovery request.
     pub(crate) fn installed_source_keys(&self) -> Option<impl Iterator<Item = &'static str>> {
         Some(self.installed?.sources().iter().map(|&(key, _)| key))
     }

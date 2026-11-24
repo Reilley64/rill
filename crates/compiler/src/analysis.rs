@@ -11,6 +11,7 @@ use std::sync::Arc;
 pub mod conversions;
 pub mod declarations;
 pub mod ordinary;
+pub mod ownership;
 pub mod scalars;
 pub mod typed;
 pub use scalars::{data, generics};
@@ -70,6 +71,103 @@ pub enum TypeTerm<'g> {
         result: Type<'g>,
     },
 }
+// The scoped retained-destination handoff recognizes only a caller's
+// exclusive access to a shared bool or string descriptor, not general nested
+// storage. Returns the descriptor type (`&bool` or `&string`).
+fn retained_contents_type<'a, 'g>(ty: &'a TypeTerm<'g>) -> Option<&'a Type<'g>> {
+    if let TypeTerm::Reference {
+        mutable: true,
+        referent,
+    } = ty
+        && matches!(referent.as_ref(), TypeTerm::Reference { mutable: false, referent: inner }
+            if matches!(inner.as_ref(), TypeTerm::Primitive(p) if matches!(p.name(), "bool" | "string")))
+    {
+        Some(referent)
+    } else {
+        None
+    }
+}
+
+// The bool descriptor alone: the two-hop route, the Bool gate and the
+// `Option<bool>` handoff stay bool-only.
+fn retained_bool_contents_type<'a, 'g>(ty: &'a TypeTerm<'g>) -> Option<&'a Type<'g>> {
+    retained_contents_type(ty).filter(|contents| {
+        matches!(contents.as_ref(), TypeTerm::Reference { referent, .. }
+            if matches!(referent.as_ref(), TypeTerm::Primitive(p) if p.name() == "bool"))
+    })
+}
+
+// Retained contents that are a shared reference to a record: `&mut &R` with
+// `R` a non-generic application record. The type alone cannot say that every
+// field is an `i32`. This screen reads only the type and charges nothing; a
+// type it refuses is never looked up.
+fn retained_record_candidate<'a, 'g>(ty: &'a TypeTerm<'g>) -> Option<&'a Type<'g>> {
+    let TypeTerm::Reference {
+        mutable: true,
+        referent,
+    } = ty
+    else {
+        return None;
+    };
+    matches!(referent.as_ref(), TypeTerm::Reference { mutable: false, referent: record }
+        if matches!(record.as_ref(), TypeTerm::Nominal { declaration, arguments }
+            if declaration.module.origin == crate::loader::Origin::Application
+                && arguments.is_empty()))
+    .then_some(referent)
+}
+
+// The record candidate's declaration is a record of `i32` fields. The lookup
+// is keyed by the declaration's module path, so it is charged by path length
+// per comparison (metering rule 3), after the free type screen (rule 1). The
+// body that holds the candidate's reference slot stays on its old path for
+// any other shape.
+fn retained_record_contents<'a, 'g>(
+    inventory: &ordinary::OrdinaryAnalysis<'g>,
+    ty: &'a TypeTerm<'g>,
+    budget: &mut declarations::Budget,
+) -> Result<Option<&'a Type<'g>>, ()> {
+    let Some(contents) = retained_record_candidate(ty) else {
+        return Ok(None);
+    };
+    retained_i32_record(inventory, contents, budget)
+}
+
+// `contents` is `&R`: the same charged lookup of `R`'s declaration, for a
+// `&mut &R` destination and for the element of a `&mut List<&R>` (rule R1).
+fn retained_i32_record<'a, 'g>(
+    inventory: &ordinary::OrdinaryAnalysis<'g>,
+    contents: &'a Type<'g>,
+    budget: &mut declarations::Budget,
+) -> Result<Option<&'a Type<'g>>, ()> {
+    let TypeTerm::Reference { referent, .. } = contents.as_ref() else {
+        return Ok(None);
+    };
+    let TypeTerm::Nominal { declaration, .. } = referent.as_ref() else {
+        return Ok(None);
+    };
+    let declarations = &inventory.type_facts().declarations;
+    let probes = (usize::BITS - declarations.len().leading_zeros() + 1) as usize;
+    budget.step(
+        (declaration.module.path.len() + 1)
+            .checked_mul(probes)
+            .ok_or(())?,
+    )?;
+    let Some(facts) = declarations.get(*declaration) else {
+        return Ok(None);
+    };
+    let DeclarationShape::Record { fields } = &facts.shape else {
+        return Ok(None);
+    };
+    if !facts.binders.is_empty() {
+        return Ok(None);
+    }
+    budget.step(fields.len())?;
+    Ok(fields
+        .iter()
+        .all(|field| matches!(field.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32"))
+        .then_some(contents))
+}
+
 #[derive(Clone, Debug)]
 pub struct Binder<'g> {
     pub declaration: &'g Declaration,
@@ -79,6 +177,11 @@ pub struct Binder<'g> {
 pub struct MemberType<'g> {
     pub declaration: &'g Declaration,
     pub ty: Type<'g>,
+    /// Integrated body typing identified this formal as the direct source of
+    /// an ordinary named string yield. No storage/provider proof is implied.
+    pub(in crate::analysis) text_iteration_source: bool,
+    /// The direct consuming loop reached with this whole incoming Option list fresh.
+    pub(in crate::analysis) option_iteration_source: Option<NodeId>,
 }
 #[derive(Debug)]
 pub enum Payload<'g> {
@@ -229,6 +332,21 @@ pub struct PartialFacts<'g> {
     obligations: BTreeMap<(&'g ModuleKey, usize, Unsupported), Obligation<'g>>,
 }
 impl<'g> PartialFacts<'g> {
+    /// No finding. Every field is named, so a new one fails to compile until it
+    /// is decided here (metering rule 8).
+    pub(crate) fn publishes_nothing_at_limit(&self) -> bool {
+        let Self {
+            findings,
+            // Declarations, uses and obligations (blockers): facts, not findings.
+            declarations: _declarations,
+            uses: _uses,
+            obligations: _obligations,
+        } = self;
+        findings.is_empty()
+    }
+    pub(crate) fn withhold_findings(&mut self) {
+        self.findings.clear();
+    }
     pub fn declarations(&self) -> impl Iterator<Item = &DeclarationFacts<'g>> {
         self.declarations.values()
     }
@@ -942,7 +1060,12 @@ impl<'g> Analyzer<'g> {
                 self.ty(module, module.syntax.nodes[member].children[1], binders, 1)?
             {
                 self.reserve(1)?;
-                members.push(MemberType { declaration, ty });
+                members.push(MemberType {
+                    declaration,
+                    ty,
+                    text_iteration_source: false,
+                    option_iteration_source: None,
+                });
             } else {
                 valid = false;
             }

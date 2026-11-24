@@ -20,8 +20,9 @@ pub use collections::{
     CollectionRepresentation, CollectionStorage, ListRole, ListTraversal,
 };
 pub use completion::TypedCompletion;
-pub(in crate::analysis) use core::ApplicationOrdinaryScope;
+pub(in crate::analysis) use core::InstalledOrdinaryScope;
 pub(super) use core::PrimitiveCore;
+pub use core::routine::RoutineRole;
 pub use core::{
     DisplayProtection, ErrorBridge, ErrorOperation, ErrorProviders, ErrorRepresentation,
     OptionRole, PrimitiveBinding, PrimitiveCoverage, PrimitiveOverlap, PrimitiveProtection,
@@ -40,9 +41,10 @@ pub use ownership::{
     OwnershipRule,
 };
 pub use primitive::{Primitive, PrimitiveOperation, PrimitiveValue};
+pub(in crate::analysis) use result_use::{PairCall, PairChild};
 pub use result_use::{
     PendingResultUse, ResultComponent, ResultDiscard, ResultDiscardKind, ResultUseBlocker,
-    ResultUseReport,
+    ResultUseReport, ScopedJoinCall, ScopedJoinReference, ScopedJoinSlot,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -59,6 +61,7 @@ pub struct TypedReport<'g> {
     bodies: GenericReport<'g>,
     public_interface_findings: Vec<PublicInterfaceFinding<'g>>,
     core: core::InstalledCore<'g>,
+    routine: Option<RoutineRole<'g>>,
     ownership: ownership::Report<'g>,
     collections: CollectionCore<'g>,
     collection_overlaps: Vec<CollectionOverlap<'g>>,
@@ -73,10 +76,10 @@ pub struct TypedReport<'g> {
 /// Evidence of the integrated typed checkpoint for this immutable capture.
 #[derive(Debug)]
 pub struct TypedReceipt<'a, 'g> {
-    report: &'a TypedReport<'g>,
+    pub(super) report: &'a TypedReport<'g>,
 }
 
-impl TypedReceipt<'_, '_> {
+impl<'g> TypedReceipt<'_, 'g> {
     pub fn context(&self) -> crate::loader::GraphId {
         self.report.inventory.context()
     }
@@ -87,6 +90,20 @@ impl TypedReceipt<'_, '_> {
 
     pub fn statistics(&self) -> Statistics {
         self.report.statistics()
+    }
+
+    /// Concrete call and Result-use facts, not the ownership judgment.
+    pub fn scoped_join(
+        &self,
+        module: &crate::loader::Module,
+        node: crate::parser::NodeId,
+    ) -> Result<Option<&ScopedJoinCall<'g>>, super::QueryError> {
+        Ok(self.report.bodies().node(module, node)?.and_then(|fact| {
+            let super::scalars::NodeFactKind::Expression(expression) = &fact.kind else {
+                return None;
+            };
+            expression.call.as_ref()?.scoped_join.as_deref()
+        }))
     }
 }
 
@@ -111,6 +128,11 @@ impl<'g> TypedReport<'g> {
     /// Stages not reached or outside this increment. An omitted stage is not a pass.
     pub fn not_performed(&self) -> &[Stage] {
         &self.not_performed
+    }
+
+    /// The pinned source designation, independent of operation availability.
+    pub fn routine_role(&self) -> Option<RoutineRole<'g>> {
+        self.routine
     }
 
     pub fn option_role(&self) -> Option<&OptionRole<'g>> {
@@ -291,7 +313,7 @@ impl<'g> TypedReport<'g> {
 }
 
 pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
-    let inventory = analyze_typed_inventory(graph, limits);
+    let mut inventory = analyze_typed_inventory(graph, limits);
     let mut budget = Budget {
         limits,
         statistics: inventory.statistics(),
@@ -353,9 +375,17 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
     } else {
         core::roles_complete(&inventory, &core, &collections, &ownership, &mut budget)
     };
+    let routine_source = graph.installed_routine_source();
+    let routine_role = match routine_source {
+        Some(module) if !authority_exhausted => {
+            core::routine::check(&inventory, module, &mut budget)
+        }
+        _ => Ok(None),
+    };
+    let routine = routine_role.unwrap_or_default();
     let ordinary_scope = matches!(roles_complete, Ok(true))
-        .then(|| core::ApplicationOrdinaryScope::from_closed_roles(graph));
-    let bodies = analyze_integrated_bodies(
+        .then(|| core::InstalledOrdinaryScope::from_closed_roles(graph, routine));
+    let mut bodies = analyze_integrated_bodies(
         &inventory,
         budget,
         IntegratedInputs {
@@ -366,8 +396,9 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
             conversions: Some(&core.conversions),
             collections,
             native_ownership: &ownership.protection,
+            ownership_overlaps: &ownership.overlaps,
             ordinary_scope,
-            exhausted: authority_exhausted || roles_complete.is_err(),
+            exhausted: authority_exhausted || roles_complete.is_err() || routine_role.is_err(),
         },
     );
     let mut budget = Budget {
@@ -375,6 +406,13 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
         statistics: bodies.statistics(),
     };
     let mut completion = bodies.completion();
+    if completion != ScalarFailureKind::ResourceLimit
+        && inventory
+            .mark_text_iteration_sources(bodies.take_text_iteration_sources(), &mut budget)
+            .is_err()
+    {
+        completion = ScalarFailureKind::ResourceLimit;
+    }
     if completion != ScalarFailureKind::ResourceLimit
         && core::check_providers(&inventory, &bodies, &mut budget, &mut core).is_err()
     {
@@ -412,10 +450,18 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
                 collections,
                 native: &ownership,
                 outcome_observer: core.result_inspection.map(|d| &d.id),
+                routine,
             },
             &mut budget,
             &mut report,
         )
+        .and_then(|()| report.attach_pair_calls(&mut bodies, &mut budget))
+        .and_then(|()| {
+            if report.pending().is_empty() && report.discards().is_empty() {
+                report.attach_option_iterators(&mut inventory, &mut budget)?;
+            }
+            Ok(())
+        })
         .is_err()
         {
             completion = ScalarFailureKind::ResourceLimit;
@@ -426,6 +472,19 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
     } else {
         None
     };
+    let routine_bound = result_use
+        .as_ref()
+        .is_some_and(ResultUseReport::routine_bound);
+    let routine_protection = match routine {
+        Some(role) if completion != ScalarFailureKind::ResourceLimit => {
+            super::ordinary::source::admitted_family(&inventory, &role.family.id, &mut budget)
+                .map(|family| family.is_ok())
+        }
+        _ => Ok(routine_source.is_none()),
+    };
+    if routine_protection.is_err() {
+        completion = ScalarFailureKind::ResourceLimit;
+    }
     let mut core_inventories = core::InventoryCompleteness::default();
     if completion != ScalarFailureKind::ResourceLimit
         && core::check_inventories(
@@ -446,9 +505,18 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
         && collections.representations().count() == 4
         && ownership.representations_complete();
     let core_blockers = [
-        (!matches!(roles_complete, Ok(true)), CoreBlocker::Roles),
-        (!core_inventories.providers, CoreBlocker::Providers),
-        (!core_inventories.protection, CoreBlocker::Protection),
+        (
+            !matches!(roles_complete, Ok(true)) || routine_source.is_some() && routine.is_none(),
+            CoreBlocker::Roles,
+        ),
+        (
+            !core_inventories.providers || routine_source.is_some() && !routine_bound,
+            CoreBlocker::Providers,
+        ),
+        (
+            !core_inventories.protection || !matches!(routine_protection, Ok(true)),
+            CoreBlocker::Protection,
+        ),
         (!representation_complete, CoreBlocker::Representation),
     ]
     .into_iter()
@@ -489,6 +557,7 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
         bodies,
         public_interface_findings,
         core,
+        routine,
         ownership,
         collections,
         collection_overlaps,
@@ -507,5 +576,81 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
             report.not_performed = vec![Stage::Ownership, Stage::Execution];
         }
     }
+    if report.completion == TypedCompletion::ResourceLimit {
+        report.withhold_findings();
+    }
     report
+}
+
+impl TypedReport<'_> {
+    /// Whether the report publishes no finding and no verdict that cites one
+    /// (metering rule 8). Every field of the report and of the components that
+    /// can carry a finding is named, so adding one fails to compile until it is
+    /// decided here. Test support for `tests/support/limit.rs`; it reads what
+    /// the accessors publish and changes nothing.
+    #[doc(hidden)]
+    pub fn publishes_nothing_at_limit(&self) -> bool {
+        let Self {
+            inventory,
+            bodies,
+            public_interface_findings,
+            core,
+            ownership,
+            collections,
+            collection_overlaps,
+            result_use,
+            // The role designation, the completion, an internal flag with no
+            // accessor, blockers, counters and stage names: not findings.
+            routine: _routine,
+            completion: _completion,
+            protected_violation: _protected_violation,
+            core_blockers: _core_blockers,
+            statistics: _statistics,
+            not_performed: _not_performed,
+        } = self;
+        inventory.publishes_nothing_at_limit()
+            && bodies.publishes_nothing_at_limit()
+            && public_interface_findings.is_empty()
+            && core.publishes_nothing_at_limit()
+            && ownership.publishes_nothing_at_limit()
+            && collections.publishes_nothing_at_limit()
+            && collection_overlaps.is_empty()
+            && result_use
+                .as_ref()
+                .is_none_or(ResultUseReport::publishes_nothing_at_limit)
+    }
+
+    /// A `ResourceLimit` report publishes no finding (metering rule 8): the
+    /// finding lists, the `Overlap` coverage verdict (which says an `R0500`
+    /// finding exists, so it reads `Pending`, as for an unresolved region), the
+    /// registration issues and the Result discards. Publication only: it runs
+    /// after the meter stops.
+    fn withhold_findings(&mut self) {
+        self.inventory.withhold_findings();
+        self.bodies.withhold_findings();
+        self.public_interface_findings.clear();
+        self.collection_overlaps.clear();
+        self.ownership.overlaps.clear();
+        self.core.conversions.withhold_findings();
+        if let Some(uses) = &mut self.result_use {
+            uses.withhold_findings();
+        }
+        let pending = |coverage: &mut OwnershipCoverage| {
+            if *coverage == OwnershipCoverage::Overlap {
+                *coverage = OwnershipCoverage::Pending;
+            }
+        };
+        for scope in &mut self.ownership.protection {
+            pending(&mut scope.coverage);
+        }
+        for scope in self.collections.protection.iter_mut().flatten() {
+            pending(&mut scope.coverage);
+        }
+        for scope in &mut self.core.primitives.protection {
+            scope.overlaps.clear();
+            if scope.coverage == PrimitiveCoverage::Overlap {
+                scope.coverage = PrimitiveCoverage::Pending;
+            }
+        }
+    }
 }

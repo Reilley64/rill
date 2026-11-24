@@ -1,4 +1,7 @@
 //! M4.6 evidence over real M3 captures, not Rill execution.
+#[path = "support/limit.rs"]
+mod limit;
+
 use compiler::analysis::generics::{GoalBlocker, GoalState, GoalVerdict, analyze_generics};
 use compiler::analysis::ordinary::analyze_ordinary;
 use compiler::analysis::scalars::BodyOwner;
@@ -108,6 +111,45 @@ fn a_selected_clause_determines_open_output_before_checking_equality() {
             .any(|id| report.goal(id).unwrap().source.span.bytes() == b"inner(U,E)")
     );
     assert!(report.node(module, node).unwrap().is_none());
+}
+
+/// Ruling 23 (item 1) and C15 item 1: an ordinary call's `OutputAgreement::Disagrees`
+/// is a type mismatch (R-code) at the use. The exact run publishes it; no limited run does.
+#[test]
+fn a_limited_generics_report_publishes_no_output_disagreement() {
+    let fixture = Fixture::new(
+        "function inner<T,E>(value: T): E;
+         implement<U> inner(value: U): i32 { return 1i32; }
+         function outer<T,E>(value: T): E;
+         implement<U,E> outer(value: U): E where inner(U,E) { while (true) {} }
+         let pending: bool = outer(true);",
+    );
+    let graph = fixture.load();
+    let ordinary = analyze_ordinary(&graph, AnalysisLimits::default());
+    let exact = analyze_generics(&ordinary, AnalysisLimits::default());
+    assert!(
+        limit::conversion_use_flaws(&graph, &exact).contains(&"publishes an output disagreement"),
+        "the exact run publishes the disagreement"
+    );
+    let stats = exact.statistics();
+    let mut limited = 0;
+    for max_work in 0..stats.work {
+        let report = analyze_generics(
+            &ordinary,
+            AnalysisLimits {
+                max_work,
+                max_entries: stats.entries,
+                max_depth: stats.max_depth,
+            },
+        );
+        if report.completion() == compiler::analysis::scalars::ScalarFailureKind::ResourceLimit {
+            limited += 1;
+            let flaws = limit::conversion_use_flaws(&graph, &report);
+            assert!(flaws.is_empty(), "{flaws:?} at {:?}", report.statistics());
+            limit::assert_generics_limit(&report);
+        }
+    }
+    assert!(limited > 0);
 }
 
 #[test]
@@ -905,10 +947,7 @@ fn type_growth_exhausts_a_limit_instead_of_reporting_a_cycle_or_absence() {
         ..AnalysisLimits::default()
     };
     let report = analyze_generics(&ordinary, limits);
-    assert_eq!(
-        report.completion(),
-        compiler::analysis::scalars::ScalarFailureKind::ResourceLimit
-    );
+    limit::assert_generics_limit(&report);
     assert_eq!(report.statistics().max_depth, limits.max_depth);
     let determinations: Vec<_> = report
         .goals()
@@ -1150,9 +1189,101 @@ fn retained_goal_work_and_entries_have_independent_exact_boundaries() {
         },
     ] {
         let limited = analyze_generics(&ordinary, short);
-        assert_eq!(
-            limited.completion(),
-            compiler::analysis::scalars::ScalarFailureKind::ResourceLimit
-        );
+        limit::assert_generics_limit(&limited);
     }
+}
+
+/// Metering rule 8: a `ResourceLimit` generics report publishes no finding in
+/// any list (body, conditional, declaration issue, annotation). The exact cap
+/// publishes them; every cap below it, on each axis, publishes none.
+#[test]
+fn resource_limit_publishes_no_finding_list() {
+    let sources = [
+        "type Gone = { x: Missing }; type Loop = { a: Loop }; let v: i32 = unknown;
+         function g<T = Absent>(x: Nope): T;",
+        "function f<T>(x: Missing<T>, y: Other): T; function k<T = Zed>(x: T): T;",
+    ];
+    for (n, source) in sources.into_iter().enumerate() {
+        let fixture = Fixture::new(source);
+        let graph = fixture.load();
+        let ordinary = analyze_ordinary(&graph, AnalysisLimits::default());
+        let report = analyze_generics(&ordinary, AnalysisLimits::default());
+        let stats = report.statistics();
+        let exact = AnalysisLimits {
+            max_work: stats.work,
+            max_entries: stats.entries,
+            max_depth: stats.max_depth,
+        };
+        let replay = analyze_generics(&ordinary, exact);
+        assert_eq!(replay.statistics(), stats);
+        assert!(replay.annotations().findings().count() >= 2, "source {n}");
+        assert_eq!(
+            replay.declaration_issues().len(),
+            usize::from(n == 0),
+            "source {n}"
+        );
+
+        for work in 0..stats.work {
+            let limited = analyze_generics(
+                &ordinary,
+                AnalysisLimits {
+                    max_work: work,
+                    ..exact
+                },
+            );
+            limit::assert_generics_limit(&limited);
+        }
+        for entries in 0..stats.entries {
+            let limited = analyze_generics(
+                &ordinary,
+                AnalysisLimits {
+                    max_entries: entries,
+                    ..exact
+                },
+            );
+            limit::assert_generics_limit(&limited);
+        }
+        for depth in 0..stats.max_depth {
+            let limited = analyze_generics(
+                &ordinary,
+                AnalysisLimits {
+                    max_depth: depth,
+                    ..exact
+                },
+            );
+            limit::assert_generics_limit(&limited);
+        }
+    }
+}
+
+/// Withholding the issues of a `ResourceLimit` ordinary report moves no cap:
+/// `analyze_generics` still meters them, so its statistics on that input are
+/// the ones measured before rule 8 reached `analyze_ordinary` (402 work gave
+/// 404 work and 92 entries then, 2 more than the ordinary report's own).
+#[test]
+fn withheld_ordinary_issues_are_still_metered_by_generics() {
+    let fixture = Fixture::new(
+        "type Gone = { x: Missing }; type Loop = { a: Loop }; let v: i32 = unknown;
+         function g<T = Absent>(x: Nope): T;",
+    );
+    let graph = fixture.load();
+    let ordinary = analyze_ordinary(
+        &graph,
+        AnalysisLimits {
+            max_work: 402,
+            ..AnalysisLimits::default()
+        },
+    );
+    assert_eq!(
+        (ordinary.statistics().work, ordinary.statistics().entries),
+        (402, 90)
+    );
+    assert!(ordinary.declaration_issues().is_empty());
+    let report = analyze_generics(&ordinary, AnalysisLimits::default());
+    limit::assert_generics_limit(&report);
+    let statistics = report.statistics();
+    assert_eq!(
+        (statistics.work, statistics.entries, statistics.max_depth),
+        (404, 92, 2)
+    );
 }

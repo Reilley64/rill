@@ -24,6 +24,25 @@ impl<'a, 'g> Check<'a, 'g> {
         for argument in call.argument_evaluation_order() {
             states = self.stage_argument(argument, states, depth + 1)?;
         }
+        if settled
+            && let Some(DataExpression::CallableCopy(copy)) = &value.data
+            && let [argument] = call.arguments.as_slice()
+        {
+            // The borrow is evaluated, but neither it nor a Result residence
+            // enters the new owner: the checked fields are independent primitives.
+            let borrowed = Root::Temporary(*argument);
+            for state in &mut states {
+                let contents = state.take(borrowed, &[], self.budget)?;
+                self.discard(contents, borrowed, *argument, ResultDiscardKind::Expression)?;
+                state.store(
+                    Root::Temporary(node),
+                    &[],
+                    Content::Callable(copy.origin.node),
+                    self.budget,
+                )?;
+            }
+            return Ok(states);
+        }
         self.budget.step(self.core.collections.protection.len())?;
         if settled
             && let [argument] = call.arguments.as_slice()
@@ -44,8 +63,72 @@ impl<'a, 'g> Check<'a, 'g> {
             }
             return Ok(states);
         }
+        // Only the designated winner can transfer work to children. A legal
+        // application winner in this family keeps its ordinary call contract.
+        let scoped = self.core.routine.is_some_and(|role| {
+            role.needs_scoped_evidence(
+                call.callee,
+                call.selection.as_ref().map(|s| s.implementation),
+            )
+        });
+        let boundary = if scoped {
+            self.scoped
+                .map(|(role, slots)| pairs::PairBoundary::Scoped(role, slots))
+        } else {
+            call.selection
+                .as_ref()
+                .and_then(|selection| self.pairs.get(selection.implementation))
+                .copied()
+                .map(pairs::PairBoundary::Serial)
+        };
+        if settled && let Some(boundary) = boundary {
+            let mut forwarded = Vec::new();
+            let mut pending = Vec::new();
+            for mut state in states {
+                self.budget.reserve(1)?;
+                if self.transfer_pair(node, value, call, &mut state, boundary, depth + 1)? {
+                    if scoped && let Some(slot) = self.fresh_result_slot(&value.ty) {
+                        self.split_captured_flag(node, 1 - slot, &mut state, &mut forwarded)?;
+                    }
+                    forwarded.push(state);
+                } else {
+                    self.pending(node, ResultUseBlocker::CallBoundary)?;
+                    self.finish_call(
+                        node,
+                        value,
+                        &mut state,
+                        call.argument_evaluation_order(),
+                        (false, false, false),
+                    )?;
+                    pending.push(state);
+                }
+            }
+            if scoped && self.fresh_result_slot(&value.ty).is_some() {
+                // A failed child proof has no known Result occurrence. Keep the
+                // caller residences; seeding from the type would blame the join.
+                forwarded.extend(pending);
+            } else {
+                forwarded.extend(self.call_output(node, value, pending)?);
+            }
+            return Ok(forwarded);
+        }
+        if scoped {
+            self.pending(node, ResultUseBlocker::CallBoundary)?;
+        }
+        let once = if settled && !scoped && !states.is_empty() {
+            self.once_call(node, value, call, &states)?
+        } else {
+            None
+        };
+        let mut closed_once = true;
         for state in &mut states {
-            let checked = settled && self.ordinary_boundary(call, state, depth + 1)?;
+            let checked = if let Some((_, _, actual)) = once {
+                let proved = self.prove_closed_actual(state, actual, depth + 1)?;
+                closed_once &= proved;
+                proved
+            } else {
+                settled && !scoped && self.ordinary_boundary(call, state, depth + 1)?
+            };
             if settled && !checked && self.contracts.contains_key(call.callee) {
                 self.pending(node, ResultUseBlocker::CallBoundary)?;
             }
@@ -57,6 +140,9 @@ impl<'a, 'g> Check<'a, 'g> {
                 (checked, observer, dispose),
             )?;
         }
+        if let Some((route, name, _)) = once {
+            self.record_once_call(route, name, closed_once)?;
+        }
         if !settled {
             self.pending(node, ResultUseBlocker::CallBoundary)?;
             // Argument evaluation is separate from the conditional winner.
@@ -66,6 +152,9 @@ impl<'a, 'g> Check<'a, 'g> {
             } else {
                 self.singleton(Residence::default())
             };
+        }
+        if scoped && self.fresh_result_slot(&value.ty).is_some() {
+            return Ok(states);
         }
         self.call_output(node, value, states)
     }
@@ -110,12 +199,66 @@ impl<'a, 'g> Check<'a, 'g> {
                 }
                 state.observe(*owner, path, self.budget)?;
             }
-            let mutable_reference = self.expression_facts(argument)?.is_some_and(|value| {
-                matches!(value.ty.as_ref(), TypeTerm::Reference { mutable: true, .. })
+            let ty = self
+                .expression_facts(argument)?
+                .map(|value| value.ty.as_ref());
+            let bool_descriptor = match ty {
+                Some(ty) => {
+                    retained_bool_contents_type(ty).is_some()
+                        || retained_record_contents(self.inventory, ty, self.budget)?.is_some()
+                }
+                None => false,
+            };
+            let mutable_referent = ty.and_then(|ty| match ty {
+                TypeTerm::Reference {
+                    mutable: true,
+                    referent,
+                } => Some(referent.as_ref()),
+                _ => None,
             });
+            let primitive_tuple = if !referents.is_empty()
+                && !observer
+                && let Some(TypeTerm::Tuple(elements)) = mutable_referent
+            {
+                self.budget.step(elements.len())?;
+                elements
+                    .iter()
+                    .all(|element| matches!(element.as_ref(), TypeTerm::Primitive(_)))
+            } else {
+                false
+            };
             for address @ (owner, _) in referents {
-                if observer && exact.is_none() || mutable_reference && !observer {
-                    self.forget_address(state, &address, argument)?;
+                if observer && exact.is_none() || mutable_referent.is_some() && !observer {
+                    let boolean_storage =
+                        primitive_tuple || matches!(mutable_referent, Some(TypeTerm::Primitive(_)));
+                    let exact_descriptor = if bool_descriptor && let Some(exact) = &exact {
+                        self.budget.step(1 + exact.1.len().min(address.1.len()))?;
+                        exact == &address
+                    } else {
+                        false
+                    };
+                    if boolean_storage || exact_descriptor {
+                        // Mutation can invalidate Boolean refinements in
+                        // primitive storage or an exact descriptor alias.
+                        // Neither exception acknowledges a Result residence.
+                        let affected = state.take(address.0, &address.1, self.budget)?;
+                        self.budget.step(affected.len())?;
+                        let stale = |entry: &Located<'g>| match &entry.content {
+                            Content::BooleanCopy(_) => true,
+                            Content::Test(tag, _) if boolean_storage => {
+                                matches!(tag.as_ref(), Constructor::Boolean(_))
+                            }
+                            Content::Alias(_) | Content::PossibleAlias(_) => exact_descriptor,
+                            // Preserve ordinary hint invalidation on tuple storage.
+                            Content::CallerBoolOrigin(_) | Content::ConsumedPair => primitive_tuple,
+                            _ => false,
+                        };
+                        if affected.iter().any(|entry| !stale(entry)) {
+                            self.pending(argument, ResultUseBlocker::Storage)?;
+                        }
+                    } else {
+                        self.forget_address(state, &address, argument)?;
+                    }
                 } else if !observer && borrows_can_escape {
                     state.store(
                         Root::Temporary(node),
@@ -201,6 +344,32 @@ impl<'a, 'g> Check<'a, 'g> {
         // The typed invocation identifies the receiver. Its contract alone does
         // not prove Result use for an erased callable or for owned captures.
         let syntax = &self.module.syntax.nodes[node];
+        let pair_receiver = if syntax.kind == NodeKind::Call
+            && syntax.children.as_slice() == [receiver]
+            && invocation.mode == crate::analysis::InvocationMode::Once
+            && invocation.access == Access::Owned
+            && invocation.assumption.is_none()
+            && let Some(path) = &invocation.path
+            && path.root.kind == DeclarationKind::Binding
+            && path.projections.is_empty()
+            && let TypeTerm::Tuple(elements) = value.ty.as_ref()
+            && elements.len() == 2
+        {
+            let name = self.ungroup_value(receiver)?;
+            self.budget.step(3)?;
+            (self.module.syntax.nodes[name].kind == NodeKind::ValueReference
+                && elements.iter().all(|element| match element.as_ref() {
+                    TypeTerm::Primitive(_) => true,
+                    TypeTerm::Reference {
+                        mutable: false,
+                        referent,
+                    } => matches!(referent.as_ref(), TypeTerm::Primitive(_)),
+                    _ => false,
+                }))
+            .then_some(Root::Local(path.root))
+        } else {
+            None
+        };
         let arguments = if syntax.kind == NodeKind::Call {
             &syntax.children[1..]
         } else {
@@ -230,7 +399,22 @@ impl<'a, 'g> Check<'a, 'g> {
         };
         let root = Root::Temporary(receiver);
         let mut states = Vec::new();
+        let mut repeated = Vec::new();
         for mut state in initial {
+            if let Some(local) = pair_receiver
+                && self
+                    .address(&state, invocation.path.as_ref())?
+                    .is_some_and(|(exact, parts)| exact == local && parts.is_empty())
+                && matches!(state.contents(local, &[], self.budget)?.as_slice(), [value]
+                    if value.component.is_empty() && matches!(value.content, Content::ConsumedPair))
+            {
+                // No environment remains to evaluate and there are no
+                // Result inputs or outputs. Keep checking unrelated
+                // residences; M5 diagnoses the invalid ownership use.
+                self.budget.reserve(1)?;
+                repeated.push(state);
+                continue;
+            }
             if invocation.mode != crate::analysis::InvocationMode::Once
                 && let Some(address) = self.address(&state, invocation.path.as_ref())?
             {
@@ -247,11 +431,30 @@ impl<'a, 'g> Check<'a, 'g> {
             let address = state
                 .alias(root, &[], self.budget)?
                 .unwrap_or((root, Vec::new()));
+            let values = state.contents(address.0, &address.1, self.budget)?;
+            let mut consumed = None;
+            if let Some(local) = pair_receiver
+                && address.0 == root
+                && address.1.is_empty()
+                && let [value] = values.as_slice()
+                && value.component.is_empty()
+                && let Content::Callable(origin) = value.content
+                && self
+                    .address(state, invocation.path.as_ref())?
+                    .is_some_and(|(exact, parts)| exact == local && parts.is_empty())
+                && state.contents(local, &[], self.budget)?.is_empty()
+                && let Some(arrow) = self
+                    .facts(origin)?
+                    .and_then(|f| f.callable.as_ref()?.arrow.as_deref())
+                    .filter(|arrow| arrow.site.node == origin && arrow.premise.is_none())
+                && self.primitive_capture_pair(origin, arrow)?
+            {
+                consumed = Some(local);
+            }
             let checked = if invocation.assumption.is_some() {
-                let receiver = state.contents(address.0, &address.1, self.budget)?;
-                self.symbolic_callback(invocation, &receiver)?
+                self.symbolic_callback(invocation, &values)?
             } else {
-                self.prove_at(state, &address, invocation.mode, depth + 1)?
+                self.prove_actual(values, invocation.mode, depth + 1)?
             };
             for referent in state.aliases_under(address.0, &address.1, self.budget)? {
                 self.forget_address(state, &referent, node)?;
@@ -260,8 +463,11 @@ impl<'a, 'g> Check<'a, 'g> {
             self.finish_call(node, value, state, args(), (checked, false, false))?;
             if !checked {
                 self.pending(node, ResultUseBlocker::CallBoundary)?;
+            } else if let Some(local) = consumed {
+                state.store(local, &[], Content::ConsumedPair, self.budget)?;
             }
         }
+        states.append(&mut repeated);
         self.call_output(node, value, states)
     }
 }

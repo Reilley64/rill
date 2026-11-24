@@ -16,6 +16,42 @@ pub(in crate::analysis) struct CollectionCore<'g> {
     pub protection: [Option<CollectionProtection<'g>>; OPERATIONS.len()],
 }
 
+impl CollectionCore<'_> {
+    /// No `Overlap` verdict on any region (metering rule 8).
+    pub(super) fn publishes_nothing_at_limit(&self) -> bool {
+        let Self {
+            protection,
+            // Roles and artifacts: facts, not findings.
+            list: _list,
+            iteration: _iteration,
+            iterators: _iterators,
+            provider_artifact: _provider_artifact,
+            representation_artifact: _representation_artifact,
+        } = self;
+        protection
+            .iter()
+            .flatten()
+            .all(CollectionProtection::publishes_nothing_at_limit)
+    }
+}
+
+impl CollectionProtection<'_> {
+    /// No `Overlap` verdict. Every field is named, so a new one fails to
+    /// compile until it is decided here (metering rule 8).
+    fn publishes_nothing_at_limit(&self) -> bool {
+        let Self {
+            coverage,
+            // The scope's identity, operation and provider: facts.
+            family: _family,
+            owner: _owner,
+            operation: _operation,
+            provider: _provider,
+            bridge: _bridge,
+        } = self;
+        *coverage != OwnershipCoverage::Overlap
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub(in crate::analysis) struct IterationCore<'g> {
     pub iterate: &'g Declaration,

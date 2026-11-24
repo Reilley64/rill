@@ -8,7 +8,7 @@ use crate::analysis::scalars::{
 };
 use crate::analysis::{
     Binder, DeclarationFacts, DeclarationId, DeclarationShape, MemberType, Payload, Substitution,
-    Type, TypeTerm,
+    Type, TypeTerm, retained_bool_contents_type, retained_record_contents,
 };
 use crate::loader::{DeclarationKind, Module, ModuleKey};
 use crate::parser::{NodeId, NodeKind};
@@ -20,8 +20,11 @@ mod callbacks;
 mod calls;
 mod control;
 mod loops;
+mod once;
+mod pairs;
 mod patterns;
 mod releases;
+mod retained;
 mod shape;
 mod storage;
 mod values;
@@ -30,7 +33,7 @@ use loops::LoopExits;
 #[cfg(test)]
 mod tests;
 pub use storage::ResultComponent;
-use storage::{Address, Content, Located, Occurrence, Residence, Root};
+use storage::{Address, Content, Located, Occurrence, OptionListSource, Residence, Root};
 use values::PlaceStorage;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -71,12 +74,71 @@ pub struct PendingResultUse<'g> {
     pub blocker: ResultUseBlocker,
 }
 
+pub(in crate::analysis) use pairs::{PairCall, PairChild};
+pub use pairs::{ScopedJoinCall, ScopedJoinReference, ScopedJoinSlot};
+
 #[derive(Debug, Default)]
 pub struct ResultUseReport<'g> {
     discards: Vec<ResultDiscard<'g>>,
     pending: Vec<PendingResultUse<'g>>,
+    // Temporary until the integrated analysis attaches each proof directly to
+    // its originating call. The key indexes this report's typed node array.
+    pair_calls: BTreeMap<usize, pairs::CheckedTransfer<'g>>,
+    routine_bound: bool,
+    fresh_option_iterators: Vec<(&'g DeclarationId, &'g DeclarationId, NodeId)>,
 }
 impl<'g> ResultUseReport<'g> {
+    pub(super) fn attach_pair_calls(
+        &mut self,
+        bodies: &mut GenericReport<'g>,
+        budget: &mut Budget,
+    ) -> Work<()> {
+        budget.step(self.pair_calls.len())?;
+        for (index, proof) in std::mem::take(&mut self.pair_calls) {
+            let NodeFactKind::Expression(facts) = &mut bodies.typed_node_mut(index).kind else {
+                unreachable!("proved call expression")
+            };
+            let call = facts.call.as_mut().expect("proved call");
+            match proof {
+                pairs::CheckedTransfer::Serial(proof) => call.list_arrows = Some(proof),
+                pairs::CheckedTransfer::Scoped(proof) => call.scoped_join = Some(proof),
+            }
+        }
+        Ok(())
+    }
+
+    pub(super) fn attach_option_iterators(
+        &mut self,
+        inventory: &mut OrdinaryAnalysis<'g>,
+        budget: &mut Budget,
+    ) -> Work<()> {
+        for (function, formal, site) in std::mem::take(&mut self.fresh_option_iterators) {
+            inventory.mark_option_iterator(function, formal, site, budget)?;
+        }
+        Ok(())
+    }
+
+    pub(super) fn routine_bound(&self) -> bool {
+        self.routine_bound
+    }
+
+    /// A `ResourceLimit` report publishes no finding (metering rule 8).
+    pub(super) fn withhold_findings(&mut self) {
+        self.discards.clear();
+    }
+
+    /// No Result discard (metering rule 8). `pending` is a blocker list.
+    pub(super) fn publishes_nothing_at_limit(&self) -> bool {
+        let Self {
+            discards,
+            pending: _pending,
+            pair_calls: _pair_calls,
+            routine_bound: _routine_bound,
+            fresh_option_iterators: _fresh_option_iterators,
+        } = self;
+        discards.is_empty()
+    }
+
     pub fn discards(&self) -> &[ResultDiscard<'g>] {
         &self.discards
     }
@@ -85,8 +147,21 @@ impl<'g> ResultUseReport<'g> {
     }
 }
 
-type Nodes<'a, 'g> = BTreeMap<(&'g ModuleKey, NodeId), &'a NodeFacts<'g>>;
+type Nodes<'a, 'g> = BTreeMap<(&'g ModuleKey, NodeId), (usize, &'a NodeFacts<'g>)>;
+
 type Alternatives<'g> = Vec<Residence<'g>>;
+
+#[derive(Clone, Copy)]
+enum ValueUse {
+    Used,
+    Statement,
+    /// The scrutinee of a Boolean match that has no typed source place.
+    Scrutinee,
+    Binding {
+        pattern: NodeId,
+        depth: usize,
+    },
+}
 
 #[derive(Clone, Copy)]
 pub(super) struct Inputs<'a, 'g> {
@@ -97,6 +172,7 @@ pub(super) struct Inputs<'a, 'g> {
     pub collections: super::CollectionCore<'g>,
     pub native: &'a super::ownership::Report<'g>,
     pub outcome_observer: Option<&'g DeclarationId>,
+    pub routine: Option<super::RoutineRole<'g>>,
 }
 
 #[derive(Clone, Copy)]
@@ -114,11 +190,11 @@ pub(super) fn check<'g>(
     report: &mut ResultUseReport<'g>,
 ) -> Work<()> {
     let mut nodes = BTreeMap::new();
-    for facts in bodies.typed_nodes() {
+    for (index, facts) in bodies.typed_nodes().iter().enumerate() {
         budget.reserve(1)?;
         nodes
             .entry((facts.site.module, facts.site.node))
-            .or_insert(facts);
+            .or_insert((index, facts));
     }
     let mut checked = BTreeSet::new();
     for body in bodies.checked_bodies() {
@@ -138,6 +214,7 @@ pub(super) fn check<'g>(
             }
         }
     }
+    let mut pairs = BTreeMap::new();
     let mut implementation_headers = BTreeMap::new();
     let mut families = BTreeSet::new();
     for source in inventory.graph().implementations() {
@@ -151,11 +228,36 @@ pub(super) fn check<'g>(
                     == crate::analysis::ordinary::Compatibility::Compatible
                 {
                     budget.reserve(1)?;
-                    implementation_headers
-                        .insert(&implementation.source.declaration, &implementation.header);
+                    let id = &implementation.source.declaration;
+                    implementation_headers.insert(id, &implementation.header);
+                    if implementation.header.binders.len() == 4
+                        && checked.contains(id)
+                        && let Some(metadata) = inventory.headers().get(id)
+                        && metadata.requirements.len() == 6
+                        && let Some(slots) = pairs::summary(
+                            inventory,
+                            &implementation.header,
+                            metadata,
+                            bodies,
+                            &nodes,
+                            budget,
+                        )?
+                    {
+                        budget.reserve(2)?;
+                        pairs.insert(id, slots);
+                    }
                 }
             }
         }
+    }
+    let mut scoped = None;
+    if let Some(role) = core.routine
+        && checked.contains(&role.implementation.id)
+        && let Some(header) = implementation_headers.get(&role.implementation.id)
+        && let Some(summary) = pairs::scoped_summary(inventory, role, header, &nodes, budget)?
+    {
+        scoped = Some((role, summary));
+        report.routine_bound = true;
     }
     let release_parameters = releases::check(
         inventory,
@@ -167,6 +269,9 @@ pub(super) fn check<'g>(
     )?;
     let sources = Sources {
         inventory,
+        bodies,
+        pairs: &pairs,
+        scoped,
         nodes: &nodes,
         checked: &checked,
         variants: &variants,
@@ -219,6 +324,9 @@ pub(super) fn check<'g>(
 #[derive(Clone, Copy)]
 struct Sources<'a, 'g> {
     inventory: &'a OrdinaryAnalysis<'g>,
+    bodies: &'a GenericReport<'g>,
+    pairs: &'a pairs::PairBodies<'g>,
+    scoped: Option<(super::RoutineRole<'g>, pairs::PairBody<'g>)>,
     nodes: &'a Nodes<'a, 'g>,
     checked: &'a BTreeSet<&'g DeclarationId>,
     variants: &'a BTreeMap<&'g DeclarationId, &'a Payload<'g>>,
@@ -229,6 +337,9 @@ struct Sources<'a, 'g> {
 
 struct Check<'a, 'g> {
     inventory: &'a OrdinaryAnalysis<'g>,
+    bodies: &'a GenericReport<'g>,
+    pairs: &'a pairs::PairBodies<'g>,
+    scoped: Option<(super::RoutineRole<'g>, pairs::PairBody<'g>)>,
     nodes: &'a Nodes<'a, 'g>,
     checked: &'a BTreeSet<&'g DeclarationId>,
     variants: &'a BTreeMap<&'g DeclarationId, &'a Payload<'g>>,
@@ -241,16 +352,27 @@ struct Check<'a, 'g> {
     report: &'a mut ResultUseReport<'g>,
     loops: Vec<LoopExits<'g>>,
     match_views: Vec<(Address<'g>, Root<'g>)>,
+    wildcard_sources: Vec<Address<'g>>,
+    // The root of the latest assignment or `&mut` evaluated, from the place facts those
+    // already read. `parameter_copy_source` rejects a local it names without a scan.
+    last_written: Option<&'g DeclarationId>,
     checked_arrows: BTreeSet<NodeId>,
     dead_depth: usize,
     dead_start: Option<usize>,
     contracts: &'a CallbackContract<'g>,
+    once_calls: once::ClosedCalls<'g>,
+    once_return: Option<NodeId>,
     parametric: Option<CallbackEntry<'g>>,
     input_variant: Option<bool>,
     invoked_variants: [bool; 2],
     substitution: Option<&'a Substitutions<'a, 'g>>,
     proving_callable: bool,
     has_pending: bool,
+    current_parameters: &'a [MemberType<'g>],
+    current_option_guard: Option<NodeId>,
+    // Direct top-level statement depth and the reached fresh source, if any.
+    option_iterator: Option<(usize, Option<(&'g DeclarationId, NodeId)>)>,
+    nested_write_body: Option<NodeId>,
 }
 
 impl<'a, 'g> Check<'a, 'g> {
@@ -268,6 +390,9 @@ impl<'a, 'g> Check<'a, 'g> {
         }
         Ok(Self {
             inventory: sources.inventory,
+            bodies: sources.bodies,
+            pairs: sources.pairs,
+            scoped: sources.scoped,
             nodes: sources.nodes,
             checked: sources.checked,
             variants: sources.variants,
@@ -280,16 +405,24 @@ impl<'a, 'g> Check<'a, 'g> {
             report,
             loops: Vec::new(),
             match_views: Vec::new(),
+            wildcard_sources: Vec::new(),
+            last_written: None,
             checked_arrows: BTreeSet::new(),
             dead_depth: 0,
             dead_start: None,
             contracts,
+            once_calls: BTreeMap::new(),
+            once_return: None,
             parametric: None,
             input_variant: None,
             invoked_variants: [false; 2],
             substitution: None,
             proving_callable: false,
             has_pending: false,
+            current_parameters: &[],
+            current_option_guard: None,
+            option_iterator: None,
+            nested_write_body: None,
         })
     }
 
@@ -312,7 +445,10 @@ impl<'a, 'g> Check<'a, 'g> {
 
     fn facts(&mut self, node: NodeId) -> Work<Option<&'a NodeFacts<'g>>> {
         self.budget.step(1)?;
-        Ok(self.nodes.get(&(&self.module.key, node)).copied())
+        Ok(self
+            .nodes
+            .get(&(&self.module.key, node))
+            .map(|&(_, fact)| fact))
     }
 
     fn pending(&mut self, node: NodeId, blocker: ResultUseBlocker) -> Work<()> {
@@ -429,6 +565,10 @@ impl<'a, 'g> Check<'a, 'g> {
             match declaration.id.kind {
                 DeclarationKind::Function | DeclarationKind::Implementation => {
                     if syntax.children.get(1).is_none()
+                        || self.pairs.contains_key(&declaration.id)
+                        || self
+                            .scoped
+                            .is_some_and(|(role, _)| role.implementation.id == declaration.id)
                         || self
                             .contracts
                             .get(&declaration.id)
@@ -456,7 +596,7 @@ impl<'a, 'g> Check<'a, 'g> {
         for state in self.block(node, Residence::default(), 1)? {
             self.exit(state, node)?;
         }
-        Ok(())
+        self.finish_once_calls()
     }
 
     fn exit(&mut self, mut state: Residence<'g>, node: NodeId) -> Work<()> {
@@ -576,7 +716,15 @@ impl<'a, 'g> Check<'a, 'g> {
             | NodeKind::Import => self.singleton(state),
             NodeKind::Binding { .. } => {
                 let source = *children.last().unwrap();
-                let alternatives = self.expression(source, state, depth + 1)?;
+                let alternatives = self.expression_with_use(
+                    source,
+                    state,
+                    depth + 1,
+                    ValueUse::Binding {
+                        pattern: children[0],
+                        depth: depth + 1,
+                    },
+                )?;
                 let facts = self.facts(node)?;
                 let mut running = Vec::new();
                 for mut state in alternatives {
@@ -610,15 +758,44 @@ impl<'a, 'g> Check<'a, 'g> {
             }
             NodeKind::Assignment(_) => {
                 let (left, right) = (children[0], children[1]);
-                let path = self.facts(left)?.and_then(|f| match &f.kind {
-                    NodeFactKind::Expression(e) => e.path.as_ref(),
-                    _ => None,
-                });
+                let target = self.expression_facts(left)?;
+                let path = target.and_then(|expression| expression.path.as_ref());
                 let checked = self.facts(node)?.is_some();
+                // A write the source language forbids has no facts: it names no mutable local.
+                if checked {
+                    self.last_written = path.map(|path| path.root).or(self.last_written);
+                }
+                let plain_dereference = path.filter(|path| {
+                    checked
+                        && syntax.kind == NodeKind::Assignment("=")
+                        && path.projections.as_slice() == [PathProjection::Dereference]
+                });
+                let plain_i32_compound = path.filter(|path| {
+                    checked
+                        && syntax.kind == NodeKind::Assignment("+=")
+                        && path.projections.as_slice() == [PathProjection::Dereference]
+                        && target.is_some_and(|target| {
+                            matches!(target.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32")
+                        })
+                });
                 let mut alternatives = self.expression(right, state, depth + 1)?;
                 for state in &mut alternatives {
-                    let incoming = state.take(Root::Temporary(right), &[], self.budget)?;
-                    if let Some(target @ (root, path)) = &self.address(state, path)?
+                    if let Some(path) = path {
+                        state.access_option_list(path.root, None, self.budget)?;
+                    }
+                    let from = Root::Temporary(right);
+                    if checked
+                        && state.has_boolean_copies()
+                        && let Some(path) = path.filter(|path| path.projections.is_empty())
+                        && let Some((root, components)) = self.address(state, Some(path))?
+                        && components.is_empty()
+                        && state.transfer_boolean_copy(from, root, true, self.budget)?
+                    {
+                        continue;
+                    }
+                    let incoming = state.take(from, &[], self.budget)?;
+                    let storage = self.place_storage(state, path)?;
+                    if let PlaceStorage::Exact(target @ (root, path)) = &storage
                         && checked
                     {
                         let displaced = state.take(*root, path, self.budget)?;
@@ -630,16 +807,43 @@ impl<'a, 'g> Check<'a, 'g> {
                             ResultDiscardKind::Replacement,
                         )?;
                         state.install(incoming, *root, path, self.budget)?;
+                    } else if let Some(path) = plain_dereference
+                        && matches!(&storage, PlaceStorage::Indirect(locations) if locations.is_empty())
+                        && self.caller_bool_storage(state, path.root)?
+                    {
+                        // No local address or Result occurrence can reside in this
+                        // scalar descriptor. The ownership pass checks its backing.
+                        self.budget.step(incoming.len())?;
+                        if incoming.iter().any(|entry| {
+                            matches!(entry.content, Content::Result(_) | Content::Unclassified(_))
+                        }) {
+                            self.pending(node, ResultUseBlocker::Storage)?;
+                        }
+                    } else if checked
+                        && syntax.kind == NodeKind::Assignment("=")
+                        && matches!(&storage, PlaceStorage::Indirect(addresses) if addresses.is_empty())
+                        && let Some(target) = target
+                        && self.terminal_nested_bool_write(node, target, state, &incoming, depth)?
+                    {
+                        // No displaced Result-use state to update; ownership still checks the store.
+                    } else if plain_i32_compound.is_some()
+                        && matches!(&storage, PlaceStorage::Indirect(locations) if locations.is_empty())
+                    {
+                        // A compound write through an exclusive `i32` descriptor
+                        // replaces a closed scalar: no Result or Boolean fact can
+                        // reside there. The ownership pass checks the backing.
                     } else {
                         self.pending(node, ResultUseBlocker::Storage)?;
-                        for address in self.place_storage(state, path)?.addresses() {
+                        for address in storage.addresses() {
                             self.forget_address(state, &address, node)?;
                         }
                     }
                 }
                 Ok(alternatives)
             }
-            NodeKind::ExpressionStatement => self.expression(children[0], state, depth + 1),
+            NodeKind::ExpressionStatement => {
+                self.expression_with_use(children[0], state, depth + 1, ValueUse::Statement)
+            }
             NodeKind::Return => {
                 let mut alternatives = if let Some(&value) = children.first() {
                     let mut alternatives = self.expression(value, state, depth + 1)?;
@@ -661,8 +865,13 @@ impl<'a, 'g> Check<'a, 'g> {
                 Ok(Vec::new())
             }
             NodeKind::IfStatement => self.conditional(node, state, false, depth + 1),
-            NodeKind::Guard => self.guard(node, state, depth + 1),
             NodeKind::While => self.while_loop(node, state, depth + 1),
+            NodeKind::Guard => {
+                let previous = self.current_option_guard.replace(node);
+                let result = self.guard(node, state, depth + 1);
+                self.current_option_guard = previous;
+                result
+            }
             NodeKind::For => self.for_loop(node, state, depth + 1),
             NodeKind::Break | NodeKind::Continue => self.loop_jump(node, state),
             _ => {
@@ -703,8 +912,18 @@ impl<'a, 'g> Check<'a, 'g> {
     fn expression(
         &mut self,
         node: NodeId,
+        state: Residence<'g>,
+        depth: usize,
+    ) -> Work<Alternatives<'g>> {
+        self.expression_with_use(node, state, depth, ValueUse::Used)
+    }
+
+    fn expression_with_use(
+        &mut self,
+        node: NodeId,
         mut state: Residence<'g>,
         depth: usize,
+        usage: ValueUse,
     ) -> Work<Alternatives<'g>> {
         self.depth(depth)?;
         let Some(facts) = self.facts(node)? else {
@@ -715,10 +934,13 @@ impl<'a, 'g> Check<'a, 'g> {
             self.pending(node, ResultUseBlocker::TypedInput)?;
             return self.unsettled(node, depth + 1);
         };
+        if let Some(path) = &value.path {
+            state.access_option_list(path.root, None, self.budget)?;
+        }
         let syntax = &self.module.syntax.nodes[node];
         let root = Root::Temporary(node);
         if let Some(address) = self.address(&state, value.path.as_ref())? {
-            self.read_place(node, value, &mut state, address)?;
+            self.read_place(node, value, &mut state, address, usage)?;
             return self.singleton(state);
         }
         if facts
@@ -885,16 +1107,35 @@ impl<'a, 'g> Check<'a, 'g> {
                     return self.interpolate(node, holes, state, depth + 1);
                 }
                 DataExpression::Match(matched) => {
-                    return self.match_expression(node, matched, state, depth + 1);
+                    let unused_bool = matches!(value.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "bool")
+                        && self.discarded_value(usage)?;
+                    return self.match_expression(node, matched, state, depth + 1, unused_bool);
                 }
                 _ => {}
             }
         }
         match syntax.kind {
-            NodeKind::Arrow => self.arrow(node, facts, state, depth + 1),
+            NodeKind::Arrow => {
+                if state.has_option_lists()
+                    && let Some(arrow) = facts.callable.as_ref().and_then(|f| f.arrow.as_ref())
+                {
+                    for capture in &arrow.captures {
+                        self.budget.step(1)?;
+                        state.access_option_list(capture.path.root, None, self.budget)?;
+                    }
+                }
+                self.arrow(node, facts, state, depth + 1)
+            }
             NodeKind::Group => {
                 let alternatives = self.singleton(state)?;
-                self.component(alternatives, syntax.children[0], root, &[], depth + 1)
+                self.component_with_use(
+                    alternatives,
+                    syntax.children[0],
+                    root,
+                    &[],
+                    depth + 1,
+                    usage,
+                )
             }
             NodeKind::IfExpression => self.conditional(node, state, true, depth + 1),
             NodeKind::Template
@@ -906,7 +1147,7 @@ impl<'a, 'g> Check<'a, 'g> {
                 self.singleton(state)
             }
             NodeKind::Prefix("*") => {
-                self.dereference(node, syntax.children[0], value, state, depth + 1)
+                self.dereference(node, syntax.children[0], value, state, depth + 1, usage)
             }
             NodeKind::Literal | NodeKind::ValueReference => {
                 use crate::analysis::scalars::BooleanSet;
@@ -925,7 +1166,23 @@ impl<'a, 'g> Check<'a, 'g> {
                 let operand = syntax.children[0];
                 let operand_facts = self.expression_facts(operand)?;
                 let path = operand_facts.and_then(|e| e.path.as_ref());
+                if syntax.kind == NodeKind::Prefix("&mut") {
+                    self.last_written = path.map(|path| path.root).or(self.last_written);
+                }
                 let place = self.place_storage(&state, path)?;
+                if state.has_option_lists()
+                    && let Some(path) = path
+                {
+                    let inspection = if syntax.kind == NodeKind::Prefix("&")
+                        && matches!(&place, PlaceStorage::Exact((Root::Local(id), component))
+                            if std::ptr::eq(*id, path.root) && component.is_empty())
+                    {
+                        self.option_list_inspection(node)
+                    } else {
+                        None
+                    };
+                    state.access_option_list(path.root, inspection, self.budget)?;
+                }
                 if let PlaceStorage::Exact(address) = place {
                     state.store(root, &[], Content::Alias(address), self.budget)?;
                     return self.singleton(state);
@@ -1043,6 +1300,34 @@ impl<'a, 'g> Check<'a, 'g> {
         Ok(normal)
     }
 
+    fn caller_bool_storage(
+        &mut self,
+        state: &Residence<'g>,
+        root: &'g DeclarationId,
+    ) -> Work<bool> {
+        let origin = match root.kind {
+            DeclarationKind::Parameter => Some(root),
+            DeclarationKind::Binding => state.caller_bool_origin(Root::Local(root), self.budget)?,
+            _ => None,
+        };
+        let Some(origin) = origin else {
+            return Ok(false);
+        };
+        // Only the current named body may use this handoff; a captured
+        // descriptor does not turn into one of the closure's own parameters.
+        self.budget.step(self.current_parameters.len())?;
+        let Some(parameter) = self
+            .current_parameters
+            .iter()
+            .find(|parameter| &parameter.declaration.id == origin)
+        else {
+            return Ok(false);
+        };
+        // A reference to a record is retained contents too (ri-1up).
+        Ok(retained_bool_contents_type(&parameter.ty).is_some()
+            || retained_record_contents(self.inventory, &parameter.ty, self.budget)?.is_some())
+    }
+
     fn component(
         &mut self,
         alternatives: Alternatives<'g>,
@@ -1051,10 +1336,22 @@ impl<'a, 'g> Check<'a, 'g> {
         path: &[ResultComponent<'g>],
         depth: usize,
     ) -> Work<Alternatives<'g>> {
+        self.component_with_use(alternatives, child, root, path, depth, ValueUse::Used)
+    }
+
+    fn component_with_use(
+        &mut self,
+        alternatives: Alternatives<'g>,
+        child: NodeId,
+        root: Root<'g>,
+        path: &[ResultComponent<'g>],
+        depth: usize,
+        usage: ValueUse,
+    ) -> Work<Alternatives<'g>> {
         self.budget.step(1)?;
         let mut next = Vec::new();
         for state in alternatives {
-            let mut evaluated = self.expression(child, state, depth)?;
+            let mut evaluated = self.expression_with_use(child, state, depth, usage)?;
             for state in &mut evaluated {
                 self.move_value(state, Root::Temporary(child), &[], root, path)?;
             }

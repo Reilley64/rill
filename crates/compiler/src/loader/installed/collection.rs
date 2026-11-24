@@ -73,6 +73,14 @@ pub struct CollectionArtifact<'g> {
 }
 
 impl<'g> CollectionArtifact<'g> {
+    pub(crate) fn same_capture(self, other: Self) -> bool {
+        ptr::eq(self.context, other.context) && ptr::eq(self.executable, other.executable)
+    }
+
+    pub(crate) fn same_link(self, other: Self) -> bool {
+        self.same_capture(other) && self.link == other.link
+    }
+
     pub fn context(self) -> &'g GraphId {
         self.context
     }

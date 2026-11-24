@@ -1,0 +1,43 @@
+
+#[test]
+fn zz_measure() {
+    installed("zz_measure", |request| {
+        const MEASURE_IMPORTS: &str = r#"
+            import std::{List, Result, Err};
+            import std::channel::{Receiver, Sender};
+            import std::convert::{into, tryInto};
+            import std::error::formatError;
+            import std::iter::iterate;
+            import std::mutex::LockGuard;
+            import std::number::ParseError;
+            import std::option::{Option, map as mapOption};
+            import std::result::{isOk, map as mapResult};
+            import std::shared::Shared;
+    "#;
+        let src = fs::read_to_string(std::env::var("MEASURE_SRC").unwrap()).unwrap();
+        let raw = std::env::var("MEASURE_RAW").is_ok();
+        fs::write(&request.entry, if raw { src } else { format!("{MEASURE_IMPORTS}\n{src}") }).unwrap();
+        let names = std::env::var("MEASURE_NAMES").unwrap_or_default();
+        let mut out = String::new();
+        for test_mode in [false, true] {
+            let request = InstalledRequest { test_mode, ..request.clone() };
+            let graph = loader::load_installed(request).unwrap();
+            let typed = analyze_typed(&graph, AnalysisLimits::default());
+            out += &format!("mode test={test_mode} typed {:?} {:?}\n", typed.completion(), typed.statistics());
+            let Some(receipt) = typed.receipt() else { continue };
+            let g = compiler::analysis::ownership::analyze_ownership(&receipt, AnalysisLimits::default());
+            out += &format!("  graph {:?} {:?} findings {:?}\n", g.completion(), g.statistics(), g.findings().iter().map(|f| f.code()).collect::<Vec<_>>());
+            let module = graph.modules().iter().find(|m| m.key.origin == Origin::Application && m.key.path == "main.rill").unwrap();
+            for name in names.split(',').filter(|n| !n.is_empty()) {
+                let d = module.declarations.iter().find(|d| d.name.as_deref() == Some(name)).unwrap();
+                let r = lower_body(&receipt, module, &d.id, AnalysisLimits::default()).unwrap();
+                let root = g.roots().iter().find(|r| r.site().module == &module.key && r.site().node == d.node);
+                out += &format!("  {name}: {:?} {:?} blocked {:?} findings {:?} root {:?}\n", r.completion(), r.statistics(),
+                    r.blocked_at().map(|s| String::from_utf8_lossy(s.span.bytes()).into_owned()),
+                    r.findings().iter().map(|f| (f.code(), String::from_utf8_lossy(f.site.span.bytes()).into_owned())).collect::<Vec<_>>(),
+                    root.map(|r| (r.completion(), r.ordinary_completion())));
+            }
+        }
+        fs::write(std::env::var("MEASURE_OUT").unwrap(), out).unwrap();
+    });
+}

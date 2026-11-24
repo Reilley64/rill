@@ -1,4 +1,7 @@
 //! Installed primitive and formatting facts, not Rill execution.
+#[path = "support/limit.rs"]
+mod limit;
+
 use compiler::analysis::scalars::data::DataExpression;
 use compiler::analysis::scalars::generics::{GoalJudgment, GoalState};
 use compiler::analysis::scalars::{BodyOwner, NodeFactKind, ScalarFindingKind};
@@ -104,10 +107,7 @@ fn primitive_copy_and_dispose(prefix: &Path, test_mode: bool) {
         max_work: exact.max_work - 1,
         ..exact
     };
-    assert_eq!(
-        analyze_typed(&graph, short).completion(),
-        TypedCompletion::ResourceLimit
-    );
+    limit::assert_typed_limit(&analyze_typed(&graph, short));
     assert_eq!(report.primitive_protection().len(), 30);
     assert!(
         report
@@ -440,6 +440,27 @@ fn protected_primitive_replacement(prefix: &Path, test_mode: bool) {
     };
     assert_eq!(overlap.code(), "R0500");
     assert_eq!(overlap.implementation.id.module.path, "main.rill");
+    limit::assert_typed_limits_below(&graph, &report);
+    // Ruling 19 (1): the `Overlap` verdict discloses an R0500 finding, so it is
+    // `Overlap` at the exact cap and `Pending` one work short (as for ownership,
+    // `m4_8_ownership.rs`).
+    let exact = report.statistics();
+    let short = analyze_typed(
+        &graph,
+        AnalysisLimits {
+            max_work: exact.work - 1,
+            max_entries: exact.entries,
+            max_depth: exact.max_depth,
+        },
+    );
+    limit::assert_typed_limit(&short);
+    let pending = short
+        .primitive_protection()
+        .iter()
+        .find(|p| p.role == PrimitiveRole::Copy && p.primitive == Primitive::I32)
+        .expect("the i32 copy scope one work short");
+    assert_eq!(pending.coverage, PrimitiveCoverage::Pending);
+    assert!(pending.overlaps.is_empty());
     let app = graph
         .modules()
         .iter()

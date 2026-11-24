@@ -1,0 +1,20 @@
+
+            import std::{List, Result, Err};
+            import std::channel::{Receiver, Sender};
+            import std::convert::{into, tryInto};
+            import std::error::formatError;
+            import std::iter::iterate;
+            import std::mutex::LockGuard;
+            import std::number::ParseError;
+            import std::option::{Option, map as mapOption};
+            import std::result::{isOk, map as mapResult};
+            import std::shared::Shared;
+    
+
+        function entryOnly(xs: List<i32>): i32 { return (&xs)[0u64]; }
+        function noop(): void {}
+        function across(xs: List<i32>, again: bool): void { noop(); while (again) { continue; } dispose(xs); }
+        function veto(xs: List<i32>, again: bool): void { let gate = again; while (gate) { continue; } dispose(xs); }
+        function impossible(xs: List<i32>, again: bool): void { while (again) { if (again) { break; } } }
+        function nested(xs: List<i32>, again: bool): void { { let view = &xs; while (again) { continue; } let last = view; } }
+    

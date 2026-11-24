@@ -1,4 +1,7 @@
 //! Ordinary input analysis against captured M3 graphs, without core admission.
+#[path = "support/limit.rs"]
+mod limit;
+
 use compiler::analysis::ordinary::{Completion, DeclarationIssue, analyze_ordinary};
 use compiler::analysis::{AnalysisLimits, Type, TypeTerm, analyze_declaration_types};
 use compiler::loader::{Graph, Limits, Prelude, Request, Selector, load};
@@ -543,10 +546,7 @@ fn exhausted_products_keep_known_headers_but_cannot_supply_negative_input_eviden
             ..exact
         },
     ] {
-        assert_eq!(
-            analyze_ordinary(&graph, short).completion(),
-            Completion::ResourceLimit
-        );
+        limit::assert_ordinary_limit(&graph, &analyze_ordinary(&graph, short));
     }
     let partial = analyze_ordinary(
         &graph,
@@ -555,7 +555,7 @@ fn exhausted_products_keep_known_headers_but_cannot_supply_negative_input_eviden
             ..exact
         },
     );
-    assert_eq!(partial.completion(), Completion::ResourceLimit);
+    limit::assert_ordinary_limit(&graph, &partial);
     let body = &partial.family(family_id).unwrap().unwrap().implementations[0];
     assert_eq!(
         body.source.declaration,
@@ -564,8 +564,7 @@ fn exhausted_products_keep_known_headers_but_cannot_supply_negative_input_eviden
     let e = named_type(&graph, "E");
     let selected =
         select_inputs(&partial, family_id, &vec![Established(e); 4], &[], limits).unwrap();
-    assert_eq!(selected.completion, Completion::ResourceLimit);
-    assert_eq!(selected.outcome, None);
+    limit::assert_selection_limit(&selected);
 }
 
 #[test]
@@ -685,8 +684,95 @@ fn wide_admission_products_charge_copies_to_work_with_entries_to_spare() {
             ..limits
         },
     );
-    assert_eq!(partial.completion(), Completion::ResourceLimit);
+    limit::assert_ordinary_limit(&graph, &partial);
     assert!(partial.statistics().entries < limits.max_entries);
     let partial_body = &partial.family(family_id).unwrap().unwrap().implementations[0];
     assert!(partial_body.alternatives.is_empty());
+}
+
+/// Metering rule 8: a `ResourceLimit` ordinary report publishes no finding in
+/// any list (type facts, declaration issues, header metadata). The exact cap
+/// publishes them; every cap below it, on each axis, publishes none.
+#[test]
+fn resource_limit_publishes_no_finding_list() {
+    use compiler::analysis::typed::{TypedCompletion, analyze_typed};
+    let sources = [
+        // A missing field type, an inline cycle, a missing value and two
+        // headers naming a missing type.
+        "type Gone = { x: Missing }; type Loop = { a: Loop }; let v: i32 = unknown;
+         function g<T = Absent>(x: Nope): T;",
+        "function f<T>(x: Missing<T>, y: Other): T; function k<T = Zed>(x: T): T;",
+    ];
+    for (n, source) in sources.into_iter().enumerate() {
+        let fixture = Fixture::new(source);
+        let graph = fixture.load();
+        let full = analyze_ordinary(&graph, AnalysisLimits::default());
+        assert_eq!(full.completion(), Completion::Incomplete);
+        let stats = full.statistics();
+        let exact = AnalysisLimits {
+            max_work: stats.work,
+            max_entries: stats.entries,
+            max_depth: stats.max_depth,
+        };
+        let replay = analyze_ordinary(&graph, exact);
+        assert_eq!(replay.completion(), Completion::Incomplete);
+        assert_eq!(replay.statistics(), stats);
+        assert_eq!(replay.type_facts().findings().count(), 2, "source {n}");
+        assert_eq!(
+            replay.declaration_issues().len(),
+            usize::from(n == 0),
+            "source {n}"
+        );
+        assert!(limit::header_finding(&graph, &replay), "source {n}");
+        for work in 0..stats.work {
+            let report = analyze_ordinary(
+                &graph,
+                AnalysisLimits {
+                    max_work: work,
+                    ..exact
+                },
+            );
+            limit::assert_ordinary_limit(&graph, &report);
+        }
+        for entries in 0..stats.entries {
+            let report = analyze_ordinary(
+                &graph,
+                AnalysisLimits {
+                    max_entries: entries,
+                    ..exact
+                },
+            );
+            limit::assert_ordinary_limit(&graph, &report);
+        }
+        for depth in 0..stats.max_depth {
+            let report = analyze_ordinary(
+                &graph,
+                AnalysisLimits {
+                    max_depth: depth,
+                    ..exact
+                },
+            );
+            limit::assert_ordinary_limit(&graph, &report);
+        }
+        // The typed report's inventory is the same ordinary analysis: it
+        // withholds its header metadata findings at `ResourceLimit` too.
+        let typed = analyze_typed(&graph, AnalysisLimits::default());
+        let typed_stats = typed.statistics();
+        for work in 0..typed_stats.work {
+            let report = analyze_typed(
+                &graph,
+                AnalysisLimits {
+                    max_work: work,
+                    ..AnalysisLimits::default()
+                },
+            );
+            if report.completion() == TypedCompletion::ResourceLimit {
+                limit::assert_typed_limit(&report);
+                assert!(
+                    !limit::header_finding(&graph, report.inventory()),
+                    "typed {work}"
+                );
+            }
+        }
+    }
 }

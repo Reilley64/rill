@@ -26,6 +26,7 @@ impl<'a, 'g> Check<'a, 'g> {
         }
         let root = Root::Temporary(node);
         state.store(root, &[], Content::Callable(node), self.budget)?;
+        let direct_pair = self.primitive_capture_pair(node, arrow)?;
         let mut acquired = BTreeSet::new();
         for capture in &arrow.captures {
             self.budget.step(1)?;
@@ -35,6 +36,20 @@ impl<'a, 'g> Check<'a, 'g> {
                 continue;
             }
             let storage = self.place_storage(&state, Some(&capture.path))?;
+            if direct_pair
+                && matches!(
+                    capture.form,
+                    CaptureForm::ExplicitBorrow { mutable: false }
+                        | CaptureForm::CarriedReference { mutable: false }
+                )
+                && matches!(storage, PlaceStorage::Exact((Root::Local(id), ref component))
+                    if id == capture.path.root && component.is_empty())
+            {
+                // This body only returns the shared primitive descriptors.
+                // No Result residence moves or becomes observable through them.
+                // The original capture facts still carry their loans to M5.
+                continue;
+            }
             if capture.form == CaptureForm::Value
                 && capture.demand == Some(InvocationMode::Once)
                 && capture.path.projections.is_empty()
@@ -83,6 +98,67 @@ impl<'a, 'g> Check<'a, 'g> {
         self.singleton(state)
     }
 
+    pub(super) fn primitive_capture_pair(
+        &mut self,
+        node: NodeId,
+        arrow: &ArrowFacts<'g>,
+    ) -> Work<bool> {
+        let [first, second] = arrow.captures.as_slice() else {
+            return Ok(false);
+        };
+        if !arrow.parameters.is_empty() || arrow.mode.is_none() {
+            return Ok(false);
+        }
+        self.budget.step(1)?;
+        let body = self.module.syntax.nodes[node].children[1];
+        let Some(DataExpression::Tuple { elements }) = self
+            .expression_facts(body)?
+            .and_then(|value| value.data.as_ref())
+        else {
+            return Ok(false);
+        };
+        let [left, right] = elements.as_slice() else {
+            return Ok(false);
+        };
+        let written = [self.ungroup_value(*left)?, self.ungroup_value(*right)?];
+        let a = self.ungroup_value(first.site.node)?;
+        let b = self.ungroup_value(second.site.node)?;
+        if written != [a, b] && written != [b, a] {
+            return Ok(false);
+        }
+        for (capture, source) in [(first, a), (second, b)] {
+            self.budget.step(1)?;
+            let kind = self.module.syntax.nodes[source].kind;
+            if !capture.reachable
+                || capture.through.is_some()
+                || !capture.path.projections.is_empty()
+                || !match (capture.form, kind, capture.ty.as_ref()) {
+                    (CaptureForm::Value, NodeKind::ValueReference, TypeTerm::Primitive(_)) => true,
+                    (
+                        CaptureForm::ExplicitBorrow { mutable: false },
+                        NodeKind::Prefix("&"),
+                        TypeTerm::Reference {
+                            mutable: false,
+                            referent,
+                        },
+                    )
+                    | (
+                        CaptureForm::CarriedReference { mutable: false },
+                        NodeKind::ValueReference,
+                        TypeTerm::Reference {
+                            mutable: false,
+                            referent,
+                        },
+                    ) => matches!(referent.as_ref(), TypeTerm::Primitive(_)),
+                    _ => false,
+                }
+            {
+                return Ok(false);
+            }
+        }
+        Ok(true)
+    }
+
     pub(super) fn arrow_body(
         &mut self,
         node: NodeId,
@@ -94,6 +170,7 @@ impl<'a, 'g> Check<'a, 'g> {
         let (head, body) = (children[0], children[1]);
         let parameters =
             &self.module.syntax.nodes[self.module.syntax.nodes[head].children[0]].children;
+        let previous = std::mem::take(&mut self.current_parameters);
         let mut entry = self.singleton(captures)?;
         for (&parameter, ty) in parameters.iter().zip(&arrow.parameters) {
             if let Some(declaration) = self.declaration_at(parameter, DeclarationKind::Parameter)? {
@@ -116,6 +193,7 @@ impl<'a, 'g> Check<'a, 'g> {
                 }
             }
         }
+        self.current_parameters = previous;
         Ok(())
     }
 
