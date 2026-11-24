@@ -218,6 +218,14 @@ impl<'g> DisposerLookup<'_, 'g> {
     }
 }
 
+fn flows_normally(flow: &Flow) -> bool {
+    flow.normal
+        && !flow.pending
+        && !flow.returns
+        && flow.breaks.is_empty()
+        && flow.continues.is_empty()
+}
+
 fn owns_text(ty: &TypeTerm<'_>) -> bool {
     matches!(ty, TypeTerm::Primitive(p) if p.name() == "string")
 }
@@ -1657,16 +1665,16 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         let NodeFactKind::Expression(facts) = &fact.kind else {
             return Err(Stop::Pending(node));
         };
-        let flow = &fact.flow;
-        if !flow.normal
-            || flow.pending
-            || flow.returns
-            || !flow.breaks.is_empty()
-            || !flow.continues.is_empty()
-        {
+        if !flows_normally(&fact.flow) {
             return Err(Stop::Pending(node));
         }
         Ok(facts)
+    }
+
+    /// `normal_value`'s flow test over facts already in hand: no charge.
+    pub(super) fn flows_normally(&self, node: NodeId) -> bool {
+        self.fact(&node)
+            .is_some_and(|fact| flows_normally(&fact.flow))
     }
 
     fn place(&mut self, node: NodeId) -> ResultOf<Slot> {
@@ -7869,9 +7877,21 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         let [argument] = call.arguments.as_slice() else {
             return false;
         };
+        let Some(selection) = call.selection.as_ref() else {
+            return false;
+        };
+        // The declared formal must equal the written argument's type, so a
+        // formal that is not `&mut List<i32>` is refused here, free.
+        let list = self.value(*argument).is_ok_and(|value| {
+            matches!(value.ty.as_ref(), TypeTerm::Reference { mutable: true, referent }
+                if self.is_list_i32(referent))
+        });
         into.is_some()
             && !self.in_loop
-            && call.selection.is_some()
+            && list
+            && selection.implementation.module == self.module.key
+            && selection.implementation.kind == DeclarationKind::Implementation
+            && selection.substitution.is_empty()
             && call.callee.kind == DeclarationKind::Family
             && call.callee.module.origin == Origin::Application
             && call.pipe_input.is_none()
