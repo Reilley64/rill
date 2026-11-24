@@ -123,3 +123,8 @@ Red logs: `red-c15b-wrong-acceptance.log` (the wrong acceptance), `red-item1-con
 - The full M5 binary and the full gate run in hosted CI, not here.
 - Sources beyond the four of the readers sweep and the conversion cases named above.
 - The items listed under "Swept and not withheld".
+
+## Corrections
+
+- 2026-11-24 (`ri-qlh.17`, d-4): "Fifty merges" in the "Window" paragraph counts commits. Between C8 `6f35705e` and `2e13bc6e` there are 50 commits, 10 of them first-parent merges. Statement (a), "What a public caller could get in the window", also omits three more-permissive readers named by the final re-review: the call `Winner` and `Agrees`, and the conversion-use `Winner`. The list above is not complete for them.
+- 2026-11-24 (`ri-qlh.17`, d-5): "the CLI and the loader read none of these values" and "no consumer outside `crates/compiler`" miss `tests/installed/typed/runner.rs:60`, which prints `report.bodies().findings()`. The read is harmless: it only prints the findings of a report the runner already holds.
