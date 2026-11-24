@@ -577,9 +577,43 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
         }
     }
     if report.completion == TypedCompletion::ResourceLimit {
-        report.inventory.withhold_findings();
-        report.bodies.withhold_findings();
-        report.public_interface_findings.clear();
+        report.withhold_findings();
     }
     report
+}
+
+impl TypedReport<'_> {
+    /// A `ResourceLimit` report publishes no finding (metering rule 8): the
+    /// finding lists, the `Overlap` coverage verdict (which says an `R0500`
+    /// finding exists, so it reads `Pending`, as for an unresolved region), the
+    /// registration issues and the Result discards. Publication only: it runs
+    /// after the meter stops.
+    fn withhold_findings(&mut self) {
+        self.inventory.withhold_findings();
+        self.bodies.withhold_findings();
+        self.public_interface_findings.clear();
+        self.collection_overlaps.clear();
+        self.ownership.overlaps.clear();
+        self.core.conversions.withhold_findings();
+        if let Some(uses) = &mut self.result_use {
+            uses.withhold_findings();
+        }
+        let pending = |coverage: &mut OwnershipCoverage| {
+            if *coverage == OwnershipCoverage::Overlap {
+                *coverage = OwnershipCoverage::Pending;
+            }
+        };
+        for scope in &mut self.ownership.protection {
+            pending(&mut scope.coverage);
+        }
+        for scope in self.collections.protection.iter_mut().flatten() {
+            pending(&mut scope.coverage);
+        }
+        for scope in &mut self.core.primitives.protection {
+            scope.overlaps.clear();
+            if scope.coverage == PrimitiveCoverage::Overlap {
+                scope.coverage = PrimitiveCoverage::Pending;
+            }
+        }
+    }
 }

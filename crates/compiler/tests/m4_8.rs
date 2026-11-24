@@ -522,7 +522,7 @@ fn integrated_limits_include_visibility_and_reject_foreign_nodes() {
         },
     ] {
         let limited = analyze_typed(&graph, short);
-        assert_eq!(limited.completion(), TypedCompletion::ResourceLimit);
+        limit::assert_typed_limit(&limited);
         assert!(limited.statistics().work <= short.max_work);
         assert!(limited.statistics().entries <= short.max_entries);
     }

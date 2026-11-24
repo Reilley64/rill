@@ -134,9 +134,16 @@ impl<'g> ConversionReport<'_, 'g> {
         Ok(header.filter(|_| self.completion != ordinary::Completion::ResourceLimit))
     }
 
+    /// A `ResourceLimit` report publishes no family and so no registration issue
+    /// (metering rule 8): `Ok(None)` also means the declaration has no family,
+    /// so check `completion()` first. The stored families keep their issues:
+    /// `bodies` reads them.
     pub fn family(&self, id: &DeclarationId) -> Result<Option<&ConversionFamily<'g>>, QueryError> {
         self.input().family(id)?;
-        Ok(self.families.get(id))
+        Ok(self
+            .families
+            .get(id)
+            .filter(|_| self.completion != ordinary::Completion::ResourceLimit))
     }
 }
 

@@ -1,4 +1,7 @@
 //! Installed conversion dispatch, not Rill execution or error wrapping.
+#[path = "support/limit.rs"]
+mod limit;
+
 use compiler::analysis::conversions::{
     ErrorAgreement, PairBlocker, PairOutcome, RegistrationIssueKind,
 };
@@ -660,17 +663,13 @@ fn authority(root: &Path, mode: bool) {
         analyze_typed(&graph, exact).completion(),
         TypedCompletion::Incomplete
     );
-    assert_eq!(
-        analyze_typed(
-            &graph,
-            AnalysisLimits {
-                max_work: exact.max_work - 1,
-                ..exact
-            }
-        )
-        .completion(),
-        TypedCompletion::ResourceLimit
-    );
+    limit::assert_typed_limit(&analyze_typed(
+        &graph,
+        AnalysisLimits {
+            max_work: exact.max_work - 1,
+            ..exact
+        },
+    ));
 
     let selector = |name: &str| Selector {
         module: "core.rill".into(),

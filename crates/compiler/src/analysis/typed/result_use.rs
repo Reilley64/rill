@@ -122,6 +122,11 @@ impl<'g> ResultUseReport<'g> {
         self.routine_bound
     }
 
+    /// A `ResourceLimit` report publishes no finding (metering rule 8).
+    pub(super) fn withhold_findings(&mut self) {
+        self.discards.clear();
+    }
+
     pub fn discards(&self) -> &[ResultDiscard<'g>] {
         &self.discards
     }

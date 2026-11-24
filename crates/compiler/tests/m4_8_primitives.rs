@@ -1,4 +1,7 @@
 //! Installed primitive and formatting facts, not Rill execution.
+#[path = "support/limit.rs"]
+mod limit;
+
 use compiler::analysis::scalars::data::DataExpression;
 use compiler::analysis::scalars::generics::{GoalJudgment, GoalState};
 use compiler::analysis::scalars::{BodyOwner, NodeFactKind, ScalarFindingKind};
@@ -104,10 +107,7 @@ fn primitive_copy_and_dispose(prefix: &Path, test_mode: bool) {
         max_work: exact.max_work - 1,
         ..exact
     };
-    assert_eq!(
-        analyze_typed(&graph, short).completion(),
-        TypedCompletion::ResourceLimit
-    );
+    limit::assert_typed_limit(&analyze_typed(&graph, short));
     assert_eq!(report.primitive_protection().len(), 30);
     assert!(
         report
@@ -440,6 +440,7 @@ fn protected_primitive_replacement(prefix: &Path, test_mode: bool) {
     };
     assert_eq!(overlap.code(), "R0500");
     assert_eq!(overlap.implementation.id.module.path, "main.rill");
+    limit::assert_typed_limits_below(&graph, &report);
     let app = graph
         .modules()
         .iter()
