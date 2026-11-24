@@ -5,6 +5,7 @@ mod limit;
 use compiler::analysis::conversions::{
     ErrorAgreement, PairBlocker, PairOutcome, RegistrationIssueKind,
 };
+use compiler::analysis::generics::{GoalBlocker, GoalState};
 use compiler::analysis::scalars::BodyOwner;
 use compiler::analysis::typed::{
     ConversionProtection, ConversionProvider, DecimalParseError, NumericConversionError,
@@ -32,6 +33,7 @@ fn installed_conversions() {
             owned_bytes_has_no_result_storage(&root, mode);
             user_dispatch(&root, mode);
             rejected_registrations(&root, mode);
+            limited_uses(&root, mode);
             authority(&root, mode);
         }
         return;
@@ -164,6 +166,8 @@ fn numeric(root: &Path, mode: bool) {
     ",
     );
     let report = analyze_typed(&graph, AnalysisLimits::default());
+    // `gap` is a `NumericGap` use and `mismatch` an `ErrorAgreement::Disagrees`.
+    limit::assert_typed_limits_below(&graph, &report);
     let app = graph
         .modules()
         .iter()
@@ -527,6 +531,8 @@ fn user_dispatch(root: &Path, mode: bool) {
         function generic<T, E>(value: T): Result<Target, E> where tryInto(Target, T, E) { return cast<Target>(value); }
     ");
     let report = analyze_typed(&graph, AnalysisLimits::default());
+    // `mismatch` is an `ErrorAgreement::Disagrees` (R0313).
+    limit::assert_typed_limits_below(&graph, &report);
     let app = graph
         .modules()
         .iter()
@@ -633,6 +639,82 @@ fn rejected_registrations(root: &Path, mode: bool) {
         Some(ConversionProvider::NumericTryInto(_))
     ));
     assert!(use_.selected_result.is_none());
+    // Ruling 19 (1): a `Registration` blocker and a goal state that cites it
+    // disclose a rejected registration, so no limited report publishes them.
+    limit::assert_typed_limits_below(&graph, &report);
+    let stats = report.statistics();
+    let short = analyze_typed(
+        &graph,
+        AnalysisLimits {
+            max_work: stats.work - 1,
+            max_entries: stats.entries,
+            max_depth: stats.max_depth,
+        },
+    );
+    limit::assert_typed_limit_uses(&graph, &short);
+    assert!(
+        short.bodies().goals().iter().all(|goal| goal.state
+            != GoalState::Unresolved(GoalBlocker::ConversionPair(PairBlocker::Registration))),
+        "one work short"
+    );
+}
+
+/// Ruling 23 (item 1 widened): a conversion use with no premise discloses a
+/// finding through its outcome and agreements as well as `Registration`. Each
+/// source is a use whose exact run publishes the state; no limited run does.
+fn limited_uses(root: &Path, mode: bool) {
+    let target = "import std::convert::from; type Target = {};";
+    let pair = "type Pair<A, B> = { a: A; b: B };";
+    let winner = "implement from<Target>(value: bool): Target { return Target {}; }";
+    let ambiguous = "implement<T> from<Target>(value: Pair<bool, T>): Target { return Target {}; } \
+        implement<T> from<Target>(value: Pair<T, bool>): Target { return Target {}; }";
+    let uses = [
+        (
+            format!("{target} function f(v: bool): Target {{ return from<Target>(v); }}"),
+            "from<Target>(v)",
+            Some(PairOutcome::NoMatch),
+            None,
+        ),
+        (
+            format!(
+                "{target} {pair} {ambiguous} function f(v: Pair<bool, bool>): Target {{ return from<Target>(v); }}"
+            ),
+            "from<Target>(v)",
+            Some(PairOutcome::Ambiguous),
+            None,
+        ),
+        (
+            format!("{target} {winner} function f(v: bool): bool {{ return from<Target>(v); }}"),
+            "from<Target>(v)",
+            None,
+            Some(false),
+        ),
+    ];
+    for (source, span, outcome, result_agreement) in uses {
+        let graph = capture(root, mode, &source);
+        let report = analyze_typed(&graph, AnalysisLimits::default());
+        assert_eq!(report.completion(), TypedCompletion::Incomplete, "{source}");
+        let app = graph
+            .modules()
+            .iter()
+            .find(|m| m.key.origin == Origin::Application)
+            .unwrap();
+        let node = app
+            .syntax
+            .nodes
+            .iter()
+            .position(|n| n.span.bytes() == span.as_bytes())
+            .unwrap();
+        let use_ = report.bodies().conversion_use(app, node).unwrap().unwrap();
+        assert!(use_.premise.is_none());
+        match outcome {
+            Some(PairOutcome::NoMatch) => assert_eq!(use_.outcome, outcome),
+            Some(PairOutcome::Ambiguous) => assert_eq!(use_.outcome, outcome),
+            _ => assert!(matches!(use_.outcome, Some(PairOutcome::Winner(_)))),
+        }
+        assert_eq!(use_.result_agreement, result_agreement);
+        limit::assert_typed_limits_below(&graph, &report);
+    }
 }
 
 fn authority(root: &Path, mode: bool) {

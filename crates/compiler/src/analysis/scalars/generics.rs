@@ -87,17 +87,18 @@ impl<'g> GenericReport<'g> {
             facts,
             conditional_findings,
             declaration_issues,
-            // Selections, evidence and node facts: not findings (the lists
-            // above carry the diagnostics). The rest is identity and counters.
+            // Node facts: not findings (the lists above carry the diagnostics).
+            // The rest is identity and counters.
             graph: _graph,
-            evidence: _evidence,
+            evidence,
             statistics: _statistics,
             completion: _completion,
             integrated: _integrated,
             not_reached: _not_reached,
-            ordinary_calls: _ordinary_calls,
-            ordinary_values: _ordinary_values,
-            conversion_uses: _conversion_uses,
+            ordinary_calls,
+            ordinary_values,
+            conversion_uses,
+            // Facts about conditional nodes, under a premise: not findings.
             conditional_conversion_nodes: _conditional_conversion_nodes,
         } = self;
         let ScalarFacts {
@@ -114,6 +115,26 @@ impl<'g> GenericReport<'g> {
             && annotations.findings().next().is_none()
             && conditional_findings.is_empty()
             && declaration_issues.is_empty()
+            && evidence.publishes_nothing_at_limit(&self.conversion_use_goals())
+            && ordinary_calls
+                .values()
+                .all(OrdinaryCall::publishes_nothing_at_limit)
+            && ordinary_values
+                .values()
+                .all(OrdinaryValue::publishes_nothing_at_limit)
+            && conversion_uses
+                .values()
+                .all(ConversionUse::publishes_nothing_at_limit)
+    }
+
+    /// The goals of the conversion uses with no premise, whose verdict is a
+    /// finding when it says the pair is missing, rejected or disagrees.
+    fn conversion_use_goals(&self) -> Vec<&GoalId> {
+        self.conversion_uses
+            .values()
+            .filter(|use_| use_.premise.is_none())
+            .filter_map(|use_| use_.goal.as_ref())
+            .collect()
     }
 
     /// A `ResourceLimit` report publishes no finding (metering rule 8), and a
@@ -121,6 +142,22 @@ impl<'g> GenericReport<'g> {
     /// report's bodies can have another completion until here).
     pub(in crate::analysis) fn withhold_findings(&mut self) {
         self.completion = ScalarFailureKind::ResourceLimit;
+        let goals = self
+            .conversion_use_goals()
+            .into_iter()
+            .cloned()
+            .collect::<Vec<_>>();
+        self.evidence
+            .withhold_findings(&goals.iter().collect::<Vec<_>>());
+        for call in self.ordinary_calls.values_mut() {
+            call.withhold_findings();
+        }
+        for value in self.ordinary_values.values_mut() {
+            value.withhold_findings();
+        }
+        for use_ in self.conversion_uses.values_mut() {
+            use_.withhold_findings();
+        }
         self.facts.findings.clear();
         self.facts.annotations.withhold_findings();
         self.conditional_findings.clear();
