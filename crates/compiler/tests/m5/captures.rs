@@ -4153,8 +4153,7 @@ fn typed_consumed_pair_fact_binds_the_ownership_rejection() {
                         })
                 })
                 .collect();
-            // RFC 0004, "Callable modes and requirements": `once` is consumed by
-            // invocation, so a second invocation of the receiver is a moved access.
+            const RFC: &str = "docs/rfcs/0004-functions-overloads-and-generic-requirements.md:468 (`once` is consumed by invocation)";
             for name in ["repeated", "conditionalRepeat", "groupedRepeat"] {
                 let report = lower_body(
                     &typed.receipt().unwrap(),
@@ -4163,12 +4162,16 @@ fn typed_consumed_pair_fact_binds_the_ownership_rejection() {
                     AnalysisLimits::default(),
                 )
                 .unwrap();
-                assert_eq!(report.completion(), Completion::SourceRejected, "{name}");
+                assert_eq!(
+                    report.completion(),
+                    Completion::SourceRejected,
+                    "{name}: {RFC}"
+                );
                 let [finding] = report.findings() else {
-                    panic!("{name}: expected a consumed receiver")
+                    panic!("{name}: expected a consumed receiver, {RFC}")
                 };
-                assert_eq!(finding.code(), "R0200", "{name}");
-                assert!(consumed.contains(&finding.site.node), "{name}");
+                assert_eq!(finding.code(), "R0200", "{name}: {RFC}");
+                assert!(consumed.contains(&finding.site.node), "{name}: {RFC}");
             }
             assert_eq!(consumed.len(), 3, "only the three repeated invocations");
         },
