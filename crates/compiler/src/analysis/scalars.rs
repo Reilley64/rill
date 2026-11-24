@@ -143,6 +143,7 @@ pub struct CallFacts<'g> {
     pub(in crate::analysis) list_arrows: Option<Box<super::typed::PairCall<'g>>>,
     pub(in crate::analysis) scoped_join: Option<Box<super::typed::ScopedJoinCall<'g>>>,
     pub callee: &'g DeclarationId,
+    pub declaration: &'g Declaration,
     pub bindings: Vec<&'g Binding>,
     pub substitution: Vec<Substitution<'g>>,
     /// The selected ordinary body and its own binder substitution, when proved.
@@ -1825,6 +1826,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 list_arrows: None,
                 scoped_join: None,
                 callee: &declaration.id,
+                declaration,
                 bindings,
                 substitution,
                 selection: None,
