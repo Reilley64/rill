@@ -334,6 +334,38 @@ function localThenParam(dst: &mut List<&User>, a: &User): void {
 }
 "####;
 
+const TWO_LOCALS: &str = r####"
+type User = { id: i32 };
+function retain<D, S>(dst: D, source: S): void;
+implement retain(dst: &mut List<&User>, source: &User): void { while (true) {} }
+function firstThenSecond(dst: &mut List<&User>): void {
+  let one = User { id: 1 };
+  let two = User { id: 2 };
+  retain(dst, &one);
+  retain(dst, &two);
+}
+function secondThenFirst(dst: &mut List<&User>): void {
+  let one = User { id: 1 };
+  let two = User { id: 2 };
+  retain(dst, &two);
+  retain(dst, &one);
+}
+function twoThenParam(dst: &mut List<&User>, a: &User): void {
+  let one = User { id: 1 };
+  let two = User { id: 2 };
+  retain(dst, &two);
+  retain(dst, &one);
+  retain(dst, a);
+}
+function loopLocalThenParam(dst: &mut List<&User>, a: &User, flag: bool): void {
+  let user = User { id: 1 };
+  while (flag) {
+    retain(dst, &user);
+    retain(dst, a);
+  }
+}
+"####;
+
 const OWNED_SOURCES: &str = r####"
 type User = { id: i32 };
 function retain<D, S>(dst: D, source: S): void;
@@ -1778,14 +1810,14 @@ fn r1_old_contents_survive_a_later_retain() {
                             rejected(
                                 "reversed",
                                 "R0202",
-                                "retain(dst, a)",
+                                "retain(dst, &user)",
                                 "&user",
                                 (5130, 572, 6),
                             ),
                             rejected(
                                 "reversedViaCall",
                                 "R0202",
-                                "forward(dst, a)",
+                                "retain(dst, &user)",
                                 "&user",
                                 (4360, 572, 6),
                             ),
@@ -1797,23 +1829,17 @@ fn r1_old_contents_survive_a_later_retain() {
     );
 }
 
-/// Review ci-0mdr SP-6, re-review ci-b4b2 C-3. The R0202 for a body-local
-/// source stored into `dst` is reported at the last call that retains into
-/// `dst` before the exit, with the body-local borrow as the related site. It is
-/// not reported at the call that stored the local. `paramThenLocal` stores the
+/// Review ci-0mdr SP-6, re-review ci-b4b2 C-3, ticket ri-i0kj. The R0202 for a
+/// body-local source stored into `dst` is reported at the call that stored the
+/// local, with the body-local borrow as the related site, not at a later call
+/// that retains into `dst` (RFC 0007 line 218). `paramThenLocal` stores the
 /// local last (site `retain(dst, &user)`); `localThenParam` stores it first and
-/// a valid parameter call follows, so the site is `retain(dst, a)`, the valid
-/// call. Both still reject.
-///
-/// Stated limit (SP-6, `ri-qlh`): RFC 0007 line 218 has the callee's exit check
-/// reject the body-local source that flows to `dst`, which puts the blocker at
-/// the storing call, `retain(dst, &user)`. The compiler reports the exit's last
-/// retention instead, so `localThenParam` blames a valid call. This test pins
-/// that behaviour, not the RFC's site.
+/// a valid parameter call follows, and the site is still `retain(dst, &user)`.
+/// Both reject.
 #[test]
-fn r1_blocker_site_is_the_last_retention_not_the_storing_call() {
+fn r1_local_then_parameter_reports_the_storing_call() {
     installed(
-        "rfc_cases::list_contents::r1_blocker_site_is_the_last_retention_not_the_storing_call",
+        "rfc_cases::list_contents::r1_local_then_parameter_reports_the_storing_call",
         |request| {
             check_cases(
                 &request,
@@ -1833,9 +1859,64 @@ fn r1_blocker_site_is_the_last_retention_not_the_storing_call() {
                             rejected(
                                 "localThenParam",
                                 "R0202",
-                                "retain(dst, a)",
+                                "retain(dst, &user)",
                                 "&user",
                                 (5104, 559, 6),
+                            ),
+                        ],
+                    }
+                }],
+            );
+        },
+    );
+}
+
+/// Ticket ri-i0kj. Two body-local sources stored into `dst`: R0202 is at the
+/// first storing call, with that call's own borrow as the related site, in
+/// either declaration order. RFC 0007 line 218 has the exit check reject a
+/// body-local source that flows to `dst`; the earliest store is where the
+/// contents first hold one, and the exit reports one finding per root. A valid
+/// parameter call after the stores, in or out of a loop, is never the site.
+#[test]
+fn r1_two_local_stores_report_the_first_storing_call() {
+    installed(
+        "rfc_cases::list_contents::r1_two_local_stores_report_the_first_storing_call",
+        |request| {
+            check_cases(
+                &request,
+                &[const {
+                    Case {
+                        text: TWO_LOCALS,
+                        typed_stats: (343618, 51567, 12),
+                        graph: (GraphCompletion::SourceRejected, (210460, 7464, 8)),
+                        roots: &[
+                            rejected(
+                                "firstThenSecond",
+                                "R0202",
+                                "retain(dst, &one)",
+                                "&one",
+                                (5785, 778, 6),
+                            ),
+                            rejected(
+                                "secondThenFirst",
+                                "R0202",
+                                "retain(dst, &two)",
+                                "&two",
+                                (5786, 778, 6),
+                            ),
+                            rejected(
+                                "twoThenParam",
+                                "R0202",
+                                "retain(dst, &two)",
+                                "&two",
+                                (7309, 1087, 6),
+                            ),
+                            rejected(
+                                "loopLocalThenParam",
+                                "R0202",
+                                "retain(dst, &user)",
+                                "&user",
+                                (6065, 1037, 8),
                             ),
                         ],
                     }
@@ -1965,8 +2046,8 @@ fn r1_pair_with_one_body_local_source_rejects() {
 /// Rejecting twin of `r1_lone_destination_checks_with_its_sequence` (review
 /// ci-0mdr SP-5): a lone-destination call adds no source but keeps "every
 /// source they already held", so a body-local source stored before or after
-/// it still reaches the exit. R0202 is at the last retaining call: `touch(dst)`
-/// when the local was stored first, the storing call when it came last.
+/// it still reaches the exit. R0202 is at the storing call, whether `touch(dst)`
+/// comes before or after it.
 #[test]
 fn r1_lone_destination_keeps_a_stored_local_rejected() {
     installed(
@@ -1983,7 +2064,7 @@ fn r1_lone_destination_keeps_a_stored_local_rejected() {
                             rejected(
                                 "loneAfterLocal",
                                 "R0202",
-                                "touch(dst)",
+                                "retain(dst, &user)",
                                 "&user",
                                 (4951, 475, 6),
                             ),
