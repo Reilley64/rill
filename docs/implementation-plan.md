@@ -38,6 +38,10 @@ M2 through M6 identify milestone boundaries. The table does not establish implem
 
 Post-M6 ri-bgy tracks explicit copying, `wrapErr` and the [scoped routine API changes](standard-library-contracts.md#post-m6-scoped-routine-names). It requires completed M6 acceptance. Use the verified M6 revision as the implementation input. Do not change the M5 or M6 baseline for this work.
 
+### Acceptance evidence from M6
+
+M1 through M5 keep their acceptance records as written. From M6 on the tests are the evidence: a ticket writes no evidence file and no list of tests or caps, and a milestone writes no acceptance record that repeats what the tests assert. A milestone's matrix maps each row to tests by name, and a script generates that map and fails on a row with no test. What a test cannot hold (what a ticket did not establish, an exception and its reason) goes in a `Not established` comment on the ticket's bead. The naming convention, the script and the note's place are in the [toolchain development guide](agents/development.md), item 4. An older section below that asks for "exact implemented test names and observed outcomes" in a record describes M1 to M5.
+
 ## M1 scope and interface
 
 Implement source storage and lexing in `crates/compiler/`. Keep source facts reusable by later compiler and IDE callers. No LSP transport or LLVM types belong in this interface.

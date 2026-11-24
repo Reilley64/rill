@@ -1,6 +1,4 @@
 //! Source → installed typed receipt → ownership judgments and cleanup MIR.
-// The installed M4 profile that can issue a receipt is macOS AArch64.
-#![cfg(all(target_arch = "aarch64", target_os = "macos"))]
 
 use compiler::analysis::AnalysisLimits;
 use compiler::analysis::ownership::{

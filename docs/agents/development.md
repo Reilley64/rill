@@ -15,11 +15,17 @@
    Run `mise run check:ci` when you change workflows, and select other product checks by the changed component; for compiler analysis that spends work, entries or depth, follow the [compiler metering standard](compiler-metering.md). Run heavy provisioning or experiments only through their explicit profiles after reviewing the prerequisites. After you push, read the hosted result for the branch. A pull request that conflicts with its base gets no hosted run: start one with `gh workflow run check.yml --ref <branch>`. A missing run is not a passing run.
 
 4. Report each check's actual scope and result. Write gate logs to `~/.t3/evidence/rill/<bead-id>/`, not `/tmp`. A source that reproduces a review finding is a committed test, not evidence. Keep unavailable product checks nonzero until real implementations and suites replace them. Scaffold compilation, Python/model checks and an LLVM C-API smoke do not establish Rill execution or complete client acceptance.
+
+   From M6 on the tests are the evidence. Write no per-ticket evidence file, no ledger note and no prose list of tests or caps. Keep only what a test cannot hold:
+
+   - A cap that moves has its new pin and, beside it, an assertion that the old cap gives `ResourceLimit`; the old numbers, new numbers and reason go in the commit message ([metering rule 11](compiler-metering.md#11-cap-changes)).
+   - What the ticket did not establish, an exception and its reason go in one comment on the ticket's bead headed `Not established`, and in the handoff. A later milestone finds them there. Nothing goes in a milestone record for this.
+   - A milestone's row-to-test map is generated, not written by hand. A matrix is a Markdown table whose first cell is a row id such as `O1`, `K3` or `C12`. Name a test, or the file or directory that holds it, after its row: the id in lower case with its number padded to two digits, then an underscore (`o01_shifted_point_checks`, `k03_forms.rs`). `python tools/row_tests.py map` prints the map; `python tools/row_tests.py check` fails on a row with no test, and `mise run check:docs` runs it. A milestone adds its matrix to `MATRICES` in `tools/row_tests.py`. The unit tests are `tools/test_row_tests.py`.
 5. Give each worker that runs Cargo in parallel its own `CARGO_TARGET_DIR` inside its worktree, so removing the worktree reclaims the build. Workers sharing one target directory block each other on its lock, and a full disk (2026-11-20) stopped every M5 worker at once.
 
 6. Know these traps:
 
-   - `crates/compiler/build.rs` builds the ownership archive only for `aarch64-apple-darwin`. A test that uses `env!("RILL_OWNERSHIP_ARCHIVE")` needs `#[cfg(all(target_arch = "aarch64", target_os = "macos"))]`, or it passes locally and fails on the other hosted platforms. Read `gh pr checks <n>` after every push.
+   - `crates/compiler/build.rs` builds the ownership archive for `aarch64-apple-darwin` on every host, cross-compiled from the `targets` entry of `core:rust` in `mise.toml`. `tests/m5.rs` is not gated by platform, and `mise run check:m5` fails a platform whose M5 binary lists no tests. Tests that stay gated to aarch64 macOS (`native_ownership`, the `m4_8_*` archive tests) run nothing elsewhere. Read `gh pr checks <n>` after every push.
    - Workflows start on push to `main` and on pull requests only. A branch with no pull request needs `gh workflow run <file> --ref <branch>`; a dispatched `native.yml` also runs `verify:release`.
    - A cancelled hosted job is no result: rerun it.
    - `gc bd create --body-file` needs an absolute path.
