@@ -5,7 +5,7 @@ use super::scalars::{BodyOwner, NodeFactKind, NodeFacts, Site};
 use super::typed::{CollectionProvider, CollectionRepresentation, TypedReceipt, TypedReport};
 use super::{
     AnalysisLimits, DeclarationShape, InvocationMode, Module, NodeId, QueryError, Statistics, Type,
-    TypeTerm, retained_bool_contents_type, retained_contents_type,
+    TypeTerm, retained_bool_contents_type, retained_contents_type, retained_record_contents,
 };
 use crate::loader::{CollectionArtifact, Declaration, DeclarationId, DeclarationKind};
 use crate::source::Span;
@@ -1712,12 +1712,17 @@ fn lower<'a, 'g>(
     let mut retains_exclusive_bool = false;
     if matches!(parameters.len(), 2..=4) {
         budget.step(parameters.len())?;
-        if let Some(destination) = parameters
-            .iter()
-            .position(|parameter| retained_contents_type(&parameter.ty).is_some())
-        {
-            retains_exclusive_bool = retained_contract(parameters, result, destination, budget)?
-                .is_some_and(|contract| contract.exclusive_source);
+        let mut destination = None;
+        for (position, parameter) in parameters.iter().enumerate() {
+            if retained_contents_of(typed, &parameter.ty, budget)?.is_some() {
+                destination = Some(position);
+                break;
+            }
+        }
+        if let Some(destination) = destination {
+            retains_exclusive_bool =
+                retained_contract(typed, parameters, result, destination, budget)?
+                    .is_some_and(|contract| contract.exclusive_source);
         }
     }
     let two_hop = retained_two_hop_bool_contract(header);
@@ -1749,7 +1754,7 @@ fn lower<'a, 'g>(
         let slot = build.parameter(parameter)?;
         params.push(slot);
         owns_guard |= build.slots[slot].contains_guard();
-        if let Some(ty) = retained_contents_type(&parameter.ty) {
+        if let Some(ty) = retained_contents_of(typed, &parameter.ty, build.budget)? {
             let contents = build.slot(parameter.declaration.node, ty)?;
             build.budget.reserve(1)?;
             build
@@ -2056,17 +2061,37 @@ enum RetainedCallExtra {
 // declared contract at calls and exits. A call with the destination alone
 // stores nothing new: the contents keep every source they already held.
 fn retained_contract<'a, 'g>(
+    typed: &TypedReport<'g>,
     parameters: &'a [super::MemberType<'g>],
     result: &Type<'g>,
     destination: usize,
     budget: &mut Budget,
 ) -> ResultOf<Option<RetainedContract<'a, 'g>>> {
+    let Some(destination_ty) = parameters.get(destination).map(|formal| &formal.ty) else {
+        return Ok(None);
+    };
+    let contents = retained_contents_of(typed, destination_ty, budget)?;
     retained_contract_of(
         parameters.iter().map(|formal| &formal.ty),
         result,
         destination,
+        contents,
         &mut |count| Ok(budget.step(count)?),
     )
+}
+
+// The contents a retained destination type holds. A `bool` or `string`
+// descriptor is read from the type alone; a reference to a record of `i32`
+// fields needs its declaration, charged after the free type screen.
+fn retained_contents_of<'a, 'g>(
+    typed: &TypedReport<'g>,
+    ty: &'a TypeTerm<'g>,
+    budget: &mut Budget,
+) -> ResultOf<Option<&'a Type<'g>>> {
+    if let Some(contents) = retained_contents_type(ty) {
+        return Ok(Some(contents));
+    }
+    Ok(retained_record_contents(typed.inventory(), ty, budget)?)
 }
 
 // The contract over parameter types, charging through `step`. A screen passes
@@ -2077,6 +2102,7 @@ fn retained_contract_of<'a, 'g, I>(
     types: I,
     result: &Type<'g>,
     destination: usize,
+    contents: Option<&'a Type<'g>>,
     step: &mut dyn FnMut(usize) -> ResultOf<()>,
 ) -> ResultOf<Option<RetainedContract<'a, 'g>>>
 where
@@ -2092,10 +2118,12 @@ where
     let Some(destination_ty) = types.clone().nth(destination) else {
         return Ok(None);
     };
-    let Some(contents) = retained_contents_type(destination_ty) else {
+    let Some(contents) = contents else {
         return Ok(None);
     };
     let bool_contents = retained_bool_contents_type(destination_ty).is_some();
+    // An exclusive source reborrows a `bool` or `string` descriptor's place.
+    let scalar_contents = retained_contents_type(destination_ty).is_some();
     let mut scalar = None;
     let mut sources = 0;
     let mut exclusive_source = false;
@@ -2106,7 +2134,8 @@ where
         }
         if *ty == *contents {
             sources += 1;
-        } else if matches!((contents.as_ref(), ty.as_ref()), (
+        } else if scalar_contents
+            && matches!((contents.as_ref(), ty.as_ref()), (
             TypeTerm::Reference { referent: stored, .. },
             TypeTerm::Reference { mutable: true, referent: source },
         ) if stored == source)

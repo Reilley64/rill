@@ -18,7 +18,7 @@ use crate::analysis::typed::{
     NativeOwnershipProvider, NativeRepresentationKind, OptionRole, OwnershipCoverage,
     OwnershipRule, Primitive, PrimitiveCoverage, PrimitiveOperation, PrimitiveRole, ResultRole,
 };
-use crate::analysis::{MemberType, Payload};
+use crate::analysis::{MemberType, Payload, retained_record_candidate};
 use crate::loader::{Intrinsic, Origin};
 use crate::parser::NodeKind;
 use std::sync::Arc;
@@ -223,6 +223,11 @@ fn owns_text(ty: &TypeTerm<'_>) -> bool {
 
 fn primitive_reference(ty: &TypeTerm<'_>) -> bool {
     matches!(ty, TypeTerm::Reference { referent, .. } if matches!(referent.as_ref(), TypeTerm::Primitive(_)))
+}
+
+fn shared_record_reference(ty: &TypeTerm<'_>) -> bool {
+    matches!(ty, TypeTerm::Reference { mutable: false, referent }
+        if matches!(referent.as_ref(), TypeTerm::Nominal { .. }))
 }
 
 fn shared_primitive_reference(ty: &TypeTerm<'_>) -> bool {
@@ -1661,6 +1666,31 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         Ok(self.nested_record_values.get(path.root).copied())
     }
 
+    /// A scalar field read through a named shared reference to a record
+    /// (`view.x`, `view: &Point`). The screen reads facts already paid for;
+    /// the descriptor's slot is the first charge.
+    fn scalar_field_through_reference(
+        &mut self,
+        node: NodeId,
+        facts: &ExpressionFacts<'g>,
+    ) -> ResultOf<Option<Slot>> {
+        let Some(path) = &facts.path else {
+            return Ok(None);
+        };
+        if !matches!(
+            path.projections.as_slice(),
+            [PathProjection::Dereference, PathProjection::Field(_)]
+        ) || !matches!(facts.ty.as_ref(), TypeTerm::Primitive(p) if !matches!(p.name(), "string" | "void"))
+            || facts.access != Access::ReadOnly
+        {
+            return Ok(None);
+        }
+        self.budget.step(1)?;
+        Ok(Some(
+            *self.locals.get(path.root).ok_or(Stop::Pending(node))?,
+        ))
+    }
+
     fn read_value_place(&mut self, node: NodeId, facts: &ExpressionFacts<'g>) -> ResultOf<Slot> {
         let path = facts.path.as_ref().ok_or(Stop::Pending(node))?;
         if facts.access == Access::Owned
@@ -2053,13 +2083,20 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         }
         self.budget.step(2)?;
         let source = self.value(syntax.children[0])?;
-        if retained_contents_type(&source.ty).is_none() {
+        let ty = source.ty.clone();
+        if self.retained_contents(&ty)?.is_none() {
             return Err(Stop::Pending(node));
         }
         self.locals
             .get(path.root)
             .copied()
             .ok_or(Stop::Pending(node))
+    }
+
+    /// The contents a retained destination type holds, a reference to a
+    /// record of `i32` fields included (see `retained_contents_of`).
+    fn retained_contents<'t>(&mut self, ty: &'t TypeTerm<'g>) -> ResultOf<Option<&'t Type<'g>>> {
+        retained_contents_of(self.typed, ty, self.budget)
     }
 
     fn immutable_named_value(
@@ -5577,6 +5614,12 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 let path = facts.path.as_ref().ok_or(Stop::Pending(node))?;
                 let root = *self.locals.get(path.root).ok_or(Stop::Pending(node))?;
                 Action::ForbiddenBorrowedMove(root)
+            } else if let Some(from) = self.scalar_field_through_reference(node, facts)? {
+                Action::Dereference {
+                    from,
+                    into,
+                    explicit_copy: false,
+                }
             } else if matches!(projection, Projection::Field(_))
                 && facts.access == Access::ReadOnly
                 && shared_primitive_reference(&facts.ty)
@@ -5738,7 +5781,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                         from,
                         into,
                         exclusive,
-                        retained_target: retained_contents_type(&facts.ty).is_some(),
+                        retained_target: self.retained_contents(&facts.ty)?.is_some(),
                     }
                 }
             }
@@ -6678,7 +6721,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 exclusive_source: false,
             }
         } else {
-            retained_contract(formals, declared_result, position, self.budget)?
+            retained_contract(self.typed, formals, declared_result, position, self.budget)?
                 .ok_or(Stop::Pending(node))?
         };
         for (formal, &actual) in formals.iter().zip(&call.arguments) {
@@ -7902,10 +7945,14 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             };
             *slot = Some(&value.ty);
         }
+        // The screen reads the type alone: a reference to a record needs
+        // a declaration lookup, so it stays on the old path here.
+        let contents = slots[0].and_then(|ty| retained_contents_type(ty));
         retained_contract_of(
             slots.iter().map(|ty| ty.unwrap()),
             &facts.ty,
             0,
+            contents,
             &mut |_| Ok(()),
         )
         .is_ok_and(|contract| contract.is_some())
@@ -8148,7 +8195,8 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             }
             for (position, &arg) in call.arguments.iter().enumerate() {
                 self.budget.step(1)?;
-                if retained_contents_type(&self.value(arg)?.ty).is_some() {
+                let arg_ty = self.value(arg)?.ty.clone();
+                if self.retained_contents(&arg_ty)?.is_some() {
                     pipe_retention = Some((
                         position,
                         self.retained_call_contract(node, call, position, result, false)?,
@@ -8178,6 +8226,13 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 }
             }
         }
+        // A written destination that may hold a reference to a record (read
+        // from the written types alone, free) admits that reference as a
+        // source; the contract check below decides the rest.
+        let record_destination = call.arguments.iter().any(|&arg| {
+            self.value(arg)
+                .is_ok_and(|value| retained_record_candidate(&value.ty).is_some())
+        });
         self.budget.reserve(call.arguments.len() + 1)?;
         let mut args = Vec::with_capacity(call.arguments.len());
         let mut forwarding_prefix = None;
@@ -8213,11 +8268,15 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                     return Err(Stop::Pending(arg));
                 }
                 two_hop = Some(self.two_hop_call_route(node, call, result, depth + 1)?);
-            } else if retained_contents_type(&ty).is_some() {
+            } else if self.retained_contents(&ty)?.is_some() {
                 if !piped && destination.replace(position).is_some() {
                     return Err(Stop::Pending(arg));
                 }
-            } else if !borrows_record && !self.direct_call_type(&ty) && !tuple_or_leaf_admitted {
+            } else if !borrows_record
+                && !self.direct_call_type(&ty)
+                && !tuple_or_leaf_admitted
+                && !(record_destination && shared_record_reference(&ty))
+            {
                 if !self.admits_direct_tuple_or_leaf_call(call, result)? {
                     return Err(Stop::Pending(arg));
                 }

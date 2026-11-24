@@ -202,7 +202,13 @@ impl<'a, 'g> Check<'a, 'g> {
             let ty = self
                 .expression_facts(argument)?
                 .map(|value| value.ty.as_ref());
-            let bool_descriptor = ty.is_some_and(|ty| retained_bool_contents_type(ty).is_some());
+            let bool_descriptor = match ty {
+                Some(ty) => {
+                    retained_bool_contents_type(ty).is_some()
+                        || retained_record_contents(self.inventory, ty, self.budget)?.is_some()
+                }
+                None => false,
+            };
             let mutable_referent = ty.and_then(|ty| match ty {
                 TypeTerm::Reference {
                     mutable: true,

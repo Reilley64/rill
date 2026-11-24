@@ -7,18 +7,18 @@
 use super::*;
 use compiler::analysis::ownership::{BorrowedMemberBinding, Projection};
 
-struct Case {
-    text: &'static str,
-    typed_stats: Triple,
-    graph: (GraphCompletion, Triple),
-    roots: &'static [Root],
+pub(super) struct Case {
+    pub(super) text: &'static str,
+    pub(super) typed_stats: Triple,
+    pub(super) graph: (GraphCompletion, Triple),
+    pub(super) roots: &'static [Root],
 }
 
 fn check(test: &str, cases: &[Case]) {
     installed(test, |request| check_cases(&request, cases));
 }
 
-fn check_cases(request: &InstalledRequest, cases: &[Case]) {
+pub(super) fn check_cases(request: &InstalledRequest, cases: &[Case]) {
     for (index, case) in cases.iter().enumerate() {
         fs::write(&request.entry, format!("{IMPORTS}\n{}", case.text)).unwrap();
         for test_mode in [false, true] {
@@ -46,7 +46,7 @@ fn check_cases(request: &InstalledRequest, cases: &[Case]) {
     }
 }
 
-fn application(graph: &loader::Graph) -> &loader::Module {
+pub(super) fn application(graph: &loader::Graph) -> &loader::Module {
     graph
         .modules()
         .iter()
@@ -288,6 +288,75 @@ fn incomplete_borrowed_temporary_caps_now_give_resource_limit() {
     );
 }
 
+/// ri-1up, metering rule 11 (ticket's mandated B1 flip, chief of staff
+/// ruling 2026-11-24 07:23 AEDT): a scalar field read through a reference to
+/// a record is now lowered, so `viewField` is no longer `Incomplete` at
+/// `view.x` (1,986 / 86 / 3, parent `4f7a8032`): the borrowed temporary is
+/// released while `view` is still read, R0203 as for `stored`. The old cap
+/// gives `ResourceLimit`, with no MIR and no finding.
+#[test]
+fn read_through_a_stored_view_of_a_temporary_rejects_its_release() {
+    const VIEW: &str = r####"
+type Point = { x: i32; y: i32 };
+function shifted(point: Point): Point { return point; }
+function viewField(): i32 { let view = &shifted(Point { x: 1, y: 2 }); return view.x; }
+"####;
+    installed(
+        "rfc_cases::o12::read_through_a_stored_view_of_a_temporary_rejects_its_release",
+        |request| {
+            check_cases(
+                &request,
+                &[Case {
+                    text: VIEW,
+                    typed_stats: (325209, 47806, 12),
+                    graph: (GraphCompletion::SourceRejected, (188579, 4666, 7)),
+                    roots: &[
+                        Root {
+                            name: "shifted",
+                            want: Want::Checked,
+                            graph: None,
+                            stats: (2778, 237, 3),
+                        },
+                        Root {
+                            name: "viewField",
+                            want: Want::Rejected {
+                                code: "R0203",
+                                site: r####"let view = &shifted(Point { x: 1, y: 2 });"####,
+                                related: r####"&shifted(Point { x: 1, y: 2 })"####,
+                            },
+                            graph: None,
+                            stats: (2962, 348, 7),
+                        },
+                    ],
+                }],
+            );
+            fs::write(&request.entry, format!("{IMPORTS}\n{VIEW}")).unwrap();
+            for test_mode in [false, true] {
+                let request = InstalledRequest {
+                    test_mode,
+                    ..request.clone()
+                };
+                let graph = loader::load_installed(request).unwrap();
+                let typed = analyze_typed(&graph, AnalysisLimits::default());
+                let receipt = typed.receipt().unwrap();
+                let module = application(&graph);
+                let declaration = module
+                    .declarations
+                    .iter()
+                    .find(|d| {
+                        d.id.kind == DeclarationKind::Function
+                            && d.name.as_deref() == Some("viewField")
+                    })
+                    .unwrap();
+                let (old, _) = limits(statistics((1986, 86, 3)));
+                let limited = lower_body(&receipt, module, &declaration.id, old).unwrap();
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none() && limited.findings().is_empty());
+            }
+        },
+    );
+}
+
 /// Grouped, scoped and loop-wrapped forms, a second field, a parameter
 /// argument, a never-read descriptor, the other literal spellings, and a
 /// dead and a feasible store: each measured on the candidate.
@@ -410,7 +479,12 @@ function literal(): &string { return &"static"; }
 }
 
 /// Metering rule 2: the nearest unsupported siblings stay `Incomplete` at
-/// the caps `4f7a8032` measured, with the blocker span of each. `owner` stays
+/// the caps measured at `bc9bfdd5`, with the blocker span of each. Removing
+/// `viewField` (a read through a stored view; it left this list for ri-1up,
+/// see
+/// `read_through_a_stored_view_of_a_temporary_rejects_its_release`) lowers
+/// every root's cost by a few units (fewer declarations to search), so the
+/// module's caps were re-measured at `bc9bfdd5` without it. `owner` stays
 /// R0202 (RFC 0006, a named owner gains no static duration).
 #[test]
 fn unsupported_siblings_keep_their_parent_caps() {
@@ -421,21 +495,20 @@ fn unsupported_siblings_keep_their_parent_caps() {
 type Point = { x: i32; y: i32 };
 function shifted(point: Point): Point { return point; }
 function copyOut(): Point { return *(&shifted(Point { x: 1, y: 2 })); }
-function viewField(): i32 { let view = &shifted(Point { x: 1, y: 2 }); return view.x; }
 function bound(): i32 { let x = (&shifted(Point { x: 1, y: 2 })).x; return x; }
 function interpolated(n: i32): &string { return &`a${n}`; }
 function number(): &i32 { return &1i32; }
 function owner(): &string { let text = "x"; return &text; }
 function flag(b: bool): &string { return &`a${b}`; }
 "####,
-            typed_stats: (335803, 49013, 12),
-            graph: (GraphCompletion::SourceRejected, (192243, 4594, 5)),
+            typed_stats: (333771, 48779, 12),
+            graph: (GraphCompletion::SourceRejected, (191338, 4565, 5)),
             roots: &[
                 Root {
                     name: "shifted",
                     want: Want::Checked,
                     graph: None,
-                    stats: (2886, 291, 3),
+                    stats: (2862, 279, 3),
                 },
                 Root {
                     name: "copyOut",
@@ -443,15 +516,7 @@ function flag(b: bool): &string { return &`a${b}`; }
                         blocker: r####"*(&shifted(Point { x: 1, y: 2 }))"####,
                     },
                     graph: None,
-                    stats: (2330, 136, 3),
-                },
-                Root {
-                    name: "viewField",
-                    want: Want::Incomplete {
-                        blocker: r####"view.x"####,
-                    },
-                    graph: None,
-                    stats: (1986, 86, 3),
+                    stats: (2306, 124, 3),
                 },
                 Root {
                     name: "bound",
@@ -459,7 +524,7 @@ function flag(b: bool): &string { return &`a${b}`; }
                         blocker: r####"(&shifted(Point { x: 1, y: 2 })).x"####,
                     },
                     graph: None,
-                    stats: (1996, 87, 3),
+                    stats: (1972, 75, 3),
                 },
                 Root {
                     name: "interpolated",
@@ -467,7 +532,7 @@ function flag(b: bool): &string { return &`a${b}`; }
                         blocker: r####"`a${n}`"####,
                     },
                     graph: None,
-                    stats: (1982, 83, 4),
+                    stats: (1958, 71, 4),
                 },
                 Root {
                     name: "number",
@@ -475,7 +540,7 @@ function flag(b: bool): &string { return &`a${b}`; }
                         blocker: r####"1i32"####,
                     },
                     graph: None,
-                    stats: (1976, 77, 4),
+                    stats: (1952, 65, 4),
                 },
                 Root {
                     name: "owner",
@@ -485,7 +550,7 @@ function flag(b: bool): &string { return &`a${b}`; }
                         related: r####"text"####,
                     },
                     graph: None,
-                    stats: (2086, 138, 4),
+                    stats: (2062, 126, 4),
                 },
                 Root {
                     name: "flag",
@@ -493,7 +558,7 @@ function flag(b: bool): &string { return &`a${b}`; }
                         blocker: r####"`a${b}`"####,
                     },
                     graph: None,
-                    stats: (1982, 83, 4),
+                    stats: (1958, 71, 4),
                 },
             ],
         }],

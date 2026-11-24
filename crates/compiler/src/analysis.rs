@@ -97,6 +97,67 @@ fn retained_bool_contents_type<'a, 'g>(ty: &'a TypeTerm<'g>) -> Option<&'a Type<
     })
 }
 
+// Retained contents that are a shared reference to a record: `&mut &R` with
+// `R` a non-generic application record. The type alone cannot say that every
+// field is an `i32`. This screen reads only the type and charges nothing; a
+// type it refuses is never looked up.
+fn retained_record_candidate<'a, 'g>(ty: &'a TypeTerm<'g>) -> Option<&'a Type<'g>> {
+    let TypeTerm::Reference {
+        mutable: true,
+        referent,
+    } = ty
+    else {
+        return None;
+    };
+    matches!(referent.as_ref(), TypeTerm::Reference { mutable: false, referent: record }
+        if matches!(record.as_ref(), TypeTerm::Nominal { declaration, arguments }
+            if declaration.module.origin == crate::loader::Origin::Application
+                && arguments.is_empty()))
+    .then_some(referent)
+}
+
+// The record candidate's declaration is a record of `i32` fields. The lookup
+// is keyed by the declaration's module path, so it is charged by path length
+// per comparison (metering rule 3), after the free type screen (rule 1). The
+// body that holds the candidate's reference slot stays on its old path for
+// any other shape.
+fn retained_record_contents<'a, 'g>(
+    inventory: &ordinary::OrdinaryAnalysis<'g>,
+    ty: &'a TypeTerm<'g>,
+    budget: &mut declarations::Budget,
+) -> Result<Option<&'a Type<'g>>, ()> {
+    let Some(contents) = retained_record_candidate(ty) else {
+        return Ok(None);
+    };
+    let TypeTerm::Reference { referent, .. } = contents.as_ref() else {
+        return Ok(None);
+    };
+    let TypeTerm::Nominal { declaration, .. } = referent.as_ref() else {
+        return Ok(None);
+    };
+    let declarations = &inventory.type_facts().declarations;
+    let probes = (usize::BITS - declarations.len().leading_zeros() + 1) as usize;
+    budget.step(
+        (declaration.module.path.len() + 1)
+            .checked_mul(probes)
+            .ok_or(())?,
+    )?;
+    let Some(facts) = declarations.get(*declaration) else {
+        return Ok(None);
+    };
+    let DeclarationShape::Record { fields } = &facts.shape else {
+        return Ok(None);
+    };
+    if !facts.binders.is_empty() {
+        return Ok(None);
+    }
+    budget.step(fields.len())?;
+    Ok(fields
+        .iter()
+        .all(|field| matches!(field.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32"))
+        .then_some(contents))
+}
+
 #[derive(Clone, Debug)]
 pub struct Binder<'g> {
     pub declaration: &'g Declaration,
