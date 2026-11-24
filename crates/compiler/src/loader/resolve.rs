@@ -170,6 +170,32 @@ impl Engine {
             }
             prelude_keys.push(key);
         }
+        let mut complete = false;
+        if let Some(profile) = self.installed {
+            let root = self.roots[&Origin::Standard].clone();
+            let mut baseline = Vec::new();
+            for &(key, _) in profile.sources() {
+                self.host.charge(1 + profile.metadata().len())?;
+                let path = root.join(key);
+                let Some(probe) = self.host.probe(&path, Some(&root))? else {
+                    baseline.clear();
+                    break;
+                };
+                if probe.kind != Kind::File || probe.path != path {
+                    return Err(failure(
+                        FailureKind::InvalidRequest,
+                        "installed source does not have its pinned module key",
+                    ));
+                }
+                if !profile.metadata().iter().any(|edge| edge.path == key) {
+                    baseline.push(probe.path);
+                }
+            }
+            complete = !baseline.is_empty();
+            for path in baseline {
+                self.add_module(Origin::Standard, path)?;
+            }
+        }
         while let Some(key) = self.pending.pop_front() {
             self.host.charge(1)?;
             let mut imports =
@@ -179,7 +205,7 @@ impl Engine {
             }
             self.imports.extend(imports);
         }
-        let metadata = self.capture_installed_metadata()?;
+        let metadata = self.capture_installed_metadata(complete)?;
         self.imports
             .sort_by(|a, b| (&a.module, a.span.start()).cmp(&(&b.module, b.span.start())));
         let (facts, names, public_names) = self.seeds()?;
@@ -665,7 +691,7 @@ impl Engine {
         Ok(privacy)
     }
 
-    fn capture_installed_metadata(&mut self) -> Result<BTreeSet<&'static str>> {
+    fn capture_installed_metadata(&mut self, complete: bool) -> Result<BTreeSet<&'static str>> {
         let mut captured = BTreeSet::new();
         let Some(profile) = self.installed else {
             return Ok(captured);
@@ -673,6 +699,9 @@ impl Engine {
         let root = self.roots[&Origin::Standard].clone();
         let edges = profile.metadata();
         let mut requested = BTreeSet::new();
+        if complete {
+            requested.extend(edges.iter().map(|edge| edge.path));
+        }
         for module in self.modules.values() {
             for node in &module.syntax.nodes {
                 self.host.charge(edges.len())?;

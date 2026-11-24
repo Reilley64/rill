@@ -868,13 +868,16 @@ fn limited_uses(root: &Path, mode: bool) {
 }
 
 fn authority(root: &Path, mode: bool) {
-    let no_trigger = capture(root, mode, "import std::number::ConversionError;");
-    assert!(
-        no_trigger
-            .modules()
-            .iter()
-            .all(|m| !matches!(m.key.path.as_str(), "bytes.rill" | "convert.rill"))
-    );
+    let baseline = capture(root, mode, "import std::number::ConversionError;");
+    for key in ["bytes.rill", "convert.rill"] {
+        assert!(
+            baseline
+                .modules()
+                .iter()
+                .any(|m| m.key.origin == Origin::Standard && m.key.path == key),
+            "{key}"
+        );
+    }
     let source = "import std::convert::tryInto; function parse(text: &string): void { let _ = tryInto<u8>(text); }";
     let graph = capture(root, mode, source);
     assert!(

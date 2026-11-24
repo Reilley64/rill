@@ -43,16 +43,16 @@ prototypes/19-clocks-cancellation.rill	run	SourceRejected:R0400:import has no pu
 prototypes/19-clocks-cancellation.rill	test	SourceRejected:R0400:import has no public target:import std::panic;	-	-	-	-	-
 prototypes/20-stacks-recursion.rill	run	SourceRejected:R0400:import has no public target:spawnWithStack	-	-	-	-	-
 prototypes/20-stacks-recursion.rill	test	SourceRejected:R0400:import has no public target:spawnWithStack	-	-	-	-	-
-prototypes/21-diagnostics/empty.rill	run	ok	Incomplete	-	-	-	-
-prototypes/21-diagnostics/empty.rill	test	ok	Incomplete	-	-	-	-
+prototypes/21-diagnostics/empty.rill	run	ok	Checked	2	0	0	0
+prototypes/21-diagnostics/empty.rill	test	ok	Checked	2	0	0	0
 prototypes/21-diagnostics/expect-failures.rill	run	SourceRejected:R0400:import has no public target:import std::log;	-	-	-	-	-
 prototypes/21-diagnostics/expect-failures.rill	test	SourceRejected:R0400:import has no public target:import std::log;	-	-	-	-	-
-prototypes/21-diagnostics/locations.rill	run	ok	Incomplete	-	-	-	-
-prototypes/21-diagnostics/locations.rill	test	ok	Incomplete	-	-	-	-
+prototypes/21-diagnostics/locations.rill	run	ok	Checked	2	1	0	0
+prototypes/21-diagnostics/locations.rill	test	ok	Checked	2	1	0	0
 prototypes/21-diagnostics/valid.rill	run	ok	Incomplete	-	-	-	-
 prototypes/21-diagnostics/valid.rill	test	ok	Incomplete	-	-	-	-
-prototypes/21-diagnostics/warning.rill	run	ok	Incomplete	-	-	-	-
-prototypes/21-diagnostics/warning.rill	test	ok	Incomplete	-	-	-	-
+prototypes/21-diagnostics/warning.rill	run	ok	Checked	2	0	0	0
+prototypes/21-diagnostics/warning.rill	test	ok	Checked	2	0	0	0
 prototypes/22-networking.rill	run	SourceRejected:R0400:import has no public target:import std::panic;	-	-	-	-	-
 prototypes/22-networking.rill	test	SourceRejected:R0400:import has no public target:import std::panic;	-	-	-	-	-
 prototypes/23-tls/values.rill	run	SourceRejected:R0400:import has no public target:import std::panic;	-	-	-	-	-
