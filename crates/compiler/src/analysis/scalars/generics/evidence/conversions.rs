@@ -166,7 +166,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 let actual = output.arguments[2].clone();
                 let actual_site = output.site;
                 let origin = proof.source;
-                let premise = proof.premise.expect("conditional conversion output");
+                let premise = proof.premise;
                 let record = proof.equalities.is_empty();
                 let already_bound =
                     self.closed(expected_error, binders, &|i| slots[i].is_some(), 1)?;
@@ -177,9 +177,11 @@ impl<'r, 'g> Checker<'r, 'g> {
                 if agrees {
                     slots.clone_from_slice(&proposed);
                     progressed |= !already_bound;
-                    self.mark_conversion_dependency(inference, node, premise, true)?;
-                    self.arrow_premise =
-                        Some(self.arrow_premise.map_or(premise, |p| p.combine(premise)));
+                    if let Some(premise) = premise {
+                        self.mark_conversion_dependency(inference, node, premise, true)?;
+                        self.arrow_premise =
+                            Some(self.arrow_premise.map_or(premise, |p| p.combine(premise)));
+                    }
                 } else {
                     settled = false;
                 }
