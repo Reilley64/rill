@@ -1,6 +1,6 @@
 # Review ci-0mdr fixes, part C4: screen before charging (ST-2, ST-4, ST-9) (2026-11-24, city bead ci-e8rg)
 
-Child `ri-px1.11.3` of the single fix pass `ri-px1.11` for review `ci-0mdr`. Base `origin/implementation/m5-ownership-cleanup` at `da5bec50` (it holds C1, `ead19c6a`, and its `ResourceLimit` helpers). Branch `m5-ownership-cleanup/r2f-ri-px1.11.3`. Every parent cap below was measured at `7002855e` in a separate `git worktree add` (removed after), with one throwaway probe test that prints each root's completion, statistics and blocker; the probe sources and outputs are in `~/.t3/evidence/rill/m5-build-2026-11-22/ci-e8rg/probes/`. The new tests were written first and were red on the base for the two siblings that moved (log excerpts below).
+Child `ri-px1.11.3` of the single fix pass `ri-px1.11` for review `ci-0mdr`. Base `origin/implementation/m5-ownership-cleanup` at `da5bec50` (it holds C1, `ead19c6a`, and its `ResourceLimit` helpers). Branch `m5-ownership-cleanup/r2f-ri-px1.11.3`. Every parent cap below was measured at `7002855e` in a separate `git worktree add` (removed after), with one throwaway probe test that prints each root's completion, statistics and blocker; the probe sources and outputs are in `~/.t3/evidence/rill/m5-build-2026-11-22/ci-e8rg/probes/`. The new tests were written first and were red on the base for the two siblings that moved (`red-base.log`, below). Each `.out` in `probes/` ran on one revision: `parent.out` and `parent3.out` at `7002855e`, `parent2.out` at `f24d825b`, `cand*.out` on the base `da5bec50` before the fix (`probes/README.txt`).
 
 ## Findings
 
@@ -9,7 +9,7 @@ Child `ri-px1.11.3` of the single fix pass `ri-px1.11` for review `ci-0mdr`. Bas
 | ST-2 | fixed | `family_view_shape` (`ownership/build.rs`) now also refuses, from facts already paid for, a call whose written argument is not `&mut List<i32>` and a selection whose implementation is not an `implement` of this module with an empty substitution. Test `rfc_cases::o11_family_view_over_a_non_list_stays_at_its_parent_cap` |
 | ST-9, `i32_arithmetic.rs:326`, decided **left** operand | recorded: not reproducible, already at its parent cap | A decided left operand makes the whole `&&` not normal, and in each context tried (a `return` operand, a `let` initializer, an `if` condition, a call argument) the `&&` node's own flow check refuses it before `i32_equality_conjunction`, so `normal_value(left)` never charges for it. Pinned at the parent's numbers by `rfc_cases::decided_conjunction_left_keeps_its_parent_cap`, which passes on the base too (rule 10 cannot be met for this shape) |
 | ST-9, `i32_arithmetic.rs:326`, decided **right** operand (found while probing the left) | fixed | The left operand's checks ran, then the right operand was lowered and rejected: the blocker moved from the whole `&&` to the right operand and the root paid 6 work, 3 entries, 1 depth. `i32_equality_conjunction` now stops with `Pending(node)` before its first charge when either operand's flow is not normal (`Build::flows_normally`, the flow test of `normal_value` without its `step`). Test `rfc_cases::decided_conjunction_right_keeps_its_parent_cap`, red on the base |
-| ST-9, `i32_arithmetic.rs:202`, `self.place(target)` | recorded, no change | The checks after it (`place.ty`, `literal.ty`, `place.place`, `arithmetic_literal`) cannot fire: an out-of-range or negative literal never reaches it (typed `Incomplete` or a prefix node refused earlier), so moving them ahead of the charge changes nothing. The one reject that is real, `!self.slots[slot].exclusive_field_reborrow`, reads the slot the charge resolves; no paid fact says how a binding was written (there are no parent links in the syntax tree). See "Stopped" |
+| ST-9, `i32_arithmetic.rs:202`, `self.place(target)` | **stopped** (no free screen; +1 work, numbers below) | The checks after it (`place.ty`, `literal.ty`, `place.place`, `arithmetic_literal`) cannot fire: an out-of-range or negative literal never reaches it (typed `Incomplete` or a prefix node refused earlier), so moving them ahead of the charge changes nothing. The one reject that is real, `!self.slots[slot].exclusive_field_reborrow`, reads the slot the charge resolves; no paid fact says how a binding was written (there are no parent links in the syntax tree). See "Stopped" |
 | ST-4 | **stopped** (no free screen) | See "Stopped". No test added, no cap pinned |
 
 ## ST-2: what was measured
@@ -36,9 +36,9 @@ Both sources hold `function stop(): never { while (true) {} }` and `function id(
 
 The same decided left operand as a `let` initializer, an `if` condition, a call argument and a `return` operand gave the parent's numbers in each context before the fix. The admitted conjunctions (`o16_join_order`, `rfc_cases` O16, the `id(a) == b && a == b` control) are unchanged: the new test passes through the same `normal_value(left)` step.
 
-Red on the base (test files only, this branch's source reverted): `decided_conjunction_right_keeps_its_parent_cap` failed with graph statistics `187472 / 4249 / 5` against `187466 / 4246 / 5`; `o11_family_view_over_a_non_list_stays_at_its_parent_cap` failed with `189376 / 4266 / 5` against `188604 / 4266 / 5`.
+Red on the base: a throwaway `git worktree add` of this branch's merged tip with `crates/compiler/src` checked out from `origin/implementation/m5-ownership-cleanup` (removed after), running the three new tests (`red-base.log`; the failing children print the assertion at `rfc_cases.rs:287`, so they ran). `decided_conjunction_right_keeps_its_parent_cap` failed with graph statistics `187472 / 4249 / 5` against `187466 / 4246 / 5`; `o11_family_view_over_a_non_list_stays_at_its_parent_cap` failed with `189376 / 4266 / 5` against `188604 / 4266 / 5`; `decided_conjunction_left_keeps_its_parent_cap` passed there, as recorded.
 
-## Stopped: ST-4 (slot allocated before a disposer record is rejected) and one +1 at `i32_arithmetic.rs:202`
+## Stopped, for the chief: ST-4 and ST-9 at `i32_arithmetic.rs:202`
 
 ST-4. `borrowed_temporary_field` and `binding_temporary_borrow` reject a call result whose record has a custom `Dispose` only after `self.slot(call_node, ..)`, because the answer comes from `DisposerLookup::select` (`outer_disposer`), which projects and ranks the `dispose` family and is charged. No paid fact names a custom disposer: `TypedReport::ownership_protection()` is a per-owner list that a scan would have to charge, and `primitive_protection()` covers primitives only. The standing rule-1 exception covers only a record or enum field or variant list, not a disposer selection, and the cost is far over its bound (c) of 150 work. Measured with `type Tracked = { x: i32 }; implement dispose(value: Tracked): void {}; function make(): Tracked { return Tracked { x: 1i32 }; }`:
 
@@ -61,9 +61,12 @@ No published cap moved. Every pinned cap in the filters below passes with no edi
 
 ## Checks (local, logs in `~/.t3/evidence/rill/m5-build-2026-11-22/ci-e8rg/`)
 
-- `m5-filters.log`: `--test m5 -- rfc_cases retained legacy_caps graph::inventory o16_join_order o15 o05`: 151 passed.
-- `m4_8.log`: `m4_8_scoped_join_caps`, `m4_8_match_boolean_snapshots`, `m4_8_callable_once`: pass.
-- `fmt.log`, `clippy.log`: clean.
+After merging the base tip `a4e56651` (C2, `ri-px1.11.1`), at `e2eff3b6`:
+
+- `m5-filters-merged.log`: `--test m5 -- rfc_cases retained legacy_caps graph::inventory o16_join_order o15 o05`: 156 passed.
+- `m4_8-merged.log`: `m4_8_scoped_join_caps`, `m4_8_match_boolean_snapshots`, `m4_8_callable_once`: pass.
+- `fmt2.log`, `clippy2.log`, `docs2.log`: `cargo fmt --all -- --check`, `cargo clippy -p compiler --tests -- -D warnings` and `mise run check:docs` clean; `git diff --check` and `git status --short | grep target/` empty.
+- `red-base.log`: the red run above. Before the merge the same filters passed on the branch alone (`m5-filters.log`, 151 passed; `m4_8.log`, `fmt.log`, `clippy.log`, `docs.log`).
 
 ## Not established
 
