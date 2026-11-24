@@ -44,6 +44,8 @@ mod o16_join_order;
 mod patterns;
 #[path = "support/pipeline.rs"]
 mod pipeline;
+#[path = "m5/probe.rs"]
+mod probe;
 #[path = "m5/propagation.rs"]
 mod propagation;
 #[path = "m5/prototype_status.rs"]
@@ -978,7 +980,7 @@ fn installed(test: &str, check: impl FnOnce(InstalledRequest)) {
     .unwrap();
     let output = support::run_copied_probe(
         Command::new(root.join("bin/m5-probe"))
-            .args(["--exact", test, "--nocapture"])
+            .args(["--exact", test, "--include-ignored", "--nocapture"])
             .env("RILL_M5_PROBE_ROOT", &root)
             .current_dir(root.join("app")),
     )

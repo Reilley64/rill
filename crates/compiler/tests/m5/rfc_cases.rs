@@ -19,6 +19,7 @@ use compiler::analysis::ownership::{GraphCompletion, Place, analyze_ownership, l
 use compiler::analysis::scalars::{BodyOwner, Site};
 use compiler::analysis::typed::TypedCompletion;
 use compiler::loader::DeclarationKind;
+use std::panic::{self, AssertUnwindSafe};
 
 #[path = "rfc_cases/list_contents.rs"]
 mod list_contents;
@@ -287,16 +288,56 @@ fn check_receipt<'g>(
     (whole, whole_stats): (GraphCompletion, Triple),
     roots: &[Root],
 ) {
+    let mut mismatches = Vec::<String>::new();
+    macro_rules! check {
+        ($ok:expr, $($message:tt)+) => {
+            if !$ok {
+                mismatches.push(format!($($message)+));
+            }
+        };
+    }
+    macro_rules! check_eq {
+        ($left:expr, $right:expr, $($message:tt)+) => {
+            match (&$left, &$right) {
+                (left, right) => {
+                    if *left != *right {
+                        mismatches.push(format!(
+                            "{}: left {left:?}, right {right:?}",
+                            format!($($message)+)
+                        ));
+                    }
+                }
+            }
+        };
+    }
+    macro_rules! check_limit {
+        ($context:expr, $assertion:expr) => {
+            if let Err(payload) = panic::catch_unwind(AssertUnwindSafe(|| $assertion)) {
+                mismatches.push(format!(
+                    "{}: {}",
+                    $context,
+                    payload
+                        .downcast_ref::<String>()
+                        .map(String::as_str)
+                        .or_else(|| payload.downcast_ref::<&str>().copied())
+                        .unwrap_or("limit assertion failed")
+                ));
+            }
+        };
+    }
     let receipt = typed.receipt().unwrap();
     let ownership = analyze_ownership(&receipt, AnalysisLimits::default());
-    assert_eq!(ownership.completion(), whole, "{context}");
-    assert_eq!(ownership.statistics(), statistics(whole_stats), "{context}");
+    check_eq!(ownership.completion(), whole, "{context}");
+    check_eq!(ownership.statistics(), statistics(whole_stats), "{context}");
     let (exact, short) = limits(ownership.statistics());
     let replay = analyze_ownership(&receipt, exact);
-    assert_eq!(replay.completion(), whole, "{context}");
-    assert_eq!(replay.statistics(), ownership.statistics(), "{context}");
+    check_eq!(replay.completion(), whole, "{context}");
+    check_eq!(replay.statistics(), ownership.statistics(), "{context}");
     for short in short {
-        crate::limit::assert_graph_limit(&analyze_ownership(&receipt, short));
+        check_limit!(
+            context,
+            crate::limit::assert_graph_limit(&analyze_ownership(&receipt, short))
+        );
     }
 
     let mut rejected = Vec::new();
@@ -324,7 +365,7 @@ fn check_receipt<'g>(
             .unwrap()
         };
         let target = query(AnalysisLimits::default());
-        assert_eq!(target.statistics(), statistics(root.stats), "{context}");
+        check_eq!(target.statistics(), statistics(root.stats), "{context}");
         let findings: Vec<_> = target
             .findings()
             .iter()
@@ -332,32 +373,52 @@ fn check_receipt<'g>(
             .collect();
         match root.want {
             Want::Checked => {
-                assert_eq!(target.completion(), Completion::Checked, "{context}");
-                assert!(target.mir().is_some_and(|mir| !mir.blocks.is_empty()));
-                assert!(findings.is_empty() && target.blocked_at().is_none());
+                check_eq!(target.completion(), Completion::Checked, "{context}");
+                check!(
+                    target.mir().is_some_and(|mir| !mir.blocks.is_empty()),
+                    "{context}: no MIR blocks"
+                );
+                check!(
+                    findings.is_empty() && target.blocked_at().is_none(),
+                    "{context}: findings {findings:?} or a blocker"
+                );
             }
             Want::Rejected {
                 code,
                 site,
                 related,
             } => {
-                assert_eq!(target.completion(), Completion::SourceRejected, "{context}");
-                assert!(target.mir().is_none() && target.blocked_at().is_none());
-                assert_eq!(findings, [(code, site.to_string(), related.to_string())]);
+                check_eq!(target.completion(), Completion::SourceRejected, "{context}");
+                check!(
+                    target.mir().is_none() && target.blocked_at().is_none(),
+                    "{context}: MIR or a blocker on a rejected root"
+                );
+                check_eq!(
+                    findings,
+                    [(code, site.to_string(), related.to_string())],
+                    "{context}"
+                );
             }
             Want::Incomplete { blocker } => {
-                assert_eq!(target.completion(), Completion::Incomplete, "{context}");
-                assert!(target.mir().is_none() && findings.is_empty());
-                assert_eq!(text(&target.blocked_at().unwrap()), blocker, "{context}");
+                check_eq!(target.completion(), Completion::Incomplete, "{context}");
+                check!(
+                    target.mir().is_none() && findings.is_empty(),
+                    "{context}: MIR or findings {findings:?} on an incomplete root"
+                );
+                check_eq!(
+                    target.blocked_at().map(|site| text(&site)),
+                    Some(blocker.to_owned()),
+                    "{context}"
+                );
             }
         }
         let (exact, short) = limits(target.statistics());
         let replay = query(exact);
-        assert_eq!(replay.completion(), target.completion(), "{context}");
-        assert_eq!(replay.statistics(), target.statistics(), "{context}");
+        check_eq!(replay.completion(), target.completion(), "{context}");
+        check_eq!(replay.statistics(), target.statistics(), "{context}");
         for short in short {
             let limited = query(short);
-            crate::limit::assert_body_limit(&limited);
+            check_limit!(context, crate::limit::assert_body_limit(&limited));
         }
 
         let graph_root = ownership
@@ -367,41 +428,51 @@ fn check_receipt<'g>(
             .unwrap();
         match root.graph.unwrap_or(root.want) {
             Want::Checked => {
-                assert_eq!(
+                check_eq!(
                     graph_root.ordinary_completion(),
                     Completion::Checked,
                     "{context}"
                 );
-                assert!(
+                check!(
                     graph_root
                         .ordinary_mir()
-                        .is_some_and(|mir| !mir.blocks.is_empty())
+                        .is_some_and(|mir| !mir.blocks.is_empty()),
+                    "{context}: no graph MIR blocks"
                 );
-                assert!(graph_root.blocked_at().is_none());
+                check!(
+                    graph_root.blocked_at().is_none(),
+                    "{context}: a graph blocker"
+                );
             }
             Want::Rejected {
                 code,
                 site,
                 related,
             } => {
-                assert_eq!(
+                check_eq!(
                     graph_root.ordinary_completion(),
                     Completion::SourceRejected,
                     "{context}"
                 );
-                assert!(graph_root.ordinary_mir().is_none() && graph_root.blocked_at().is_none());
+                check!(
+                    graph_root.ordinary_mir().is_none() && graph_root.blocked_at().is_none(),
+                    "{context}: graph MIR or a blocker on a rejected root"
+                );
                 rejected.push((code, site.to_string(), related.to_string()));
             }
             Want::Incomplete { blocker } => {
-                assert_eq!(
+                check_eq!(
                     graph_root.ordinary_completion(),
                     Completion::Incomplete,
                     "{context}"
                 );
-                assert!(graph_root.ordinary_mir().is_none());
-                assert_eq!(
-                    text(&graph_root.blocked_at().unwrap()),
-                    blocker,
+                check!(
+                    graph_root.ordinary_mir().is_none(),
+                    "{context}: graph MIR on an incomplete root"
+                );
+                check_eq!(
+                    graph_root.blocked_at().map(|site| text(&site)),
+                    Some(blocker.to_owned()),
                     "{context}"
                 );
             }
@@ -416,7 +487,13 @@ fn check_receipt<'g>(
         .collect();
     recorded.sort();
     rejected.sort();
-    assert_eq!(recorded, rejected, "{context}");
+    check_eq!(recorded, rejected, "{context}");
+    assert!(
+        mismatches.is_empty(),
+        "{} mismatches:\n{}",
+        mismatches.len(),
+        mismatches.join("\n")
+    );
 }
 
 const O1: &[Source] = &[Source {
@@ -3976,6 +4053,51 @@ fn o_rows_pre_charge_caps_now_give_resource_limit() {
                         (197917, 5950, 6),
                     ),
                 ],
+            );
+        },
+    );
+}
+
+#[test]
+fn check_receipt_collects_every_mismatch_before_it_fails() {
+    installed(
+        "rfc_cases::check_receipt_collects_every_mismatch_before_it_fails",
+        |request| {
+            fs::write(
+                &request.entry,
+                format!("{IMPORTS}\nfunction first(): i32 {{ return 1i32; }}\n"),
+            )
+            .unwrap();
+            let graph = loader::load_installed(request).unwrap();
+            let typed = analyze_typed(&graph, AnalysisLimits::default());
+            let module = graph
+                .modules()
+                .iter()
+                .find(|m| m.key.origin == Origin::Application && m.key.path == "main.rill")
+                .unwrap();
+            let roots = [Root {
+                name: "first",
+                want: Want::Checked,
+                graph: None,
+                stats: (0, 0, 0),
+            }];
+            let failure = panic::catch_unwind(AssertUnwindSafe(|| {
+                check_receipt(
+                    "whole",
+                    &typed,
+                    module,
+                    (GraphCompletion::ResourceLimit, (0, 0, 0)),
+                    &roots,
+                );
+            }))
+            .expect_err("the wrong numbers must fail");
+            let message = failure.downcast_ref::<String>().unwrap();
+            assert!(
+                message.lines().any(|line| line.starts_with("whole: left "))
+                    && message
+                        .lines()
+                        .any(|line| line.starts_with("whole, first: left ")),
+                "{message}"
             );
         },
     );

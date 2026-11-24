@@ -54,6 +54,12 @@ description = "Replay the published fixed work/entries/depth caps (m5::legacy_ca
 depends = ["doctor"]
 run = "cargo test --locked --no-default-features -p compiler --test m5 -- legacy_caps --test-threads=2"
 
+[tasks."probe:m5"]
+description = "Print the ownership pipeline's verdicts for the `=== name` sections of a sources file in both load modes (mise run probe:m5 -- <sources file>)"
+depends = ["doctor"]
+env = { RILL_M5_PROBE_VERBOSE = "1" }
+run = "sh -c 'RILL_M5_PROBE_SOURCES=$(cd \"$(dirname \"$1\")\" && pwd)/$(basename \"$1\") cargo test --locked --no-default-features -p compiler --test m5 -- --ignored probe_sources --nocapture --test-threads=1' probe:m5"
+
 [tasks."check:m5"]
 description = "Fail when the M5 ownership test binary lists no tests on this platform"
 depends = ["doctor"]
