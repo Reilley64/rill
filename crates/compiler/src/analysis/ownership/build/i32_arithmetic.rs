@@ -134,7 +134,9 @@ impl<'a, 'g> Build<'a, 'g, '_> {
 
     /// Admit `*parameter += literal` through an incoming `&mut i32`: read the
     /// referent, add the literal with the checked scalar addition, install the
-    /// sum through the descriptor and end the scratch slots.
+    /// sum through the descriptor and end the scratch slots. The descriptor
+    /// may also be an `&mut i32` field of a local record, `*record.field +=
+    /// literal` (RFC 0007 O7): its member slot carries the record's loan.
     pub(super) fn add_through_exclusive_i32(
         &mut self,
         node: NodeId,
@@ -155,7 +157,8 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         else {
             return Err(pending);
         };
-        if syntax[target].kind != NodeKind::ValueReference {
+        let member_target = syntax[target].kind == NodeKind::Field;
+        if syntax[target].kind != NodeKind::ValueReference && !member_target {
             return Err(pending);
         }
         // Facts already in hand: `value` reads them without a charge.
@@ -173,7 +176,14 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         ) else {
             return Err(pending);
         };
-        if !path.projections.is_empty()
+        if member_target {
+            if !matches!(path.projections.as_slice(), [PathProjection::Field(_)])
+                || path.root.kind != DeclarationKind::Binding
+                || target_facts.access != Access::Owned
+            {
+                return Err(pending);
+            }
+        } else if !path.projections.is_empty()
             || target_facts.access != Access::Owned
             || target_facts.binding != Some(path.root)
         {
@@ -184,6 +194,9 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         // the body was written that way.
         let mut local_descriptor = None;
         match path.root.kind {
+            // The descriptor is the record's own member slot, resolved below
+            // like a parameter's.
+            DeclarationKind::Binding if member_target => {}
             DeclarationKind::Parameter => {}
             DeclarationKind::Binding if self.exclusive_field_reborrows != 0 => {
                 let slot = self.place(target)?;
