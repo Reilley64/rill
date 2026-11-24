@@ -5,7 +5,8 @@ import std::option::Option;
 import std::result::{Result, Ok};
 import std::error::{display, formatError, intoValue};
 import std::fs::{readFile, writeFile};
-import std::string::{viewUtf8, bytes};
+import std::bytes::Bytes;
+import std::convert::{into, tryInto};
 import std::mutex::{Mutex, mutex, lock};
 import std::channel::{Sender, Receiver, channel, send, intoUnsent, after, select};
 import std::routine::{join, all};
@@ -50,7 +51,7 @@ function notify(sender: &Sender<Progress>, progress: Progress): void {
 function load(path: &string, updates: Sender<Progress>, counts: &Mutex<Counts>)
   : Result<List<Row>, AppError> {
   let data = readFile(path) ? AppError.Read { path: copy(path) };
-  let text = viewUtf8(&data) ? AppError.Decode { path: copy(path) };
+  let text = tryInto<&string>(&data) ? AppError.Decode { path: copy(path) };
   let raw = parseRows(text) ? AppError.Rows { path: copy(path) };
   let rows = map(raw, widen);
   let count = length(&rows);
@@ -104,7 +105,7 @@ function run(config: &Config): Result<void, AppError> {
   dispose(held);
   let report = renderReport(totals, snapshot);
   // Ok takes one argument: the successful void value of the write expression.
-  return Ok((writeFile(&config.output, bytes(&report))
+  return Ok((writeFile(&config.output, into<&Bytes>(&report))
     ? AppError.Write { path: copy(&config.output) }));
 }
 

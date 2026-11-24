@@ -14,7 +14,7 @@ The effectful functions show bounded config/certificate byte loading with separa
 
 `loadBounded(path,maximum)` opens ReadFile, uses readToEnd and closes on both success and failure. It returns owned bytes only after a successful read and close. Its LoadError retains both read and close failures when needed. IoError is noBorrow, so failure does not retain the consumed handle or local probe. When a load fails or exceeds its budget, this application deliberately discards its local partial config bytes. The nested standard limit error still preserves its overflow byte and simultaneous probe failure. This application policy is not a change to readToEnd's destination contract.
 
-Text configuration explicitly composes successful bytes with std::string::decodeUtf8; no automatic lossy path/config decoding. Certificate loading passes owned bytes to a separately designed ri-irw parser/provider; it does not prove certificate validity, trust or secure permissions. Metadata-before-read is not a security or stable-size check; the streaming budget is enforced during reading even if the file grows.
+Text configuration explicitly composes successful bytes with `tryInto<string>`; no automatic lossy path/config decoding. Certificate loading passes owned bytes to a separately designed ri-irw parser/provider; it does not prove certificate validity, trust or secure permissions. Metadata-before-read is not a security or stable-size check; the streaming budget is enforced during reading even if the file grows.
 
 ## Bounded copy workflow and partial effects
 

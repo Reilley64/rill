@@ -44,7 +44,7 @@ implement execute(target: &mut FixtureTarget, sql: string,
       }
     },
     Option.None => {},
-  }
+  };
   if (isCancellationRequested(&control.cancellation)) {
     return Err(DbError.Cancelled {
       observation: ExecutionObservation.NotSubmitted, source: Option.None,
@@ -63,10 +63,10 @@ implement execute(target: &mut FixtureTarget, sql: string,
             observation: ExecutionObservation.NotSubmitted, source: Option.None,
           });
         },
-      }
+      };
     },
     Option.None => {},
-  }
+  };
   target.submitted += 1u64;
   return Ok(ExecSummary { rowsAffected: Option.Some(1u64) });
 }

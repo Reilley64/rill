@@ -1,5 +1,8 @@
 use crate::pipeline::{self, ModeSummary, Outcome};
+use compiler::analysis::AnalysisLimits;
 use compiler::analysis::ownership::Completion;
+use compiler::analysis::typed::analyze_typed;
+use compiler::loader;
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -202,6 +205,30 @@ fn rows_count_the_roots_by_completion() {
                     "counted\ttest\tok\tChecked\t2\t1\t1\t0"
                 ]
             );
+        },
+    );
+}
+
+#[test]
+fn protected_overlap_rejection_reports_r0500() {
+    crate::installed(
+        "prototype_status::protected_overlap_rejection_reports_r0500",
+        |request| {
+            let app = request.entry.parent().unwrap().to_path_buf();
+            let source = fs::read_to_string(
+                Path::new(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../prototypes/21-diagnostics/rejections/protected-overlap.rill"),
+            )
+            .unwrap();
+            pipeline::replace_with_source(&app, "main.rill", &source);
+            let graph = loader::load_installed(request).expect("the rejection source loads");
+            let typed = analyze_typed(&graph, AnalysisLimits::default());
+            let codes: Vec<String> = typed
+                .ownership_overlaps()
+                .iter()
+                .map(|overlap| overlap.code().to_string())
+                .collect();
+            assert_eq!(codes, ["R0500"]);
         },
     );
 }

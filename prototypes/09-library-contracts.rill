@@ -5,10 +5,9 @@ import std::option::{Option, map as mapOption};
 import std::result::{Result, Ok, Err, map as mapResult, mapErr, isOk};
 import std::error::{display, cause, value, intoValue};
 import std::bytes::Bytes;
-import std::string::{viewUtf8, decodeLossy, chars};
-import std::char::{codePoint, fromCodePoint};
-import std::convert::{tryInto, ConversionError};
-import std::number::{parseNumber, wrappingAdd, saturatingAdd};
+import std::string::{decodeLossy, chars};
+import std::convert::{into, tryInto, ConversionError};
+import std::number::{wrappingAdd, saturatingAdd};
 import std::shared::{shared, view};
 import std::mutex::{Mutex, LockGuard, mutex, lock};
 import std::iter::{iterate, next};
@@ -197,23 +196,23 @@ function mappedCause(): bool {
 }
 
 function borrowedUtf8(): bool {
-  let data = Bytes([65u8, 66u8]);
-  guard let text = viewUtf8(&data) else (error) {
+  let data = into<Bytes>([65u8, 66u8]);
+  guard let text = tryInto<&string>(&data) else (error) {
     return false;
   }
   return *text == "AB";
 }
 
 function invalidUtf8(): bool {
-  let data = Bytes([255u8]);
-  guard let text = viewUtf8(&data) else (error) {
+  let data = into<Bytes>([255u8]);
+  guard let text = tryInto<&string>(&data) else (error) {
     return value(&error).validUpTo == 0u64;
   }
   return false;
 }
 
 function lossyUtf8(): bool {
-  let data = Bytes([255u8, 65u8]);
+  let data = into<Bytes>([255u8, 65u8]);
   return decodeLossy(&data) == "\u{fffd}A";
 }
 
@@ -227,9 +226,9 @@ function scalarCount(): u64 {
 }
 
 function invalidScalar(): bool {
-  return match (fromCodePoint(0xd800u32)) {
-    Option.Some(scalar) => false,
-    Option.None => true,
+  return match (tryInto<char>(0xd800u32)) {
+    Result.Ok(scalar) => false,
+    Result.Err(error) => true,
   };
 }
 
@@ -251,7 +250,7 @@ function fractionalConversion(): bool {
 }
 
 function parsedNumber(): bool {
-  guard let number = parseNumber<i32>(&"12") else (error) {
+  guard let number = tryInto<i32>(&"12") else (error) {
     return false;
   }
   return number == 12i32;
@@ -383,7 +382,7 @@ expect borrowedUtf8();
 expect invalidUtf8();
 expect lossyUtf8();
 expect scalarCount() == 2u64;
-expect codePoint('é') == 233u32;
+expect into<u32>('é') == 233u32;
 expect invalidScalar();
 expect narrowingFails();
 expect fractionalConversion();
