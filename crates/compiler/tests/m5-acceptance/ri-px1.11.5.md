@@ -109,13 +109,13 @@ Reverting only `typed/result_use/pairs.rs` (`git apply -R` of the source part of
 
 ## The "Unverified" item: who pays the `retained_contents` lookup
 
-Measured by a throwaway probe over 160 one-function modules (5 record shapes, 17 contexts each for `&mut &R` and for `&mut List<&R>`: a bare `&mut` borrow, a direct call, a piped call with the destination first or later, a family call and a forwarded parameter, among others), run on this branch and on the parents `bc9bfdd5` (before `ri-1up`) and `b6c93f30` (before `ri-ema`). Shapes and outputs: `probe-shapes/` and `compare-*.txt` in the log directory. No outcome or blocker moved for an unsupported record; the only flips are the admitted `i32` records (`Incomplete` to `Checked`, the ruled admissions).
+Measured by a throwaway probe over 165 one-function modules (5 record shapes; 17 contexts for `&mut &R` and 16 for `&mut List<&R>`: a bare `&mut` borrow, a direct call, a piped call with the destination first or later, a family call and a forwarded parameter, among others), run on this branch and on the parents `bc9bfdd5` (before `ri-1up`) and `b6c93f30` (before `ri-ema`). Shapes and outputs: `probe-shapes/` and `compare-*.txt` in the log directory. No outcome or blocker moved for an unsupported record; the only flips are the admitted `i32` records (`Incomplete` to `Checked`, the ruled admissions).
 
 - Piped calls pay. `dst |> touchTwo(s)` costs what `touchTwo(dst, s)` does (+144 work for a `string` field behind a list), and `dst |> touchF(s)` (family) pays the parameter's lookup only (+72).
 - A bare `&mut view` borrow of `&R` pays one lookup (`f` +72 for a `string` record).
 - Lists (against `b6c93f30`): every body that declares a `&mut List<&R>` parameter for an unsupported `R` pays one lookup (+72 `string` or nested, +70 enum), `Checked` or not; a root that also passes it on pays two (+144, up to +148 work and +3 entries). All stay inside bound (c). Under the standing ruling, listed in `docs/agents/compiler-metering.md` and pinned by `rfc_cases::list_contents::list_parameter_siblings_pay_their_lookup_and_keep_their_outcomes` (`string` field; seven module forms; old caps give `ResourceLimit`). A nested record and an enum were measured and not pinned: nested +72/+144/+148 as `string`, enum +70/+140/+144.
 - `&mut &R` (against `bc9bfdd5`): the same, except a root that declares a `&mut &R` parameter and passes it to a function that also takes a `&R` pays **three** lookups: +216 work for `string` and nested records, +210 for an enum, over bound (c). Reported, not listed: found bead `ri-zee8` (needs-triage).
-- Typed work moves +72 once in each module that holds such a parameter (one typed lookup).
+- Typed work also moves, by one lookup (+72 for a `string` record, +70 for an enum), in some modules whose body passes the value to a call (`compare-bc9bfdd5.txt` lists them); it is not pinned here.
 
 Old (parent) caps for the list modules were measured in a detached worktree of `b6c93f30` with the same module text; only roots whose cap moved assert `ResourceLimit` for the old value.
 
