@@ -153,6 +153,7 @@ fn installed_ownership_requires_the_built_archive() {
         );
         fs::write(facade, bytes).unwrap();
         let graph = loader::load_installed(request.clone()).unwrap();
+        let archive = fs::read(root.join(ARCHIVE)).unwrap();
         fs::write(root.join(ARCHIVE), b"substituted archive").unwrap();
         // Static evidence stays with the original captured inputs.
         assert!(
@@ -179,11 +180,19 @@ fn installed_ownership_requires_the_built_archive() {
         ",
         )
         .unwrap();
+        assert_eq!(
+            loader::load_installed(request.clone()).unwrap_err().kind,
+            FailureKind::InvalidRequest
+        );
+        fs::write(root.join(ARCHIVE), archive).unwrap();
         let graph = loader::load_installed(request).unwrap();
         let report = analyze_typed(&graph, AnalysisLimits::default());
         assert!(
-            report.ownership_protection().is_empty(),
-            "an unrelated same-spelled source must not request the archive"
+            report
+                .ownership_protection()
+                .iter()
+                .all(|p| p.owner.id.module.origin == Origin::Standard),
+            "an unrelated same-spelled source gets no ownership protection"
         );
         return;
     }
