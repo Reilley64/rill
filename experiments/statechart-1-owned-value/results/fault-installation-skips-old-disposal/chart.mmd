@@ -1,0 +1,98 @@
+---
+title: "The life of one owned value in one routine"
+---
+stateDiagram-v2
+  direction LR
+  state "Legend" as legend {
+    lg0: running
+    lg1: exit cleanup
+    lg2: left
+    lg3: ended by panic, no cleanup
+    lg4: Breaks OldValueGoneBeforeInstallation
+    lg5: Breaks NormalExitDisposesEachOwnedValueOnce or OldValueGoneBeforeInstallation or PropagationExitDisposesEachOwnedValueOnce in some cases
+    lg6: Path to the NormalExitDisposesEachOwnedValueOnce or OldValueGoneBeforeInstallation or PropagationExitDisposesEachOwnedValueOnce bug
+  }
+  class lg0 blue
+  class lg1 orange
+  class lg2 teal
+  class lg3 pink
+  class lg4 breaks
+  class lg5 mayBreak
+  class lg6 bugPath
+  state "At the same time" as all {
+    state "Owned value" as r0 {
+      s0: Uninitialized
+      s1: Initialized
+      s2: Remaining-field cleanup
+      s3: Moved out
+      s4: Replacement complete, old value still in place
+      s5: Disposed
+      s6: Old value under disposal
+      s7: Old value gone, replacement not yet installed
+      s8: Replacement installed over a live old value
+      s9: Initialized, replacement installed
+      [*] --> s0
+      s0 --> s1: the value is initialized [when Running]
+      s1 --> s2: the routine calls dispose on the value [when Running]
+      s1 --> s3: the whole value is moved out [when Running]
+      s1 --> s4: the replacement value is complete [when Running]
+      s1 --> s2: exit cleanup begins on the value [when Normal exit: cleaning up or Propagation exit: cleaning up]
+      s2 --> s5: the last remaining field is cleaned up [unless Program ended by panic]
+      s3 --> s7: the replacement value is complete [when Running]
+      s4 --> s6: disposal of the old value begins [when Running]
+      s4 --> s8: FAULT: the replacement is installed over the old value [when Running]
+      s5 --> s7: the replacement value is complete [when Running]
+      s6 --> s7: the last remaining field is cleaned up [when Running]
+      s7 --> s9: the replacement is installed [when Running]
+      s8 --> s2: the routine calls dispose on the value [when Running]
+      s8 --> s3: the whole value is moved out [when Running]
+      s8 --> s2: exit cleanup begins on the value [when Normal exit: cleaning up or Propagation exit: cleaning up]
+      s9 --> s2: the routine calls dispose on the value [when Running]
+      s9 --> s3: the whole value is moved out [when Running]
+      s9 --> s2: exit cleanup begins on the value [when Normal exit: cleaning up or Propagation exit: cleaning up]
+    }
+    --
+    state "Routine" as r1 {
+      s10: Running
+      s11: Normal exit: cleaning up
+      s12: Propagation exit: failure not yet in the caller's result
+      s13: Program ended by panic
+      s14: Left by normal exit
+      s15: Propagation exit: cleaning up
+      s16: Left by propagation exit
+      [*] --> s10
+      s10 --> s11: the routine returns [unless Old value gone, replacement not yet installed or Old value under disposal or Remaining-field cleanup or Replacement complete, old value still in place]
+      s10 --> s12: the routine propagates a failure [unless Old value gone, replacement not yet installed or Old value under disposal or Remaining-field cleanup or Replacement complete, old value still in place]
+      s10 --> s13: a panic begins
+      s11 --> s14: cleanup is complete, the routine returns to its caller [when Disposed or Moved out or Uninitialized]
+      s11 --> s13: a panic begins
+      s12 --> s15: the failure moves into the caller's result
+      s12 --> s13: a panic begins
+      s15 --> s16: cleanup is complete, the caller receives the failure [when Disposed or Moved out or Uninitialized]
+      s15 --> s13: a panic begins
+    }
+  }
+  classDef breaks fill:#ffecee,stroke:#e72e3b,stroke-width:2.5px,color:#cd2834
+  classDef mayBreak fill:#fff3e6,stroke:#e8730c,stroke-width:2.5px,color:#b85a06
+  class s0 bugPath
+  class s1 bugPath
+  class s2 mayBreak
+  class s3 mayBreak
+  class s3 bugPath
+  class s4 bugPath
+  class s5 mayBreak
+  class s8 breaks
+  class s8 bugPath
+  class s10 blue
+  class s10 bugPath
+  class s11 orange
+  class s11 bugPath
+  class s12 orange
+  class s12 bugPath
+  class s13 pink
+  class s14 teal
+  class s14 bugPath
+  class s15 orange
+  class s15 bugPath
+  class s16 teal
+  class s16 bugPath

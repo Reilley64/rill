@@ -1,0 +1,29 @@
+---
+title: "Replacement of one owned value"
+---
+stateDiagram-v2
+  s0: Uninitialized
+  s1: Initialized
+  s2: Moved out
+  s3: Replacement complete, old value still in place
+  s4: Disposing: dispose overload running
+  s5: Old value gone, replacement not yet installed
+  s6: Remaining-field cleanup
+  s7: Old value under disposal
+  s8: Disposed
+  s9: Initialized, replacement installed
+  [*] --> s0
+  s0 --> s1: the value is initialized
+  s1 --> s2: the whole value is moved out
+  s1 --> s3: the replacement value is complete
+  s1 --> s4: the routine calls dispose on the value or exit cleanup begins on the value
+  s2 --> s5: the replacement value is complete
+  s3 --> s7: disposal of the old value begins
+  s4 --> s6: the dispose overload returns, fields remain
+  s4 --> s8: the dispose overload returns, no field is left to clean
+  s5 --> s9: the replacement is installed
+  s6 --> s8: the last remaining field is cleaned up
+  s8 --> s5: the replacement value is complete
+  s7 --> s5: the dispose overload returns, no field is left to clean or the last remaining field is cleaned up
+  s9 --> s2: the whole value is moved out
+  s9 --> s4: the routine calls dispose on the value or exit cleanup begins on the value

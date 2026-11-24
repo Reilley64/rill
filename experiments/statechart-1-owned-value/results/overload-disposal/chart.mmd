@@ -1,0 +1,19 @@
+---
+title: "Disposal of one value: dispose overload, then remaining-field cleanup"
+---
+stateDiagram-v2
+  s0: No disposal in progress
+  s1: Dispose overload running, two fields still owned
+  s2: Dispose overload running, one field still owned
+  s3: Remaining-field cleanup, two fields left
+  s4: Dispose overload running, no field still owned
+  s5: Remaining-field cleanup, one field left
+  [*] --> s0
+  s0 --> s1: disposal of a value begins
+  s1 --> s2: the dispose overload moves or disposes a field
+  s1 --> s3: the dispose overload returns
+  s2 --> s4: the dispose overload moves or disposes a field
+  s2 --> s5: the dispose overload returns
+  s3 --> s5: cleanup disposes the last-declared remaining field
+  s4 --> s0: the dispose overload returns
+  s5 --> s0: cleanup disposes the last-declared remaining field

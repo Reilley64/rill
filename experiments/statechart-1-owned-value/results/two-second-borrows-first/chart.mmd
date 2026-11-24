@@ -1,0 +1,45 @@
+---
+title: "Exit cleanup order between two owned values"
+---
+stateDiagram-v2
+  state "Legend" as legend {
+    lg0: running
+    lg1: exit cleanup
+    lg2: left
+    lg3: ended by panic, no cleanup
+  }
+  class lg0 blue
+  class lg1 orange
+  class lg2 teal
+  class lg3 pink
+  s0: Running
+  s1: Exit cleanup, the routine owns no value
+  s2: Program ended by panic
+  s3: Left
+  s4: Exit cleanup, the routine owns only the first value
+  s5: First value under disposal, second not owned
+  s6: Exit cleanup, the routine owns both values
+  s7: Second value under disposal, first still owned
+  [*] --> s0
+  s0 --> s1: the routine returns or propagates a failure while it owns no value
+  s0 --> s2: a panic begins
+  s1 --> s3: cleanup is complete
+  s1 --> s2: a panic begins
+  s0 --> s4: the routine returns or propagates a failure while it owns only the first value
+  s4 --> s5: cleanup begins on the first value
+  s4 --> s2: a panic begins
+  s0 --> s6: the routine returns or propagates a failure while it owns both values
+  s5 --> s1: the value is disposed
+  s5 --> s2: a panic begins
+  s6 --> s7: cleanup begins on the second value
+  s6 --> s2: a panic begins
+  s7 --> s4: the value is disposed
+  s7 --> s2: a panic begins
+  class s0 blue
+  class s1 orange
+  class s2 pink
+  class s3 teal
+  class s4 orange
+  class s5 orange
+  class s6 orange
+  class s7 orange
