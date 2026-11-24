@@ -2,5 +2,5 @@
 import std::mutex::LockGuard;
 type Payload = { value: u64 };
 
-implement dispose(guard: LockGuard<Payload>): void {
+implement dispose(value: LockGuard<Payload>): void {
 }

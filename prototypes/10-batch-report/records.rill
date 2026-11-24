@@ -5,8 +5,7 @@ import std::option::Option;
 import std::result::{Result, Ok, Err, isOk};
 import std::error::{display, cause};
 import std::string::{slice, charIndices, length as textLength};
-import std::number::parseNumber;
-import std::convert::into;
+import std::convert::{into, tryInto};
 
 export type RawRow = { label: string; amount: i32 };
 export type Row = { label: string; amount: i64 };
@@ -50,7 +49,7 @@ function parseLine(text: &string, number: u64): Result<RawRow, RowError> {
   }
   let label = knownSlice(text, 0u64, at);
   let digits = knownSlice(text, at + 1u64, textLength(text));
-  let amount = parseNumber<i32>(digits) ? RowError.Number { line: number };
+  let amount = tryInto<i32>(digits) ? RowError.Number { line: number };
   return Ok(RawRow { label: copy(label), amount: amount });
 }
 

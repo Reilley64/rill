@@ -6,7 +6,7 @@ import std::env::{Inputs, EnvError, EnvErrorKind, EnvPosition, inputs, fromParts
   argsBytes, varsBytes, getBytes, args, vars, get, kind, position};
 import std::collection::{List, length, get as at};
 import std::bytes::{Bytes, length as byteLength, get as byteAt};
-import std::string::{bytes, decodeUtf8};
+import std::convert::{into, tryInto};
 import std::compare::eq;
 import std::option::Option;
 import std::result::Result;
@@ -14,7 +14,7 @@ import std::error::value;
 import std::routine::join;
 
 function encoded(text: &string): Bytes {
-  return copy(bytes(text));
+  return copy(into<&Bytes>(text));
 }
 
 function fixture(arguments: List<Bytes>, variables: List<[Bytes, Bytes]>): Inputs {
@@ -45,7 +45,7 @@ function nameAt(snapshot: &Inputs, index: u64, expected: &string): bool {
   guard let [name, content] = at(varsBytes(snapshot), index) else {
     return false;
   }
-  guard let text = decodeUtf8(name) else {
+  guard let text = tryInto<string>(name) else {
     return false;
   }
   return eq(&text, expected);
@@ -72,7 +72,7 @@ function emptySynthetic(): bool {
 }
 
 function fullArgumentSequence(): bool {
-  let snapshot = fixture([encoded(&"launcher label"), encoded(&"two words"), Bytes([])], []);
+  let snapshot = fixture([encoded(&"launcher label"), encoded(&"two words"), into<Bytes, List<u8>>([])], []);
   guard let text = args(&snapshot) else {
     return false;
   }
@@ -96,7 +96,7 @@ function sortedVariables(): bool {
 }
 
 function absentIsNotEmpty(): bool {
-  let snapshot = fixture([], [[encoded(&"EMPTY"), Bytes([])]]);
+  let snapshot = fixture([], [[encoded(&"EMPTY"), into<Bytes, List<u8>>([])]]);
   guard let missing = get(&snapshot, &"MISSING") else {
     return false;
   }
@@ -112,7 +112,7 @@ function unrestrictedNamesAndEquals(): bool {
 }
 
 function rawInvalidUtf8Preserved(): bool {
-  let snapshot = fixture([], [[encoded(&"RAW"), Bytes([255u8])]]);
+  let snapshot = fixture([], [[encoded(&"RAW"), into<Bytes>([255u8])]]);
   let key = encoded(&"RAW");
   guard let found = getBytes(&snapshot, &key) else {
     return false;
@@ -127,8 +127,8 @@ function rawInvalidUtf8Preserved(): bool {
 }
 
 function nonUtf8NameIsUsableAsBytes(): bool {
-  let snapshot = fixture([], [[Bytes([255u8]), encoded(&"kept")]]);
-  let key = Bytes([255u8]);
+  let snapshot = fixture([], [[into<Bytes>([255u8]), encoded(&"kept")]]);
+  let key = into<Bytes>([255u8]);
   guard let found = getBytes(&snapshot, &key) else {
     return false;
   }
@@ -140,32 +140,32 @@ function nonUtf8NameIsUsableAsBytes(): bool {
 
 function unrelatedInvalidTextDoesNotBreakLookup(): bool {
   let snapshot = fixture([], [
-    [Bytes([255u8]), Bytes([254u8])],
+    [into<Bytes>([255u8]), into<Bytes>([254u8])],
     [encoded(&"GOOD"), encoded(&"usable")],
   ]);
   return textIs(get(&snapshot, &"GOOD"), &"usable");
 }
 
 function invalidValueKind(): Option<EnvErrorKind> {
-  let snapshot = fixture([], [[encoded(&"RAW"), Bytes([255u8])]]);
+  let snapshot = fixture([], [[encoded(&"RAW"), into<Bytes>([255u8])]]);
   return errorKindOf(get(&snapshot, &"RAW"));
 }
 
 function invalidArgumentTextPosition(): Option<EnvPosition> {
-  let snapshot = fixture([encoded(&"label"), Bytes([255u8])], []);
+  let snapshot = fixture([encoded(&"label"), into<Bytes>([255u8])], []);
   return errorPositionOf(args(&snapshot));
 }
 
 function sortedTextErrorPosition(): Option<EnvPosition> {
   let snapshot = fixture([], [
-    [encoded(&"z"), Bytes([255u8])],
+    [encoded(&"z"), into<Bytes>([255u8])],
     [encoded(&"a"), encoded(&"valid")],
   ]);
   return errorPositionOf(vars(&snapshot));
 }
 
 function invalidNameTextPosition(): Option<EnvPosition> {
-  let snapshot = fixture([], [[Bytes([255u8]), Bytes([254u8])]]);
+  let snapshot = fixture([], [[into<Bytes>([255u8]), into<Bytes>([254u8])]]);
   return errorPositionOf(vars(&snapshot));
 }
 
@@ -271,23 +271,23 @@ expect match (invalidNameTextPosition()) {
   Option.Some(EnvPosition.VariableName(0u64)) => true,
   _ => false,
 };
-expect match (errorKindOf(fromParts([Bytes([0u8])], []))) {
+expect match (errorKindOf(fromParts([into<Bytes>([0u8])], []))) {
   Option.Some(EnvErrorKind.InvalidArgument) => true,
   _ => false,
 };
-expect match (errorKindOf(fromParts([], [[Bytes([]), Bytes([])]]))) {
+expect match (errorKindOf(fromParts([], [[into<Bytes, List<u8>>([]), into<Bytes, List<u8>>([])]]))) {
   Option.Some(EnvErrorKind.InvalidName) => true,
   _ => false,
 };
-expect match (errorKindOf(fromParts([], [[encoded(&"A=B"), Bytes([])]]))) {
+expect match (errorKindOf(fromParts([], [[encoded(&"A=B"), into<Bytes, List<u8>>([])]]))) {
   Option.Some(EnvErrorKind.InvalidName) => true,
   _ => false,
 };
-expect match (errorKindOf(fromParts([], [[Bytes([65u8, 0u8]), Bytes([])]]))) {
+expect match (errorKindOf(fromParts([], [[into<Bytes>([65u8, 0u8]), into<Bytes, List<u8>>([])]]))) {
   Option.Some(EnvErrorKind.InvalidName) => true,
   _ => false,
 };
-expect match (errorKindOf(fromParts([], [[encoded(&"KEY"), Bytes([0u8])]]))) {
+expect match (errorKindOf(fromParts([], [[encoded(&"KEY"), into<Bytes>([0u8])]]))) {
   Option.Some(EnvErrorKind.InvalidValue) => true,
   _ => false,
 };
@@ -305,7 +305,7 @@ expect match (errorKindOf(fromParts([], [
   Option.Some(EnvErrorKind.DuplicateName) => true,
   _ => false,
 };
-expect match (errorKindOf(fromParts([Bytes([0u8])], [[Bytes([]), Bytes([])]]))) {
+expect match (errorKindOf(fromParts([into<Bytes>([0u8])], [[into<Bytes, List<u8>>([]), into<Bytes, List<u8>>([])]]))) {
   Option.Some(EnvErrorKind.InvalidArgument) => true,
   _ => false,
 };
@@ -317,7 +317,7 @@ function invalidTextLookup(): Option<EnvPosition> {
 
 function invalidByteLookup(): Option<EnvErrorKind> {
   let snapshot = fixture([], []);
-  let name = Bytes([65u8, 0u8]);
+  let name = into<Bytes>([65u8, 0u8]);
   return errorKindOf(getBytes(&snapshot, &name));
 }
 
