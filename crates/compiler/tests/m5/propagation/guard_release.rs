@@ -110,6 +110,7 @@ const FIXTURE: &str = r#"
         "#;
 
 type Step = (&'static str, String);
+type Witness = (&'static str, Vec<Step>, Vec<Step>, (usize, usize, usize));
 
 fn steps(items: &[(&'static str, &str)]) -> Vec<Step> {
     items
@@ -216,7 +217,7 @@ fn bare_guard_is_released_once_on_each_propagation_exit() {
                 all.append(&mut tail);
                 all
             };
-            let witnesses: [(&str, Vec<Step>, Vec<Step>, (usize, usize, usize)); 3] = [
+            let witnesses: [Witness; 3] = [
                 (
                     "forward",
                     bare_failure("input", "input?"),
