@@ -20,6 +20,8 @@ use compiler::analysis::scalars::{BodyOwner, Site};
 use compiler::analysis::typed::TypedCompletion;
 use compiler::loader::DeclarationKind;
 
+#[path = "rfc_cases/list_contents.rs"]
+mod list_contents;
 #[path = "rfc_cases/o12.rs"]
 mod o12;
 #[path = "rfc_cases/o20.rs"]
@@ -946,26 +948,30 @@ function local(dst: &mut List<&User>): void {
   retain(dst, &user);
 }
 "#,
+    // The parent measured both roots `Incomplete` at their calls: `forwarded`
+    // 1,930 / 55 / 3, `local` 2,292 / 118 / 3, whole graph 189,463 / 4,237 / 5
+    // (typed unchanged at 329,382 / 48,563 / 12).
+    // `o09_pre_list_contents_caps_now_give_resource_limit` pins them.
     outcome: Outcome::Receipt {
         typed_stats: (329382, 48563, 12),
-        graph: (GraphCompletion::Incomplete, (189463, 4237, 5)),
+        graph: (GraphCompletion::SourceRejected, (192306, 4641, 6)),
         pre_equality_graph: (189147, 4103, 3),
         roots: &[
             Root {
                 name: "forwarded",
-                want: Want::Incomplete {
-                    blocker: r####"retain(dst, source)"####,
-                },
+                want: Want::Checked,
                 graph: None,
-                stats: (1930, 55, 3),
+                stats: (3330, 243, 5),
             },
             Root {
                 name: "local",
-                want: Want::Incomplete {
-                    blocker: r####"retain(dst, &user)"####,
+                want: Want::Rejected {
+                    code: "R0202",
+                    site: "retain(dst, &user)",
+                    related: "&user",
                 },
                 graph: None,
-                stats: (2292, 118, 3),
+                stats: (3726, 332, 6),
             },
         ],
     },
@@ -2720,10 +2726,29 @@ fn o08_pre_record_contents_typed_cap_now_gives_resource_limit() {
 }
 
 #[test]
-fn o09_retained_list_source_contract_is_incomplete_at_its_calls() {
+fn o09_retained_list_source_checks_forwarded_and_rejects_local() {
     run(
-        "rfc_cases::o09_retained_list_source_contract_is_incomplete_at_its_calls",
+        "rfc_cases::o09_retained_list_source_checks_forwarded_and_rejects_local",
         O9,
+    );
+}
+
+/// Metering rule 11, mandated flips (ri-ema): both roots and the whole graph
+/// moved, so each parent cap now gives `ResourceLimit`.
+#[test]
+fn o09_pre_list_contents_caps_now_give_resource_limit() {
+    installed(
+        "rfc_cases::o09_pre_list_contents_caps_now_give_resource_limit",
+        |request| {
+            list_contents::old_root_caps(
+                &request,
+                &[(
+                    O9[0].text,
+                    &[("forwarded", (1930, 55, 3)), ("local", (2292, 118, 3))],
+                    (189463, 4237, 5),
+                )],
+            );
+        },
     );
 }
 

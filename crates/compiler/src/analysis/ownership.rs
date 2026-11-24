@@ -5,7 +5,8 @@ use super::scalars::{BodyOwner, NodeFactKind, NodeFacts, Site};
 use super::typed::{CollectionProvider, CollectionRepresentation, TypedReceipt, TypedReport};
 use super::{
     AnalysisLimits, DeclarationShape, InvocationMode, Module, NodeId, QueryError, Statistics, Type,
-    TypeTerm, retained_bool_contents_type, retained_contents_type, retained_record_contents,
+    TypeTerm, retained_bool_contents_type, retained_contents_type, retained_i32_record,
+    retained_record_contents,
 };
 use crate::loader::{CollectionArtifact, Declaration, DeclarationId, DeclarationKind};
 use crate::source::Span;
@@ -1771,7 +1772,7 @@ fn lower<'a, 'g>(
         let slot = build.parameter(parameter)?;
         params.push(slot);
         owns_guard |= build.slots[slot].contains_guard();
-        if let Some(ty) = retained_contents_of(typed, &parameter.ty, build.budget)? {
+        if let Some(ty) = retained_destination_contents(typed, &parameter.ty, build.budget)? {
             let contents = build.slot(parameter.declaration.node, ty)?;
             build.budget.reserve(1)?;
             build
@@ -2087,7 +2088,7 @@ fn retained_contract<'a, 'g>(
     let Some(destination_ty) = parameters.get(destination).map(|formal| &formal.ty) else {
         return Ok(None);
     };
-    let contents = retained_contents_of(typed, destination_ty, budget)?;
+    let contents = retained_destination_contents(typed, destination_ty, budget)?;
     retained_contract_of(
         parameters.iter().map(|formal| &formal.ty),
         result,
@@ -2109,6 +2110,61 @@ fn retained_contents_of<'a, 'g>(
         return Ok(Some(contents));
     }
     Ok(retained_record_contents(typed.inventory(), ty, budget)?)
+}
+
+// `retained_contents_of`, and the element contents of a `&mut List<&R>`
+// destination (rule R1). Only the destination routes use it: the screen that
+// looks for a retained parameter by its descriptor contents keeps
+// `retained_contents_of`, so a list parameter pays its record lookup once.
+fn retained_destination_contents<'a, 'g>(
+    typed: &TypedReport<'g>,
+    ty: &'a TypeTerm<'g>,
+    budget: &mut Budget,
+) -> ResultOf<Option<&'a Type<'g>>> {
+    if let Some(contents) = retained_contents_of(typed, ty, budget)? {
+        return Ok(Some(contents));
+    }
+    match retained_list_candidate(typed, ty) {
+        Some(contents) => Ok(retained_i32_record(typed.inventory(), contents, budget)?),
+        None => Ok(None),
+    }
+}
+
+// Rule R1 (RFC 0007, nested routing): a `&mut List<&R>` destination holds the
+// element contents `&R`, with `R` a non-generic application nominal. The type
+// alone decides this, free; the record lookup is `retained_i32_record`'s.
+fn retained_list_candidate<'a, 'g>(
+    typed: &TypedReport<'g>,
+    ty: &'a TypeTerm<'g>,
+) -> Option<&'a Type<'g>> {
+    let TypeTerm::Reference {
+        mutable: true,
+        referent,
+    } = ty
+    else {
+        return None;
+    };
+    let TypeTerm::Nominal {
+        declaration,
+        arguments,
+    } = referent.as_ref()
+    else {
+        return None;
+    };
+    if !typed
+        .list_role()
+        .is_some_and(|list| std::ptr::eq(*declaration, &list.declaration.id))
+    {
+        return None;
+    }
+    let [element] = arguments.as_slice() else {
+        return None;
+    };
+    matches!(element.as_ref(), TypeTerm::Reference { mutable: false, referent: record }
+        if matches!(record.as_ref(), TypeTerm::Nominal { declaration, arguments }
+            if declaration.module.origin == crate::loader::Origin::Application
+                && arguments.is_empty()))
+    .then_some(element)
 }
 
 // The contract over parameter types, charging through `step`. A screen passes

@@ -129,7 +129,7 @@ fn unsupported_record_reads_keep_their_parent_caps() {
     );
 }
 
-const fn checked(name: &'static str, stats: Triple) -> Root {
+pub(super) const fn checked(name: &'static str, stats: Triple) -> Root {
     Root {
         name,
         want: Want::Checked,
@@ -138,7 +138,7 @@ const fn checked(name: &'static str, stats: Triple) -> Root {
     }
 }
 
-const fn incomplete(name: &'static str, blocker: &'static str, stats: Triple) -> Root {
+pub(super) const fn incomplete(name: &'static str, blocker: &'static str, stats: Triple) -> Root {
     Root {
         name,
         want: Want::Incomplete { blocker },
@@ -147,7 +147,7 @@ const fn incomplete(name: &'static str, blocker: &'static str, stats: Triple) ->
     }
 }
 
-const fn rejected(
+pub(super) const fn rejected(
     name: &'static str,
     code: &'static str,
     site: &'static str,
