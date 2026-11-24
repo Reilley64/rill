@@ -129,6 +129,16 @@ fn retained_record_contents<'a, 'g>(
     let Some(contents) = retained_record_candidate(ty) else {
         return Ok(None);
     };
+    retained_i32_record(inventory, contents, budget)
+}
+
+// `contents` is `&R`: the same charged lookup of `R`'s declaration, for a
+// `&mut &R` destination and for the element of a `&mut List<&R>` (rule R1).
+fn retained_i32_record<'a, 'g>(
+    inventory: &ordinary::OrdinaryAnalysis<'g>,
+    contents: &'a Type<'g>,
+    budget: &mut declarations::Budget,
+) -> Result<Option<&'a Type<'g>>, ()> {
     let TypeTerm::Reference { referent, .. } = contents.as_ref() else {
         return Ok(None);
     };
