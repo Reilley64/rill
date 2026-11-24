@@ -388,7 +388,20 @@ fn liveness(
             Action::Init(root) if slots[root].exclusive_member => {
                 root + 1..root + 1 + slots[root].members
             }
+            // A member replacement stages its loan next to the record's
+            // other members, so they stay live at the store as at `Init`.
+            Action::Displace { target, .. }
+                if slots[slots[target].owner].exclusive_member && slots[target].owner != target =>
+            {
+                let owner = slots[target].owner;
+                owner + 1..owner + 1 + slots[owner].members
+            }
             _ => 0..0,
+        };
+        // The store releases the replaced member, so its old loan is not held.
+        let replaced = match instruction.action {
+            Action::Displace { target, .. } => Some(target),
+            _ => None,
         };
         // Caller storage can still expose its installed value until a write
         // commits, even if normal local liveness would kill that version.
@@ -396,7 +409,7 @@ fn liveness(
             .into_iter()
             .flatten()
             .chain(args.iter().copied())
-            .chain(stages)
+            .chain(stages.filter(|&stage| Some(stage) != replaced))
             .chain(displaced)
             .chain(retained.values().map(|contents| contents.slot()))
         {
