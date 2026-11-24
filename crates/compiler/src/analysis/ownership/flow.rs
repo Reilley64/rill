@@ -385,6 +385,9 @@ fn liveness(
                 first..first + count * slots[first].storage(first).len()
             }
             Action::FormatI32Template { first, count, .. } => first..first + count,
+            Action::Init(root) if slots[root].exclusive_member => {
+                root + 1..root + 1 + slots[root].members
+            }
             _ => 0..0,
         };
         // Caller storage can still expose its installed value until a write
