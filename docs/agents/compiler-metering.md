@@ -139,7 +139,7 @@ A determination reused across revisits is valid only while every premise it used
 
 ## 10. A review finding closes with a committed test
 
-A reviewer's finding is closed only by a test in the repository that fails without the fix. A probe in `/tmp` or a worker's summary does not close it. The test source lives in `crates/compiler/tests/`.
+A reviewer's finding is closed only by a test in the repository that fails without the fix. A probe in `/tmp` or a worker's summary does not close it. The test source lives in `crates/compiler/tests/`. A finding about a family of forms closes with a test over the family. A sentence about all forms names the test that sweeps them.
 
 - **Check:** each fix commit for a finding adds or edits a test. Reverting only the source change fails that test, and the finding or its bead is named in the commit message.
 - **Example:** `343ff586` pins `dispose<Bag>((value))`, a grouped disposer operand, in `tests/m5/disposers.rs` together with the source fix that keeps it independently typed.
