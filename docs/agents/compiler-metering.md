@@ -4,7 +4,7 @@ Apply this page to every diff under `crates/compiler/src/analysis/` and every te
 
 Vocabulary: a **cap** is one `(work, entries, depth)` limit in `AnalysisLimits`. **Exact** is the cap equal to the measured statistics; **one short** lowers one axis by one. A **targeted** query is one function (`lower_body`); a **graph** query is the whole receipt (`analyze_ownership`). The **ledger** is [`m5-acceptance.md`](../../crates/compiler/tests/m5-acceptance.md). Each rule cites one commit that shows the fix.
 
-M5 evidence states its load mode and its limit: a result is replayed in both installed load modes, and a test over MIR or typed facts is not Rill execution. Say "no Rill program ran" unless one did.
+M5 evidence covers both installed load modes. MIR tests are not Rill execution.
 
 ## 1. Screen before you charge
 
