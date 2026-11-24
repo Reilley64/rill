@@ -145,9 +145,9 @@ pub(crate) fn generics_limit_flaws(report: &GenericReport<'_>) -> Vec<&'static s
     flaws
 }
 
-/// A `ConversionReport`: no finding through `type_facts` or any declaration
-/// header's metadata. Its bodies are `assert_generics_limit`'s. The graph names
-/// the headers.
+/// A `ConversionReport`: no finding, no declaration, use or obligation through
+/// `type_facts` and no header through `header_metadata` (metering rule 8). Its
+/// bodies are `assert_generics_limit`'s. The graph names the headers.
 pub(crate) fn conversion_limit_flaws(
     graph: &Graph,
     report: &ConversionReport<'_, '_>,
@@ -159,10 +159,32 @@ pub(crate) fn conversion_limit_flaws(
     if report.type_facts().findings().next().is_some() {
         flaws.push("publishes a type finding");
     }
+    let facts = report.type_facts();
+    if facts.declarations().next().is_some()
+        || facts.type_uses().next().is_some()
+        || facts.obligations().next().is_some()
+    {
+        flaws.push("publishes type facts");
+    }
     if conversion_header_finding(graph, report) {
         flaws.push("publishes a header metadata finding");
     }
+    if conversion_headers(graph, report) != 0 {
+        flaws.push("publishes a header");
+    }
     flaws
+}
+
+/// How many declarations of the graph have a header through the conversion
+/// report's `header_metadata`. `Ok(None)` is both "no header" and, at
+/// `ResourceLimit`, "withheld".
+pub(crate) fn conversion_headers(graph: &Graph, report: &ConversionReport<'_, '_>) -> usize {
+    graph
+        .modules()
+        .iter()
+        .flat_map(|module| &module.declarations)
+        .filter(|declaration| report.header_metadata(&declaration.id).unwrap().is_some())
+        .count()
 }
 
 /// Whether any declaration header of the conversion report publishes a metadata finding.
