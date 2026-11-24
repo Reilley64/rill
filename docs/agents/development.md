@@ -24,6 +24,5 @@
    - A cancelled hosted job is no result: rerun it.
    - `gc bd create --body-file` needs an absolute path.
    - `gc bd ready` hides the children of a blocked parent.
-   - A worker's summary is not evidence: check the source and the logs.
 
 Completion requires passing applicable implemented checks and an explicit list of unavailable or unrun acceptance gates. Release/support claims require every supported profile, not a successful skip or a configured CI matrix. Preserve prototype sources and recorded experiment evidence unless the task expressly changes them.

@@ -11,3 +11,5 @@ Use the glossary's terms in code, tickets and prose. If a term is missing, ident
 Read complete ADR filenames and their decision links. Historical ADR/prototype number collisions do not identify one artifact. Later confirmed decisions can supersede older examples; report the conflict instead of silently restoring old syntax or changing the rule.
 
 Use the `domain-modeling` skill when resolving terminology or recording a design decision. Keep definitions in the glossary, rationale in ADRs and normative proposal text in its owning RFC section. Link shared rules rather than restating them in several files.
+
+A report that the compiler accepts an invalid program names the RFC line the program breaks. Without one it is a question: answer it with a read-only probe before any fix ticket.
