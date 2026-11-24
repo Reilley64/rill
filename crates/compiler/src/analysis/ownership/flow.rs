@@ -117,6 +117,9 @@ struct Loan {
 enum LoanKind {
     Backing,
     Contents,
+    // A reference to one element slot of a List, held by the Option a
+    // lookup returns. The slot is destroyed with the List.
+    ElementSlot,
     Suspension,
     // External backing carried by an incoming exclusive Bool descriptor,
     // not a borrow of the parameter's local storage.
@@ -145,7 +148,7 @@ impl LoanKind {
     }
 
     fn borrows_local_storage(self) -> bool {
-        matches!(self, Self::Backing | Self::Contents)
+        matches!(self, Self::Backing | Self::Contents | Self::ElementSlot)
     }
 }
 
@@ -244,6 +247,18 @@ fn liveness(
                 descriptor, into, ..
             } => use_one(Some(descriptor), Some(into)),
             Action::ReadListI32 { view, into, .. } => use_one(Some(view), into),
+            Action::LookupListElement {
+                list, index, into, ..
+            } => (
+                [
+                    Some(list),
+                    match index {
+                        ElementIndex::Literal(_) => None,
+                        ElementIndex::Local(slot) => Some(slot),
+                    },
+                ],
+                Some(into),
+            ),
             Action::EqualI32Literal { from, into, .. } => use_one(Some(from), Some(into)),
             Action::CheckedI32Multiply { left, into, .. } => use_one(Some(left), Some(into)),
             Action::CheckedI32Add { left, right, into } => ([Some(left), Some(right)], Some(into)),
@@ -1282,6 +1297,7 @@ fn flat_action(action: Action<'_>, slots: &[Local<'_>]) -> bool {
             ..
         }
         | Action::ReadListI32 { .. }
+        | Action::LookupListElement { .. }
         | Action::EqualI32Literal { .. }
         | Action::None
         | Action::BudgetBackedge { .. }
@@ -4444,6 +4460,72 @@ pub(super) fn run<'a, 'g>(
                         provider,
                     }
                 }
+                Action::LookupListElement {
+                    list,
+                    index,
+                    into,
+                    lookup,
+                } => {
+                    require_initialized(&slots, &state, list, node, budget)?;
+                    conflict(
+                        &slots,
+                        &state,
+                        &live[pc],
+                        list,
+                        (node, Conflict::Access),
+                        Access::Observe,
+                        budget,
+                    )?;
+                    if let ElementIndex::Local(key) = index {
+                        require_initialized(&slots, &state, key, node, budget)?;
+                    }
+                    // The Option refers to the element's slot, not to what the
+                    // slot stores: the stored reference's own sources stay
+                    // reachable through it as contents.
+                    let mut loans = BTreeSet::new();
+                    insert_loan(
+                        &mut loans,
+                        Loan {
+                            source: list,
+                            site: node,
+                            exclusive: false,
+                            kind: LoanKind::ElementSlot,
+                        },
+                        budget,
+                    )?;
+                    visit_loans(
+                        &state,
+                        slots[list].storage(list),
+                        budget,
+                        |loan: Loan, budget: &mut Budget| {
+                            insert_loan(
+                                &mut loans,
+                                Loan {
+                                    kind: if loan.kind.borrows_local_storage() {
+                                        LoanKind::Contents
+                                    } else {
+                                        loan.kind
+                                    },
+                                    ..loan
+                                },
+                                budget,
+                            )
+                        },
+                    )?;
+                    state[into] = State::Initialized(Held {
+                        loans: loan_set(loans, budget)?,
+                        ..Held::default()
+                    });
+                    Operation::LookupListElement {
+                        list: local(list),
+                        index: match index {
+                            ElementIndex::Literal(literal) => ElementIndex::Literal(literal),
+                            ElementIndex::Local(key) => ElementIndex::Local(local(key)),
+                        },
+                        into: local(into),
+                        lookup,
+                    }
+                }
                 Action::EqualI32Literal {
                     from,
                     literal,
@@ -4681,6 +4763,7 @@ pub(super) fn run<'a, 'g>(
                             related: if callable_frame.is_some()
                                 || matches!(owner, Some(CallableOwner::Returned(_)))
                                 || slots[loan.source].projection.is_some()
+                                || loan.kind == LoanKind::ElementSlot
                             {
                                 loan.site
                             } else {
