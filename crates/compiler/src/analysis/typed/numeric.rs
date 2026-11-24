@@ -23,6 +23,13 @@ pub(in crate::analysis) struct ConversionCore<'g> {
 }
 
 impl<'g> ConversionCore<'g> {
+    /// A `ResourceLimit` report publishes no finding (metering rule 8).
+    pub(super) fn withhold_findings(&mut self) {
+        for family in self.families.values_mut() {
+            family.issues.clear();
+        }
+    }
+
     /// The pinned opaque nominal is backed by the linked owned byte buffer.
     /// Borrowed text/byte views are descriptors, not additional owned buffers.
     pub(in crate::analysis) fn bytes_representation(&self) -> Option<&'g Declaration> {

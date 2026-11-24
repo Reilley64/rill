@@ -1,6 +1,9 @@
 //! Installed ownership evidence is capture-bound and does not depend on application aliases.
 #![cfg(all(target_arch = "aarch64", target_os = "macos"))]
 
+#[path = "support/limit.rs"]
+mod limit;
+
 use compiler::analysis::AnalysisLimits;
 use compiler::analysis::typed::{
     CoreBlocker, NativeOwnershipAction, OwnershipCoverage, OwnershipRule, TypedCompletion,
@@ -68,6 +71,7 @@ fn installed_ownership_requires_the_built_archive() {
                 );
             };
             assert_eq!(overlap.code(), "R0500");
+            limit::assert_typed_limits_below(&graph, &report);
             assert_eq!(overlap.rule, copy.rule);
             assert_eq!(overlap.implementation.id.module.origin, Origin::Application);
             let app = graph
@@ -362,6 +366,7 @@ fn aggregate_classification(root: &Path, request: &InstalledRequest) {
                     assert_eq!(overlap.owner.id, copy.owner.id);
                     assert_eq!(overlap.rule, release.rule);
                     assert_eq!(overlap.implementation.id.module, app.key);
+                    limit::assert_typed_limits_below(graph, &report);
                     (OwnershipCoverage::Overlap, OwnershipCoverage::Clear)
                 } else {
                     (OwnershipCoverage::Pending, OwnershipCoverage::Pending)
@@ -844,10 +849,7 @@ fn closed_roles_without_native_providers(root: &Path, request: &InstalledRequest
                 ..exact
             },
         );
-        assert_eq!(
-            short.completion(),
-            compiler::analysis::typed::TypedCompletion::ResourceLimit
-        );
+        limit::assert_typed_limit(&short);
         assert!(!short.core_blockers().contains(&CoreBlocker::Roles));
 
         let source_only = loader::load(graph.request().clone()).unwrap();
@@ -945,7 +947,7 @@ fn complete_provider_and_protection_scope(request: &InstalledRequest) {
                 ..AnalysisLimits::default()
             },
         );
-        assert_eq!(exhausted.completion(), TypedCompletion::ResourceLimit);
+        limit::assert_typed_limit(&exhausted);
         assert!(exhausted.core_blockers().contains(&CoreBlocker::Providers));
         assert!(exhausted.core_blockers().contains(&CoreBlocker::Protection));
 
@@ -994,6 +996,7 @@ fn complete_provider_and_protection_scope(request: &InstalledRequest) {
         assert!(!report.core_blockers().contains(&CoreBlocker::Providers));
         assert!(report.receipt().is_none());
         assert_eq!(report.ownership_overlaps()[0].code(), "R0500");
+        limit::assert_typed_limits_below(&overlap, &report);
 
         fs::write(
             &request.entry,
@@ -1011,6 +1014,7 @@ fn complete_provider_and_protection_scope(request: &InstalledRequest) {
                 .iter()
                 .any(|issue| issue.kind.code() == Some("R0311"))
         );
+        limit::assert_typed_limits_below(&gap, &report);
     }
 }
 
@@ -1096,8 +1100,7 @@ fn installed_receipts(request: &InstalledRequest) {
                 ..exact
             },
         );
-        assert_eq!(short.completion(), TypedCompletion::ResourceLimit);
-        assert!(short.receipt().is_none());
+        limit::assert_typed_limit(&short);
 
         for (source, origin) in [
             (
@@ -1323,10 +1326,7 @@ fn installed_ordinary_family(request: &InstalledRequest) {
                 ..exact
             },
         ] {
-            assert_eq!(
-                analyze_typed(&graph, short).completion(),
-                TypedCompletion::ResourceLimit
-            );
+            limit::assert_typed_limit(&analyze_typed(&graph, short));
         }
 
         fs::write(
@@ -1899,9 +1899,7 @@ fn installed_pair_invocation(request: &InstalledRequest) {
                 ..exact
             },
         ] {
-            let short = analyze_typed(&graph, limit);
-            assert_eq!(short.completion(), TypedCompletion::ResourceLimit);
-            assert!(short.receipt().is_none());
+            limit::assert_typed_limit(&analyze_typed(&graph, limit));
         }
     }
 
@@ -2224,9 +2222,7 @@ fn assert_pair_evidence(graph: &loader::Graph, different_signatures: bool) {
             ..exact
         },
     ] {
-        let limited = analyze_typed(graph, short);
-        assert_eq!(limited.completion(), TypedCompletion::ResourceLimit);
-        assert!(limited.receipt().is_none());
+        limit::assert_typed_limit(&analyze_typed(graph, short));
     }
 }
 
@@ -2291,12 +2287,11 @@ fn partial_collection(request: &InstalledRequest) {
         max_work: exact.max_work - 1,
         ..exact
     };
-    use compiler::analysis::typed::TypedCompletion::{Incomplete, ResourceLimit};
-    assert_eq!(analyze_typed(&graph, exact).completion(), Incomplete);
     assert_eq!(
-        analyze_typed(&graph, first_short).completion(),
-        ResourceLimit
+        analyze_typed(&graph, exact).completion(),
+        TypedCompletion::Incomplete
     );
+    limit::assert_typed_limit(&analyze_typed(&graph, first_short));
 }
 
 struct Cleanup<'a>(&'a Path);

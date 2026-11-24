@@ -1,4 +1,7 @@
 //! Exercises installed capture with production core sources and no trust override.
+#[path = "support/limit.rs"]
+mod limit;
+
 use compiler::analysis::scalars::data::DataExpression;
 use compiler::analysis::scalars::{
     BodyOwner, NodeFactKind, PropagationTarget, ScalarFindingKind, ScalarUnsupported,
@@ -216,17 +219,14 @@ fn installed_option(profile: &InstalledRequest) {
         };
         assert!(analyze_typed(&graph, at_role).option_role().is_some());
         let exhausted = analyze_typed(&graph, before_role);
-        assert_eq!(exhausted.completion(), TypedCompletion::ResourceLimit);
+        limit::assert_typed_limit(&exhausted);
         assert!(exhausted.option_role().is_none());
 
         let short = AnalysisLimits {
             max_work: report.statistics().work - 1,
             ..AnalysisLimits::default()
         };
-        assert_eq!(
-            analyze_typed(&graph, short).completion(),
-            TypedCompletion::ResourceLimit
-        );
+        limit::assert_typed_limit(&analyze_typed(&graph, short));
     }
 }
 

@@ -1192,6 +1192,7 @@ function closed(other: string): void {{ dispose(other); }}
                     ..Default::default()
                 },
             );
+            crate::limit::assert_graph_limit(&short);
             let pending = root(&short, b"function combined(");
             assert_eq!(pending.completion(), Completion::ResourceLimit);
             assert_eq!(

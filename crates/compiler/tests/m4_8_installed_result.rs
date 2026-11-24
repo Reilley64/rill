@@ -1,4 +1,7 @@
 //! Installed Result checks use production sources and the actual installed entry point.
+#[path = "support/limit.rs"]
+mod limit;
+
 use compiler::analysis::scalars::{BodyOwner, NodeFactKind, Site};
 use compiler::analysis::typed::{TypedCompletion, analyze_typed};
 use compiler::analysis::{AnalysisLimits, TypeTerm};
@@ -841,17 +844,13 @@ fn installed_aliased_closed_err_constructs_with_context() {
                     analyze_typed(&graph, exact).statistics(),
                     report.statistics()
                 );
-                assert_eq!(
-                    analyze_typed(
-                        &graph,
-                        AnalysisLimits {
-                            max_work: exact.max_work - 1,
-                            ..exact
-                        }
-                    )
-                    .completion(),
-                    TypedCompletion::ResourceLimit
-                );
+                limit::assert_typed_limit(&analyze_typed(
+                    &graph,
+                    AnalysisLimits {
+                        max_work: exact.max_work - 1,
+                        ..exact
+                    },
+                ));
                 let role = report.result_role().unwrap();
                 for (node, syntax) in app
                     .syntax

@@ -1,8 +1,13 @@
 //! Source-level Result-use witnesses from the installed production capture.
-use compiler::analysis::{AnalysisLimits, typed::analyze_typed};
-use compiler::loader::{self, InstalledRequest, Limits, Origin};
+use compiler::analysis::{
+    AnalysisLimits,
+    typed::{TypedCompletion, analyze_typed},
+};
+use compiler::loader::{self, Graph, InstalledRequest, Limits, Origin};
 use std::{fs, path::PathBuf, process::Command};
 
+#[path = "support/limit.rs"]
+mod limit;
 mod support;
 
 #[test]
@@ -534,6 +539,81 @@ fn disposing_list_storage_does_not_observe_result_elements() {
     );
 }
 
+#[test]
+fn resource_limit_publishes_no_result_discard() {
+    installed_graphs(
+        "resource_limit_publishes_no_result_discard",
+        "
+        import std::result::Result;
+        type Pair = { left: Result<bool>; right: Result<bool>; };
+        function make(flag: bool): Result<bool> { return Result.Ok(flag); }
+        function tuple(): void {
+            let [_, owed]: [Result<bool>, Result<bool>] = [make(true), make(false)];
+        }
+        function record(): void {
+            let Pair { left: _ } = Pair { left: make(true), right: make(false) };
+        }
+        ",
+        |graph| {
+            let full = analyze_typed(graph, AnalysisLimits::default());
+            let discards = |report: &compiler::analysis::typed::TypedReport<'_>| {
+                report.result_use().map_or(0, |uses| uses.discards().len())
+            };
+            assert_ne!(full.completion(), TypedCompletion::ResourceLimit);
+            let published = discards(&full);
+            assert!(published > 0);
+            let stats = full.statistics();
+            let exact = AnalysisLimits {
+                max_work: stats.work,
+                max_entries: stats.entries,
+                max_depth: stats.max_depth,
+            };
+            let at = analyze_typed(graph, exact);
+            assert_eq!(
+                (at.completion(), at.statistics()),
+                (full.completion(), stats)
+            );
+            assert_eq!(discards(&at), published);
+            for short in [
+                AnalysisLimits {
+                    max_work: exact.max_work - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_entries: exact.max_entries - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_depth: exact.max_depth - 1,
+                    ..exact
+                },
+            ] {
+                limit::assert_typed_limit(&analyze_typed(graph, short));
+            }
+            // The review found discards published at every work cap down to 122,957 of 124,907.
+            for step in 0..64 {
+                let limited = analyze_typed(
+                    graph,
+                    AnalysisLimits {
+                        max_work: stats.work * step / 64,
+                        ..exact
+                    },
+                );
+                limit::assert_typed_limit(&limited);
+            }
+            for work in stats.work - 64..stats.work {
+                limit::assert_typed_limit(&analyze_typed(
+                    graph,
+                    AnalysisLimits {
+                        max_work: work,
+                        ..exact
+                    },
+                ));
+            }
+        },
+    );
+}
+
 fn installed(test: &str, source: &str, expected: &[(&str, Option<&str>)]) {
     installed_with(test, source, expected, |_| {});
 }
@@ -544,6 +624,54 @@ fn installed_with(
     expected: &[(&str, Option<&str>)],
     verify: impl Fn(&compiler::analysis::typed::TypedReport<'_>),
 ) {
+    installed_graphs(test, source, |graph| {
+        let report = analyze_typed(graph, AnalysisLimits::default());
+        assert!(report.result_role().is_some());
+        let uses = report.result_use().unwrap();
+        let mut actual: Vec<_> = uses
+            .discards()
+            .iter()
+            .filter(|w| w.origin.module.origin == Origin::Application)
+            .map(|w| {
+                assert_eq!(w.code(), "R0103");
+                (
+                    std::str::from_utf8(w.origin.span.bytes()).unwrap(),
+                    w.storage.map(|id| {
+                        let module = graph.modules().iter().find(|m| m.key == id.module).unwrap();
+                        module
+                            .declarations
+                            .iter()
+                            .find(|d| d.id == *id)
+                            .unwrap()
+                            .name
+                            .as_deref()
+                            .unwrap()
+                    }),
+                )
+            })
+            .collect();
+        actual.sort_unstable();
+        let findings: Vec<_> = report
+            .bodies()
+            .findings()
+            .iter()
+            .filter(|f| f.site.module.origin == Origin::Application)
+            .map(|f| (f.kind, f.site.span.bytes().escape_ascii().to_string()))
+            .collect();
+        assert!(findings.is_empty(), "{findings:?}");
+        let pending: Vec<_> = uses
+            .pending()
+            .iter()
+            .filter(|p| p.site.module.origin == Origin::Application)
+            .map(|p| (p.blocker, p.site.span.bytes().escape_ascii().to_string()))
+            .collect();
+        assert_eq!(actual, expected, "pending Result use: {pending:?}");
+        verify(&report);
+    });
+}
+
+/// Runs `each` on the installed graph of `source` in both load modes, in the probe copy of this test.
+fn installed_graphs(test: &str, source: &str, each: impl Fn(&Graph)) {
     let mut root = std::env::current_exe().unwrap();
     if root.file_name().unwrap() == "result-use-probe" {
         root.pop();
@@ -559,49 +687,7 @@ fn installed_with(
                 limits: Limits::default(),
             })
             .unwrap();
-            let report = analyze_typed(&graph, AnalysisLimits::default());
-            assert!(report.result_role().is_some());
-            let uses = report.result_use().unwrap();
-            let mut actual: Vec<_> = uses
-                .discards()
-                .iter()
-                .filter(|w| w.origin.module.origin == Origin::Application)
-                .map(|w| {
-                    assert_eq!(w.code(), "R0103");
-                    (
-                        std::str::from_utf8(w.origin.span.bytes()).unwrap(),
-                        w.storage.map(|id| {
-                            let module =
-                                graph.modules().iter().find(|m| m.key == id.module).unwrap();
-                            module
-                                .declarations
-                                .iter()
-                                .find(|d| d.id == *id)
-                                .unwrap()
-                                .name
-                                .as_deref()
-                                .unwrap()
-                        }),
-                    )
-                })
-                .collect();
-            actual.sort_unstable();
-            let findings: Vec<_> = report
-                .bodies()
-                .findings()
-                .iter()
-                .filter(|f| f.site.module.origin == Origin::Application)
-                .map(|f| (f.kind, f.site.span.bytes().escape_ascii().to_string()))
-                .collect();
-            assert!(findings.is_empty(), "{findings:?}");
-            let pending: Vec<_> = uses
-                .pending()
-                .iter()
-                .filter(|p| p.site.module.origin == Origin::Application)
-                .map(|p| (p.blocker, p.site.span.bytes().escape_ascii().to_string()))
-                .collect();
-            assert_eq!(actual, expected, "pending Result use: {pending:?}");
-            verify(&report);
+            each(&graph);
         }
         return;
     }
