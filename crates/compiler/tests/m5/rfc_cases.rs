@@ -24,6 +24,8 @@ use compiler::loader::DeclarationKind;
 mod o12;
 #[path = "rfc_cases/o20.rs"]
 mod o20;
+#[path = "rfc_cases/record_contents.rs"]
+mod record_contents;
 
 type Triple = (usize, usize, usize);
 
@@ -478,13 +480,35 @@ function selected(): i32 {
 }
 expect selected() == 9i32;
 "#,
-    outcome: Outcome::Typed {
-        completion: TypedCompletion::Incomplete,
-        signals: &[
-            r####"pending Storage @ *slot = source;"####,
-            r####"pending Storage @ &mut view"####,
+    // The parent measured typed `Incomplete` at (325943, 47994, 12) on
+    // `pending Storage @ *slot = source;` and `&mut view`;
+    // `o02_pre_record_contents_typed_cap_now_gives_resource_limit` pins it.
+    // `pre_equality_graph` is the graph cap with the expectation root's
+    // attributed work and entries removed (8410, 961).
+    outcome: Outcome::Receipt {
+        typed_stats: (326933, 48161, 12),
+        graph: (GraphCompletion::Incomplete, (190814, 5004, 6)),
+        pre_equality_graph: (182404, 4043, 6),
+        roots: &[
+            Root {
+                name: "remember",
+                want: Want::Checked,
+                graph: None,
+                stats: (2466, 167, 3),
+            },
+            Root {
+                name: "selected",
+                want: Want::Checked,
+                graph: None,
+                stats: (6373, 855, 6),
+            },
+            Root {
+                name: "expect",
+                want: Want::Checked,
+                graph: None,
+                stats: (8410, 961, 6),
+            },
         ],
-        stats: (325943, 47994, 12),
     },
 }];
 
@@ -871,14 +895,43 @@ function poison(slot: &mut &Point): void {
   *slot = &local;
 }
 "#,
-    outcome: Outcome::Typed {
-        completion: TypedCompletion::Incomplete,
-        signals: &[
-            r####"pending Storage @ *slot = source;"####,
-            r####"pending Storage @ &mut view"####,
-            r####"pending Storage @ *slot = &local;"####,
+    // The parent measured typed `Incomplete` at (327681, 48227, 12) on three
+    // `pending Storage` signals; `o08_pre_record_contents_typed_cap_now_gives_resource_limit`
+    // pins it. `pre_equality_graph` removes the expectation root (8494, 1003).
+    outcome: Outcome::Receipt {
+        typed_stats: (328745, 48394, 12),
+        graph: (GraphCompletion::SourceRejected, (192713, 5271, 6)),
+        pre_equality_graph: (184219, 4268, 6),
+        roots: &[
+            Root {
+                name: "remember",
+                want: Want::Checked,
+                graph: None,
+                stats: (2494, 181, 3),
+            },
+            Root {
+                name: "selected",
+                want: Want::Checked,
+                graph: None,
+                stats: (6429, 883, 6),
+            },
+            Root {
+                name: "expect",
+                want: Want::Checked,
+                graph: None,
+                stats: (8494, 1003, 6),
+            },
+            Root {
+                name: "poison",
+                want: Want::Rejected {
+                    code: "R0202",
+                    site: "*slot = &local;",
+                    related: "&local",
+                },
+                graph: None,
+                stats: (2815, 302, 4),
+            },
         ],
-        stats: (327681, 48227, 12),
     },
 }];
 
@@ -2555,10 +2608,19 @@ fn o01_old_typed_caps_give_resource_limit() {
 }
 
 #[test]
-fn o02_remembered_slot_waits_on_descriptor_slot_storage() {
+fn o02_remembered_slot_carries_the_stored_source_to_the_caller() {
     run(
-        "rfc_cases::o02_remembered_slot_waits_on_descriptor_slot_storage",
+        "rfc_cases::o02_remembered_slot_carries_the_stored_source_to_the_caller",
         O2,
+    );
+}
+
+#[test]
+fn o02_pre_record_contents_typed_cap_now_gives_resource_limit() {
+    old_typed_caps(
+        "rfc_cases::o02_pre_record_contents_typed_cap_now_gives_resource_limit",
+        O2,
+        (325943, 47994, 12),
     );
 }
 
@@ -2641,10 +2703,19 @@ fn o07_overlapping_reference_fields_are_not_yet_rejected() {
 }
 
 #[test]
-fn o08_poisoned_slot_waits_on_descriptor_slot_storage() {
+fn o08_poisoned_slot_rejects_the_escape_of_a_callee_local() {
     run(
-        "rfc_cases::o08_poisoned_slot_waits_on_descriptor_slot_storage",
+        "rfc_cases::o08_poisoned_slot_rejects_the_escape_of_a_callee_local",
         O8,
+    );
+}
+
+#[test]
+fn o08_pre_record_contents_typed_cap_now_gives_resource_limit() {
+    old_typed_caps(
+        "rfc_cases::o08_pre_record_contents_typed_cap_now_gives_resource_limit",
+        O8,
+        (327681, 48227, 12),
     );
 }
 

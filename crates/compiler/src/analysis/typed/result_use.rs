@@ -8,7 +8,7 @@ use crate::analysis::scalars::{
 };
 use crate::analysis::{
     Binder, DeclarationFacts, DeclarationId, DeclarationShape, MemberType, Payload, Substitution,
-    Type, TypeTerm, retained_bool_contents_type,
+    Type, TypeTerm, retained_bool_contents_type, retained_record_contents,
 };
 use crate::loader::{DeclarationKind, Module, ModuleKey};
 use crate::parser::{NodeId, NodeKind};
@@ -1288,10 +1288,16 @@ impl<'a, 'g> Check<'a, 'g> {
         // Only the current named body may use this handoff; a captured
         // descriptor does not turn into one of the closure's own parameters.
         self.budget.step(self.current_parameters.len())?;
-        Ok(self.current_parameters.iter().any(|parameter| {
-            &parameter.declaration.id == origin
-                && retained_bool_contents_type(&parameter.ty).is_some()
-        }))
+        let Some(parameter) = self
+            .current_parameters
+            .iter()
+            .find(|parameter| &parameter.declaration.id == origin)
+        else {
+            return Ok(false);
+        };
+        // A reference to a record is retained contents too (ri-1up).
+        Ok(retained_bool_contents_type(&parameter.ty).is_some()
+            || retained_record_contents(self.inventory, &parameter.ty, self.budget)?.is_some())
     }
 
     fn component(
