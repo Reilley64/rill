@@ -123,6 +123,17 @@ impl<'a, 'g> Check<'a, 'g> {
         {
             return Ok(None);
         }
+        // A copy of a local source that was written or lent already is rejected by the scan
+        // below, and the parent rejected it here for free, so no lookup is paid first. A
+        // parameter source keeps the check after the lookup, so its pins do not move.
+        if written.is_some_and(|w| std::ptr::eq(w, id))
+            && !self.wildcard_sources.iter().any(|(root, path)| {
+                path.is_empty()
+                    && matches!(root, Root::Local(p) if p.kind == DeclarationKind::Parameter)
+            })
+        {
+            return Ok(None);
+        }
         let Some((name, parent)) = self.written_binding(id)? else {
             return Ok(None);
         };
