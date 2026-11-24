@@ -54,6 +54,12 @@ description = "Replay the published fixed work/entries/depth caps (m5::legacy_ca
 depends = ["doctor"]
 run = "cargo test --locked --no-default-features -p compiler --test m5 -- legacy_caps --test-threads=2"
 
+[tasks."status:prototypes"]
+description = "Regenerate the committed prototype status table (crates/compiler/tests/m5/prototype-status.tsv) through the public pipeline"
+depends = ["doctor"]
+env = { RILL_PROTOTYPE_STATUS_WRITE = "1" }
+run = "cargo test --locked --no-default-features -p compiler --test m5 -- prototype_status --test-threads=2"
+
 [tasks."check:docs"]
 depends = ["doctor"]
 run = ["python tools/check_docs.py", "git diff --check"]
