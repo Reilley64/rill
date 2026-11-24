@@ -119,6 +119,22 @@ pub(super) struct Report<'g> {
     validated_owners: usize,
 }
 
+impl OwnershipProtection<'_> {
+    /// No `Overlap` verdict. Every field is named, so a new one fails to
+    /// compile until it is decided here (metering rule 8).
+    fn publishes_nothing_at_limit(&self) -> bool {
+        let Self {
+            coverage,
+            // The scope's identity, rule and provider: facts.
+            owner: _owner,
+            family: _family,
+            rule: _rule,
+            provider: _provider,
+        } = self;
+        *coverage != OwnershipCoverage::Overlap
+    }
+}
+
 impl Report<'_> {
     /// No overlap and no `Overlap` verdict (metering rule 8).
     pub(super) fn publishes_nothing_at_limit(&self) -> bool {
@@ -132,7 +148,7 @@ impl Report<'_> {
         overlaps.is_empty()
             && protection
                 .iter()
-                .all(|scope| scope.coverage != OwnershipCoverage::Overlap)
+                .all(OwnershipProtection::publishes_nothing_at_limit)
     }
 
     pub(super) fn roles_complete(&self) -> bool {

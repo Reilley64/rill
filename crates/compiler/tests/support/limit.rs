@@ -15,7 +15,8 @@
 //! finding. Each `*_flaws` function calls it when the accessor list finds
 //! nothing, and reports a field the list does not name (metering rule 8,
 //! chief ruling 19). The body report, `GenericReport`, `OrdinaryAnalysis`,
-//! `TypedReport`, `GraphReport` and `ConversionReport` have one.
+//! `TypedReport`, `GraphReport`, `ConversionReport`, `SelectionReport` and
+//! `PairReport` have one.
 //!
 //! - graph report (`graph_limit_flaws`): `findings()`; `mir()` and
 //!   `ordinary_mir()` of every root and active disposer.
@@ -35,6 +36,10 @@
 //! - generics report and `ConversionReport::bodies` (`generics_limit_flaws`):
 //!   `findings()`, `conditional_findings()`, `declaration_issues()`,
 //!   `annotations().findings()`.
+//! - selection report (`selection_limit_flaws`): `outcome`.
+//! - pair report (`pair_limit_flaws`): `outcome`, `selected_signature`,
+//!   `selected_error`, `error_agreement` `Disagrees`, the `Registration`
+//!   blocker and a `Registration` goal state.
 //! - conversion report (`conversion_limit_flaws`): `type_facts()` findings,
 //!   declarations, uses and obligations; `header_metadata(..)`; `family(..)`
 //!   issues.
@@ -67,9 +72,13 @@
 #![allow(dead_code)]
 
 use compiler::analysis::AnalysisLimits;
-use compiler::analysis::conversions::{ConversionReport, ErrorAgreement, PairBlocker, PairOutcome};
+use compiler::analysis::conversions::{
+    ConversionReport, ErrorAgreement, PairBlocker, PairOutcome, PairReport,
+};
 use compiler::analysis::generics::{GenericReport, GoalBlocker, GoalState, OutputAgreement};
-use compiler::analysis::ordinary::{Completion as OrdinaryCompletion, OrdinaryAnalysis};
+use compiler::analysis::ordinary::{
+    Completion as OrdinaryCompletion, OrdinaryAnalysis, SelectionReport,
+};
 use compiler::analysis::ownership::{Completion, GraphCompletion, GraphReport, Report};
 use compiler::analysis::scalars::ScalarFailureKind;
 use compiler::analysis::typed::{
@@ -393,6 +402,53 @@ pub(crate) fn conversion_limit_flaws(
     flaws
 }
 
+/// A `query_pair` report: no outcome, selected signature or selected error, no
+/// disagreeing error, no `Registration` blocker and no goal that cites a finding.
+pub(crate) fn pair_limit_flaws(report: &PairReport<'_>) -> Vec<&'static str> {
+    let mut flaws = Vec::new();
+    if report.completion != OrdinaryCompletion::ResourceLimit {
+        flaws.push("completion is not ResourceLimit");
+    }
+    if report.outcome.is_some() {
+        flaws.push("publishes an outcome");
+    }
+    if report.selected_signature.is_some() || report.selected_error.is_some() {
+        flaws.push("publishes a selected signature or error");
+    }
+    if matches!(report.error_agreement, ErrorAgreement::Disagrees { .. }) {
+        flaws.push("publishes an error disagreement");
+    }
+    if report.blockers.contains(&PairBlocker::Registration) {
+        flaws.push("publishes a Registration blocker");
+    }
+    if report.goals().iter().any(|goal| {
+        goal.premise.is_none()
+            && goal.state
+                == GoalState::Unresolved(GoalBlocker::ConversionPair(PairBlocker::Registration))
+    }) {
+        flaws.push("publishes a Registration goal state");
+    }
+    if flaws.is_empty() && !report.publishes_nothing_at_limit() {
+        flaws.push(UNNAMED);
+    }
+    flaws
+}
+
+/// A `select_inputs` report: no outcome (a winner, `NoMatch` or `Ambiguous`).
+pub(crate) fn selection_limit_flaws(report: &SelectionReport<'_>) -> Vec<&'static str> {
+    let mut flaws = Vec::new();
+    if report.completion != OrdinaryCompletion::ResourceLimit {
+        flaws.push("completion is not ResourceLimit");
+    }
+    if report.outcome.is_some() {
+        flaws.push("publishes an outcome");
+    }
+    if flaws.is_empty() && !report.publishes_nothing_at_limit() {
+        flaws.push(UNNAMED);
+    }
+    flaws
+}
+
 /// How many declarations of the graph have a header through the conversion
 /// report's `header_metadata`. `Ok(None)` is both "no header" and, at
 /// `ResourceLimit`, "withheld".
@@ -504,6 +560,18 @@ pub(crate) fn assert_ordinary_limit(graph: &Graph, report: &OrdinaryAnalysis<'_>
 pub(crate) fn assert_conversion_limit(graph: &Graph, report: &ConversionReport<'_, '_>) {
     let flaws = conversion_limit_flaws(graph, report);
     assert!(flaws.is_empty(), "{flaws:?} at {:?}", report.statistics());
+}
+
+#[track_caller]
+pub(crate) fn assert_pair_limit(report: &PairReport<'_>) {
+    let flaws = pair_limit_flaws(report);
+    assert!(flaws.is_empty(), "{flaws:?} at {:?}", report.statistics);
+}
+
+#[track_caller]
+pub(crate) fn assert_selection_limit(report: &SelectionReport<'_>) {
+    let flaws = selection_limit_flaws(report);
+    assert!(flaws.is_empty(), "{flaws:?} at {:?}", report.statistics);
 }
 
 #[track_caller]

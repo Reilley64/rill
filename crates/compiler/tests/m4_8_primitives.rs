@@ -441,6 +441,26 @@ fn protected_primitive_replacement(prefix: &Path, test_mode: bool) {
     assert_eq!(overlap.code(), "R0500");
     assert_eq!(overlap.implementation.id.module.path, "main.rill");
     limit::assert_typed_limits_below(&graph, &report);
+    // Ruling 19 (1): the `Overlap` verdict discloses an R0500 finding, so it is
+    // `Overlap` at the exact cap and `Pending` one work short (as for ownership,
+    // `m4_8_ownership.rs`).
+    let exact = report.statistics();
+    let short = analyze_typed(
+        &graph,
+        AnalysisLimits {
+            max_work: exact.work - 1,
+            max_entries: exact.entries,
+            max_depth: exact.max_depth,
+        },
+    );
+    limit::assert_typed_limit(&short);
+    let pending = short
+        .primitive_protection()
+        .iter()
+        .find(|p| p.role == PrimitiveRole::Copy && p.primitive == Primitive::I32)
+        .expect("the i32 copy scope one work short");
+    assert_eq!(pending.coverage, PrimitiveCoverage::Pending);
+    assert!(pending.overlaps.is_empty());
     let app = graph
         .modules()
         .iter()

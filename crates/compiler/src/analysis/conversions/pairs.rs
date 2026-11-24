@@ -90,6 +90,36 @@ pub struct PairReport<'g> {
 }
 
 impl<'g> PairReport<'g> {
+    /// No verdict, finding or goal state that cites one at `ResourceLimit`
+    /// (metering rule 8): no outcome or selected signature and error, no
+    /// disagreeing error, no `Registration` blocker, and no goal that discloses
+    /// a finding. Every field is named, so a new one fails to compile until it
+    /// is decided here. Test support for `tests/support/limit.rs`.
+    #[doc(hidden)]
+    pub fn publishes_nothing_at_limit(&self) -> bool {
+        let Self {
+            completion,
+            outcome,
+            blockers,
+            selected_signature,
+            selected_error,
+            error_agreement,
+            evidence,
+            // The premise, the partial matches and comparisons and counters: facts.
+            premise: _premise,
+            matches: _matches,
+            comparisons: _comparisons,
+            statistics: _statistics,
+        } = self;
+        *completion != ordinary::Completion::ResourceLimit
+            || (outcome.is_none()
+                && selected_signature.is_none()
+                && selected_error.is_none()
+                && !matches!(error_agreement, ErrorAgreement::Disagrees { .. })
+                && !blockers.contains(&PairBlocker::Registration)
+                && evidence.publishes_nothing_at_limit(&[]))
+    }
+
     pub fn goals(&self) -> &[GoalFacts<'g>] {
         self.evidence.goals()
     }

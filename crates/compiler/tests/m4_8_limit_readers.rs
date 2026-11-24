@@ -279,3 +279,49 @@ fn a_limited_typed_inventory_reads_resource_limit() {
     );
     limit::assert_typed_limit(&report);
 }
+
+/// `select_inputs` at every work cap: a limited report names no outcome, as
+/// `query_pair` does (ruling 19 (2)). The sources give a winner and no match.
+#[test]
+fn a_limited_selection_names_no_outcome() {
+    use compiler::analysis::ordinary::{Completion, analyze_ordinary};
+    for source in [
+        "enum E { Left, Right } function f<A>(a: A): bool; implement f(a: E): bool { return true; }",
+        "enum E { Left, Right } enum G { Up } function f<A>(a: A): bool; implement f(a: G): bool { return true; }",
+    ] {
+        let fixture = Fixture::new(source);
+        let graph = fixture.load();
+        let family = &graph.implementations()[0].family;
+        let e = named_type(&graph, "E");
+        let full = analyze_ordinary(&graph, AnalysisLimits::default());
+        let exact = select_inputs(
+            &full,
+            family,
+            &[Established(e.clone())],
+            &[],
+            AnalysisLimits::default(),
+        )
+        .unwrap();
+        assert_ne!(exact.completion, Completion::ResourceLimit);
+        let work = exact.statistics.work;
+        let mut limited = 0;
+        for max_work in 0..work {
+            let report = select_inputs(
+                &full,
+                family,
+                &[Established(e.clone())],
+                &[],
+                AnalysisLimits {
+                    max_work,
+                    ..AnalysisLimits::default()
+                },
+            )
+            .unwrap();
+            if report.completion == Completion::ResourceLimit {
+                limited += 1;
+                limit::assert_selection_limit(&report);
+            }
+        }
+        assert!(limited > 0, "{source}");
+    }
+}

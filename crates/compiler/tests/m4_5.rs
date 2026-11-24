@@ -564,8 +564,7 @@ fn exhausted_products_keep_known_headers_but_cannot_supply_negative_input_eviden
     let e = named_type(&graph, "E");
     let selected =
         select_inputs(&partial, family_id, &vec![Established(e); 4], &[], limits).unwrap();
-    assert_eq!(selected.completion, Completion::ResourceLimit);
-    assert_eq!(selected.outcome, None);
+    limit::assert_selection_limit(&selected);
 }
 
 #[test]

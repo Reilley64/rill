@@ -157,11 +157,11 @@ impl<'g> OrdinaryAnalysis<'g> {
             completion: _completion,
             reached_validation: _reached_validation,
         } = self;
-        types.findings().next().is_none()
+        types.publishes_nothing_at_limit()
             && declaration_issues.is_empty()
             && headers
                 .values()
-                .all(|header| header.type_metadata().findings().next().is_none())
+                .all(metadata::HeaderMetadata::publishes_nothing_at_limit)
     }
 
     /// Empties what the analysis publishes and says so: a withheld inventory

@@ -112,7 +112,7 @@ impl<'g> GenericReport<'g> {
             arrows: _arrows,
         } = facts;
         findings.is_empty()
-            && annotations.findings().next().is_none()
+            && annotations.publishes_nothing_at_limit()
             && conditional_findings.is_empty()
             && declaration_issues.is_empty()
             && evidence.publishes_nothing_at_limit(&self.conversion_use_goals())

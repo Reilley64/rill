@@ -332,6 +332,18 @@ pub struct PartialFacts<'g> {
     obligations: BTreeMap<(&'g ModuleKey, usize, Unsupported), Obligation<'g>>,
 }
 impl<'g> PartialFacts<'g> {
+    /// No finding. Every field is named, so a new one fails to compile until it
+    /// is decided here (metering rule 8).
+    pub(crate) fn publishes_nothing_at_limit(&self) -> bool {
+        let Self {
+            findings,
+            // Declarations, uses and obligations (blockers): facts, not findings.
+            declarations: _declarations,
+            uses: _uses,
+            obligations: _obligations,
+        } = self;
+        findings.is_empty()
+    }
     pub(crate) fn withhold_findings(&mut self) {
         self.findings.clear();
     }

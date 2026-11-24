@@ -44,7 +44,9 @@ impl<'g> ConversionCore<'g> {
             bytes: _bytes,
             list: _list,
         } = self;
-        families.values().all(|family| family.issues.is_empty())
+        families
+            .values()
+            .all(ConversionFamily::publishes_nothing_at_limit)
     }
 
     /// The pinned opaque nominal is backed by the linked owned byte buffer.
