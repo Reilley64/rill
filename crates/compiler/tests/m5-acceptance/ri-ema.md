@@ -69,6 +69,60 @@ All four are under 150 work and at most two lookups, and the parent caps (each r
 
 New forms of the same call that were `Incomplete` and now check, as a consequence of R1 and of registering the list parameter's contents, with no pinned expectation behind them: a direct `retain(dst, source)`, two calls, a call in a loop, a pair of `&User` sources (`retain(dst, a, b)`), a lone destination (`retain(dst)`, "the contents keep every source they already held", as `&mut &bool`) and a source read after the call. None is accepted unsoundly: the escape tests above reject every body-local source. `keep`-like roots that already checked (a list parameter and no call) moved: 2,584 / 260 / 4 to 2,760 / 305 / 4 (one lookup, a contents slot). There is no other pinned test with a `&mut List<&R>` parameter (`rg "mut List<&"`).
 
+## The chief of staff's four conditions (ci-ue8s, ruling of 2026-11-24 12:35 AEDT)
+
+The chief accepted the extra forms R1 admits (below) with four conditions. All tests are in `rfc_cases::list_contents`, both installed load modes, the targeted query and the ordinary graph root, exact and one short on each axis (`check_cases`); the sequence tests also compare the whole MIR of the targeted query and of the graph root's ordinary MIR, block by block, against one list (`pin_form`, `sequence`; rule 9). No cap moved: these are new pins of the built branch (no source change), and the fixed caps are unchanged.
+
+**Condition 1: every newly admitted form is pinned by name, with its MIR.** Caps are work / entries / depth of the root; each module's typed and whole-graph caps are in the test.
+
+| Form | Test | Root caps |
+| --- | --- | --- |
+| direct function `retain(dst, source)` | `r1_direct_function_retain_checks_with_its_sequence` | `retain` 2,102 / 102 / 1, `forwarded` 4,527 / 292 / 5 |
+| two calls | `r1_two_calls_check_with_their_sequence` | `twice` 4,683 / 448 / 5 |
+| a call in a loop | `r1_call_in_a_loop_checks_with_its_sequence` | `looped` 3,476 / 320 / 7 |
+| a pair of `&User` sources | `r1_pair_of_user_sources_checks_with_its_sequence` | `both` 3,490 / 312 / 5 |
+| the lone destination `retain(dst)` | `r1_lone_destination_checks_with_its_sequence` | `forwarded` 3,133 / 156 / 5 |
+| a source read after the call | `r1_source_read_after_the_call_checks_with_its_sequence` | `reuse` 3,457 / 306 / 5 |
+| `keep`: a `&mut List<&User>` parameter, no call | `r1_keep_list_parameter_without_a_call_is_pinned` | `keep` 2,760 / 305 / 4 (module of `direct_list_destination_checks_parameters_and_rejects_locals`; `local` there rejects R0202, 3,011 / 360 / 6) |
+
+The sequences read as follows. A call is a mutable reborrow of `dst`, a copy of the source into a stage, then one retention into the destination's contents (`retain through dst <- source`); two calls repeat that for each source; the pair stages both sources before one retention; the lone destination reborrows and retains `nothing`; the read after the call is `deref source` then `export source.id` after the retention, with `source` ending only at the function's exit; the loop's last retention jumps back to the loop head and the MIR has no return. Nothing is retained for `keep`: it only borrows its own local.
+
+**Condition 2: the loop form's rejecting twin** (`r1_loop_body_local_source_retained_into_dst_rejects`, module typed 332,728 / 49,168 / 12, graph `SourceRejected` 196,274 / 5,223 / 8). `looped` (a parameter source) checks, 3,546 / 355 / 7. A body-local `User` created in the loop and retained into `dst` rejects, and the code depends on how the body ends:
+
+| Root | Result | Caps |
+| --- | --- | --- |
+| `loopLocalReturn` (`return` after the call, inside the loop) | R0202 at `retain(dst, &user)`, related `&user` | 3,936 / 441 / 8 |
+| `loopLocal` (the body ends and the loop goes round) | R0203 at the loop body block, related `&user` | 3,960 / 444 / 8 |
+
+The ruling names R0202. The loop that goes round is R0203 (the scope's end releases a loan the destination still needs, as for `early` in `stored_source_loans_reach_the_caller_view`), which is also what `local_sources_escape_through_every_route_to_the_list`'s `loopLocal` has pinned since the build. Both reject; the R0202 form is the `return` variant. The chief should confirm that R0203 for the round-going loop is the wanted code.
+
+**Condition 3: the stored source outlives the call loan** (`r1_stored_source_outlives_the_call_loan`, module typed 336,144 / 49,622 / 12, graph `SourceRejected` 198,597 / 5,538 / 6). After `retain(dst, &user)` the call's own loan is over; `dst` still holds the source until the function ends.
+
+| Root | Result | Caps |
+| --- | --- | --- |
+| `writeAfter`: `retain(dst, &user); user.id = 2;` | R0203 at `user.id = 2;`, related `&user`: the write needs the source exclusively while `dst` still holds it | 3,924 / 431 / 6 |
+| `readAfter`: `retain(dst, &user); let n = user.id;` | R0202 at the call: a read does not conflict, only the escape rejects | 3,909 / 422 / 6 |
+| `writeBefore`: `user.id = 2; retain(dst, &user);` | R0202 at the call: no loan exists at the write | 4,006 / 472 / 6 |
+| `viewReadThenWrite`: `let view = &user; let n = view.id; user.id = 2;` | `Checked`: an ordinary view's loan ends at its last use, so the same write is fine | 2,761 / 346 / 4 |
+
+`writeAfter` against `writeBefore` and `viewReadThenWrite` is the judgment: the write rejects only when a retention precedes it, so the retained source outlived the call.
+
+Stated limit (also in the O9 row of `m5-status.md`): this judgment is reached through a body-local owner only, whose store R0202 rejects anyway. A use that would need a caller-provided source released or exclusively borrowed while `dst` is live is not expressible today: a `&mut User` source is typed `Incomplete` (probe: `retain(dst, &*source)` and `retain(dst, source)` with `source: &mut User` stop typed), `*source` stops the ownership pass at `*source`, and a caller-owned list (`retain(&mut users, source)`) is `Incomplete` at `users` (`list_destination_siblings_keep_their_outcomes_and_blockers`). The `&mut User` source is pinned by `r1_caller_provided_exclusive_source_stops_typed` (typed `Incomplete` at 326,581 / 48,099 / 12 for `retain(dst, &*source)` and 326,114 / 47,888 / 12 for `retain(dst, source)`, no ownership receipt, one short `ResourceLimit`; the typed report exposes no blocker site, so none is asserted). The `*source` and caller-owned list stops are pinned or observed as described in condition 4.
+
+**Condition 4: the admitted forms and the forms that stay `Incomplete`.**
+
+Admitted (`Checked` with MIR, or `SourceRejected` for a body-local source) for a `&mut List<&R>` destination that is a plain parameter name, `R` a non-generic record of `i32` fields:
+
+- the O9 forwarded call through a family (`o09_retained_list_source_checks_forwarded_and_rejects_local`) and its direct-function form;
+- two calls, a call in a loop, a pair of `&R` sources, the lone destination `retain(dst)`, a source read after the call, a call through a callee that forwards the parameter (`forward`);
+- a `&mut List<&R>` parameter with no call (`keep`, whose caps moved 2,584 / 260 / 4 to 2,760 / 305 / 4);
+- every body-local source, rejected: R0202 at the call (directly, through an alias, a local view, a branch, a later call, a forwarding callee, and a loop that returns) and R0203 for a loop body or branch that ends first; the same store in dead code rejects nothing (rule 6);
+- an implementation that stores nothing is rejected the same way (the known conservative rejection, R2's witness).
+
+Stay `Incomplete` at their blocker (pinned in `list_destination_siblings_keep_their_outcomes_and_blockers` and `family_list_destination_forms`): a caller-owned list (`retain(&mut users, source)`, at `users`), a grouped destination `retain((dst), source)` (at the call), an element that is a generic record, an owned `List<User>`, a `List<&mut User>`, a shared `&List<&User>` destination, a record with a `string` field, a nested record or an enum, and a call with an extra `bool` argument. A `&mut User` source stops the typed pass (`r1_caller_provided_exclusive_source_stops_typed`). Observed by probe and not pinned: a whole-record copy `*source` (ownership `Incomplete` at `*source`).
+
+**For the second review:** probe R1's admissions for a wrong acceptance. R1 reads the declared signature only and assumes a `&R` input can flow into `dst`'s elements, so it errs towards rejecting; the danger is a form that checks and should reject. The forms to try first are the ones above that check: a source whose owner ends or is mutated while `dst` is live, a `&R` source that is itself derived from a local (a view of a local, a call result), a destination reborrowed or aliased across a branch or loop, and a call in a loop whose source is created in the body. None has been found to check; every body-local source above rejects.
+
 ## Fixed caps
 
 Unchanged: `m5::legacy_caps`, `m5::graph::inventory`, every `retained`, `records`, `field_routes`, `list` and `scoped_join` test, `m4_8_scoped_join_caps`, `m4_8_match_boolean_snapshots`, `m4_8_ownership` (the M4 17-source baseline) and `m4_8_result_use`. The full M5 binary runs only in hosted CI.
@@ -89,4 +143,4 @@ Unchanged: `m5::legacy_caps`, `m5::graph::inventory`, every `retained`, `records
 
 ## Logs
 
-`~/.t3/evidence/rill/m5-build-2026-11-22/ci-xjff/`: `parent-probe.txt` and `candidate-probe.txt` (the measurements, sources in `probe-sources*/`), `m5-targeted.log`, `m5-extra.log`, `m4_8.log`, `m4_8_ownership.log`, `clippy.log`, `fmt.log`.
+`~/.t3/evidence/rill/m5-build-2026-11-22/ci-ue8s/` holds the logs of the conditions work (ci-ue8s). `~/.t3/evidence/rill/m5-build-2026-11-22/ci-xjff/`: `parent-probe.txt` and `candidate-probe.txt` (the measurements, sources in `probe-sources*/`), `m5-targeted.log`, `m5-extra.log`, `m4_8.log`, `m4_8_ownership.log`, `clippy.log`, `fmt.log`.
