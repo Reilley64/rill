@@ -111,11 +111,86 @@ impl<'a, 'g> Check<'a, 'g> {
             || id.kind != DeclarationKind::Binding
             || !self.wildcard_sources.iter().any(|(root, path)| {
                 path.is_empty()
-                    && matches!(root, Root::Local(p) if p.kind == DeclarationKind::Parameter)
+                    && matches!(root, Root::Local(p) if matches!(
+                        p.kind,
+                        DeclarationKind::Parameter | DeclarationKind::Binding
+                    ))
             })
         {
             return Ok(None);
         }
+        let Some((name, parent)) = self.written_binding(id)? else {
+            return Ok(None);
+        };
+        let nodes = &self.module.syntax.nodes;
+        let span = &nodes[name].span;
+        let NodeKind::Binding { mutable } = nodes[parent].kind else {
+            return Ok(None);
+        };
+        let (pattern, init) = (
+            nodes[parent].children[0],
+            *nodes[parent].children.last().unwrap(),
+        );
+        let mut pattern = pattern;
+        while nodes[pattern].kind == NodeKind::GroupPattern {
+            self.budget.step(1)?;
+            pattern = nodes[pattern].children[0];
+        }
+        if !matches!(
+            nodes[pattern].kind,
+            NodeKind::PatternPath | NodeKind::NamePattern
+        ) || nodes[pattern].span != *span
+        {
+            return Ok(None);
+        }
+        let init = self.ungroup_value(init)?;
+        if nodes[init].kind != NodeKind::ValueReference {
+            return Ok(None);
+        }
+        let Some(read) = self.expression_facts(init)? else {
+            return Ok(None);
+        };
+        let Some(path) = read
+            .path
+            .as_ref()
+            .filter(|path| path.projections.is_empty())
+        else {
+            return Ok(None);
+        };
+        if !matches!(read.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "bool") {
+            return Ok(None);
+        }
+        let mut found = None;
+        for (source, path_at) in &self.wildcard_sources {
+            self.budget.step(1)?;
+            if path_at.is_empty() && matches!(source, Root::Local(p) if std::ptr::eq(*p, path.root))
+            {
+                found = Some(*source);
+                break;
+            }
+        }
+        let Some(Root::Local(source)) = found else {
+            return Ok(None);
+        };
+        // A mutable copy or source still holds one value when nothing ever writes it.
+        if mutable && !self.never_written(id, parent)? {
+            return Ok(None);
+        }
+        if source.kind == DeclarationKind::Binding {
+            let Some((_, binding)) = self.written_binding(source)? else {
+                return Ok(None);
+            };
+            match self.module.syntax.nodes[binding].kind {
+                NodeKind::Binding { mutable: false } => {}
+                NodeKind::Binding { mutable: true } if self.never_written(source, binding)? => {}
+                _ => return Ok(None),
+            }
+        }
+        Ok(Some((Root::Local(source), Vec::new())))
+    }
+
+    /// The name node of the local `id` and the node that binds it, found on demand.
+    fn written_binding(&mut self, id: &DeclarationId) -> Work<Option<(NodeId, NodeId)>> {
         let nodes = &self.module.syntax.nodes;
         let declarations = &self.module.declarations;
         self.budget
@@ -158,50 +233,41 @@ impl<'a, 'g> Check<'a, 'g> {
             }
             parent += 1;
         }
-        let NodeKind::Binding { mutable: false } = nodes[parent].kind else {
-            return Ok(None);
-        };
-        let (pattern, init) = (
-            nodes[parent].children[0],
-            *nodes[parent].children.last().unwrap(),
-        );
-        let mut pattern = pattern;
-        while nodes[pattern].kind == NodeKind::GroupPattern {
+        Ok(Some((name, parent)))
+    }
+
+    /// Whether no assignment and no `&mut` in the scope of the mutable local `id`, bound
+    /// at `binding`, names it. A scalar capture copies, so an arrow that only reads the
+    /// local needs no screen of its own; an assignment or `&mut` inside one is still seen.
+    /// A node whose place is unknown counts as a write.
+    fn never_written(&mut self, id: &DeclarationId, binding: NodeId) -> Work<bool> {
+        let nodes = &self.module.syntax.nodes;
+        let span = &nodes[binding].span;
+        for node in nodes.iter().skip(binding + 1) {
             self.budget.step(1)?;
-            pattern = nodes[pattern].children[0];
-        }
-        if !matches!(
-            nodes[pattern].kind,
-            NodeKind::PatternPath | NodeKind::NamePattern
-        ) || nodes[pattern].span != *span
-        {
-            return Ok(None);
-        }
-        let init = self.ungroup_value(init)?;
-        if nodes[init].kind != NodeKind::ValueReference {
-            return Ok(None);
-        }
-        let Some(read) = self.expression_facts(init)? else {
-            return Ok(None);
-        };
-        let Some(path) = read
-            .path
-            .as_ref()
-            .filter(|path| path.projections.is_empty())
-        else {
-            return Ok(None);
-        };
-        if !matches!(read.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "bool") {
-            return Ok(None);
-        }
-        for (source, path_at) in &self.wildcard_sources {
-            self.budget.step(1)?;
-            if path_at.is_empty() && matches!(source, Root::Local(p) if std::ptr::eq(*p, path.root))
+            let written = match node.kind {
+                NodeKind::Block
+                    if node.span.start() <= span.start() && span.end() <= node.span.end() =>
+                {
+                    return Ok(true);
+                }
+                NodeKind::Assignment(_) => node.children[0],
+                NodeKind::Prefix("&mut") => node.children[0],
+                _ => continue,
+            };
+            let place = self.ungroup_value(written)?;
+            let Some(facts) = self.expression_facts(place)? else {
+                return Ok(false);
+            };
+            if facts
+                .path
+                .as_ref()
+                .is_none_or(|path| std::ptr::eq(path.root, id))
             {
-                return Ok(Some((*source, Vec::new())));
+                return Ok(false);
             }
         }
-        Ok(None)
+        Ok(false)
     }
 
     pub(super) fn discarded_value(&mut self, usage: ValueUse) -> Work<bool> {
