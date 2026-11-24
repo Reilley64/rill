@@ -3721,6 +3721,34 @@ fn reference_pair_reserves_before_it_builds_each_slot() {
                 let limited = analyze_typed(&graph, cap);
                 crate::limit::assert_typed_limit(&limited);
             }
+            // The reorder moved six units of reserve earlier and left the total
+            // alone, so the caps above hold in either order (review ci-0mdr
+            // ST-17). Inside this window of entries caps the two orders stop at
+            // different points: before the reorder every one of these stops at
+            // 405,462 / 44,957 / 12.
+            for (max_entries, stopped) in [
+                (44964, (405468, 44963, 12)),
+                (44962, (405465, 44960, 12)),
+                (44959, (405434, 44957, 12)),
+            ] {
+                let limited = analyze_typed(
+                    &graph,
+                    AnalysisLimits {
+                        max_entries,
+                        ..exact
+                    },
+                );
+                crate::limit::assert_typed_limit(&limited);
+                assert_eq!(
+                    limited.statistics(),
+                    compiler::analysis::Statistics {
+                        work: stopped.0,
+                        entries: stopped.1,
+                        max_depth: stopped.2,
+                    },
+                    "entries cap {max_entries}"
+                );
+            }
         },
     );
 }

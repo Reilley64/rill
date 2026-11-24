@@ -834,6 +834,50 @@ fn linear<'a, 'g>(mir: &'a Mir<'g>, mut pc: usize) -> Vec<&'a Operation<'g>> {
     panic!("path did not reach a return");
 }
 
+/// Every operation along the straight path from `pc` to the return, worded one
+/// line each (metering rule 9: compare the whole list, not a filtered view).
+fn render_path(mir: &Mir<'_>, pc: usize) -> Vec<String> {
+    use compiler::analysis::ownership::Place;
+    let place = |place: &Place<'_>| {
+        let root = String::from_utf8_lossy(place.root.span.bytes()).into_owned();
+        match (place.projection, place.field()) {
+            (None, _) => root,
+            (Some(_), Some(field)) => format!("{root}.{}", field.name.as_deref().unwrap()),
+            (Some(projection), None) => panic!("unexpected projection {projection:?}"),
+        }
+    };
+    linear(mir, pc)
+        .into_iter()
+        .map(|operation| match operation {
+            Operation::None => "none".to_string(),
+            Operation::Initialize(value) => format!("init {}", place(value)),
+            Operation::Export(value) => format!("export {}", place(value)),
+            Operation::Move {
+                from,
+                into: Some(into),
+            } => format!("move {} -> {}", place(from), place(into)),
+            Operation::Install { target, incoming } => {
+                format!("install {} <- {}", place(target), place(incoming))
+            }
+            Operation::Cleanup(actions) => {
+                let actions: Vec<_> = actions
+                    .iter()
+                    .map(|action| match action {
+                        Obligation::EndStorage(value) => format!("end {}", place(value)),
+                        Obligation::Drop(value) => format!("drop {}", place(value)),
+                        Obligation::ReleaseGuard { operand, .. } => {
+                            format!("release {}", place(operand))
+                        }
+                        other => panic!("unexpected cleanup {other:?}"),
+                    })
+                    .collect();
+                format!("cleanup [{}]", actions.join("; "))
+            }
+            other => panic!("unexpected operation {}", &format!("{other:?}")[..40]),
+        })
+        .collect()
+}
+
 fn straight_blocks<'a, 'g>(
     mir: &'a Mir<'g>,
     mut pc: usize,

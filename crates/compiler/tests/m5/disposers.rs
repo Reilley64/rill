@@ -393,6 +393,18 @@ fn protected_guard_cleanup_follows_the_initialized_owner() {
             let mir = replace
                 .mir()
                 .expect("replacement releases the old initialized owner");
+            assert_eq!(
+                render_path(mir, mir.entry),
+                [
+                    "move first: LockGuard<i32> -> held",
+                    "move second: LockGuard<i32> -> second",
+                    "cleanup [release held]",
+                    "install held <- second",
+                    "cleanup [release held]",
+                    "cleanup []",
+                    "none",
+                ]
+            );
             let route: Vec<_> = linear(mir, mir.entry)
                 .into_iter()
                 .filter(|op| match op {
@@ -435,6 +447,21 @@ fn protected_guard_cleanup_follows_the_initialized_owner() {
             let mir = moved
                 .mir()
                 .expect("installing in a moved slot needs no displacement release");
+            assert_eq!(
+                render_path(mir, mir.entry),
+                [
+                    "move first: LockGuard<i32> -> held",
+                    "cleanup [release held]",
+                    "init dispose(held)",
+                    "none",
+                    "move second: LockGuard<i32> -> second",
+                    "cleanup []",
+                    "install held <- second",
+                    "cleanup [release held]",
+                    "cleanup []",
+                    "none",
+                ]
+            );
             let route: Vec<_> = linear(mir, mir.entry)
                 .into_iter()
                 .filter(|op| match op {

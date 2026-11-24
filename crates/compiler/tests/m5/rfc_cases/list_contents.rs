@@ -7,6 +7,7 @@ use super::o12::{Case, check_cases};
 use super::record_contents::{checked, incomplete, rejected};
 use super::*;
 use compiler::analysis::ownership::{Place, RetainedPlace};
+use compiler::analysis::typed::ResultUseBlocker;
 
 const CONSERVATIVE: &str = r####"
 type User = { id: i32 };
@@ -293,6 +294,177 @@ function passed(dst: &mut List<&User>, source: &mut User): void {
 }
 "####;
 
+const GROUPED: &str = r####"
+type User = { id: i32 };
+function retain<D, S>(dst: D, source: S): void;
+implement retain(dst: &mut List<&User>, source: &User): void { while (true) {} }
+function grouped(dst: &mut List<&User>, source: &User): void { retain((dst), source); }
+"####;
+
+const OLD_CONTENTS: &str = r####"
+type User = { id: i32 };
+function retain<D, S>(dst: D, source: S): void;
+implement retain(dst: &mut List<&User>, source: &User): void { while (true) {} }
+function forward(dst: &mut List<&User>, source: &User): void { retain(dst, source); }
+function reversed(dst: &mut List<&User>, a: &User): void {
+  let user = User { id: 1 };
+  retain(dst, &user);
+  retain(dst, a);
+}
+function reversedViaCall(dst: &mut List<&User>, a: &User): void {
+  let user = User { id: 1 };
+  retain(dst, &user);
+  forward(dst, a);
+}
+"####;
+
+const ORDER: &str = r####"
+type User = { id: i32 };
+function retain<D, S>(dst: D, source: S): void;
+implement retain(dst: &mut List<&User>, source: &User): void { while (true) {} }
+function paramThenLocal(dst: &mut List<&User>, a: &User): void {
+  let user = User { id: 1 };
+  retain(dst, a);
+  retain(dst, &user);
+}
+function localThenParam(dst: &mut List<&User>, a: &User): void {
+  let user = User { id: 1 };
+  retain(dst, &user);
+  retain(dst, a);
+}
+"####;
+
+const OWNED_SOURCES: &str = r####"
+type User = { id: i32 };
+function retain<D, S>(dst: D, source: S): void;
+implement retain(dst: &mut List<&User>, source: &User): void { while (true) {} }
+function byValue(dst: &mut List<&User>, owned: User): void { retain(dst, &owned); }
+function hop(dst: &mut List<&User>, owned: User): void {
+  let view = &owned;
+  retain(dst, view);
+}
+function oneBranch(dst: &mut List<&User>, owned: User, flag: bool): void {
+  if (flag) { retain(dst, &owned); }
+}
+function loopOwned(dst: &mut List<&User>, owned: User, flag: bool): void {
+  while (flag) { retain(dst, &owned); }
+}
+function loopBreak(dst: &mut List<&User>, owned: User): void {
+  while (true) { retain(dst, &owned); break; }
+}
+"####;
+
+const TEMPORARY_SOURCES: &str = r####"
+type User = { id: i32 };
+function retain<D, S>(dst: D, source: S): void;
+implement retain(dst: &mut List<&User>, source: &User): void { while (true) {} }
+function make(): User { return User { id: 1 }; }
+function call(dst: &mut List<&User>): void { retain(dst, &make()); }
+function literal(dst: &mut List<&User>): void { retain(dst, &User { id: 1 }); }
+"####;
+
+const PAIR_LOCAL: &str = r####"
+type User = { id: i32 };
+function retain<D, S, T>(dst: D, a: S, b: T): void;
+implement retain(dst: &mut List<&User>, a: &User, b: &User): void { while (true) {} }
+function localSecond(dst: &mut List<&User>, a: &User): void {
+  let user = User { id: 1 };
+  retain(dst, a, &user);
+}
+function localFirst(dst: &mut List<&User>, a: &User): void {
+  let user = User { id: 1 };
+  retain(dst, &user, a);
+}
+"####;
+
+const LONE_LOCAL: &str = r####"
+type User = { id: i32 };
+function retain<D, S>(dst: D, source: S): void;
+implement retain(dst: &mut List<&User>, source: &User): void { while (true) {} }
+function touch<D>(dst: D): void;
+implement touch(dst: &mut List<&User>): void { while (true) {} }
+function loneAfterLocal(dst: &mut List<&User>): void {
+  let user = User { id: 1 };
+  retain(dst, &user);
+  touch(dst);
+}
+function loneBeforeLocal(dst: &mut List<&User>): void {
+  let user = User { id: 1 };
+  touch(dst);
+  retain(dst, &user);
+}
+"####;
+
+const NAMED_BORROW: &str = r####"type T = { name: string; id: i32 };
+function touch(dst: &mut List<&T>): void { }
+function touchTwo(dst: &mut List<&T>, source: &T): void { }
+function touchF<D, S>(dst: D, source: S): void;
+implement touchF(dst: &mut List<&T>, source: &T): void { while (true) {} }
+function touchOne<D>(dst: D): void;
+implement touchOne(dst: &mut List<&T>): void { while (true) {} }
+function f(): void { let a = T { name: "n", id: 1 }; let mut users: List<&T> = [&a]; let r = &mut users; }
+"####;
+
+const NAMED_LONE: &str = r####"type T = { name: string; id: i32 };
+function touch(dst: &mut List<&T>): void { }
+function touchTwo(dst: &mut List<&T>, source: &T): void { }
+function touchF<D, S>(dst: D, source: S): void;
+implement touchF(dst: &mut List<&T>, source: &T): void { while (true) {} }
+function touchOne<D>(dst: D): void;
+implement touchOne(dst: &mut List<&T>): void { while (true) {} }
+function f(dst: &mut List<&T>): void { touchOne(dst); }
+"####;
+
+const NAMED_FORWARDED: &str = r####"type T = { name: string; id: i32 };
+function touch(dst: &mut List<&T>): void { }
+function touchTwo(dst: &mut List<&T>, source: &T): void { }
+function touchF<D, S>(dst: D, source: S): void;
+implement touchF(dst: &mut List<&T>, source: &T): void { while (true) {} }
+function touchOne<D>(dst: D): void;
+implement touchOne(dst: &mut List<&T>): void { while (true) {} }
+function f(dst: &mut List<&T>, s: &T): void { touchF(dst, s); }
+"####;
+
+const NAMED_FORWARDED_PIPE: &str = r####"type T = { name: string; id: i32 };
+function touch(dst: &mut List<&T>): void { }
+function touchTwo(dst: &mut List<&T>, source: &T): void { }
+function touchF<D, S>(dst: D, source: S): void;
+implement touchF(dst: &mut List<&T>, source: &T): void { while (true) {} }
+function touchOne<D>(dst: D): void;
+implement touchOne(dst: &mut List<&T>): void { while (true) {} }
+function f(dst: &mut List<&T>, s: &T): void { dst |> touchF(s); }
+"####;
+
+const NAMED_DIRECT_EMPTY: &str = r####"type T = { name: string; id: i32 };
+function touch(dst: &mut List<&T>): void { }
+function touchTwo(dst: &mut List<&T>, source: &T): void { }
+function touchF<D, S>(dst: D, source: S): void;
+implement touchF(dst: &mut List<&T>, source: &T): void { while (true) {} }
+function touchOne<D>(dst: D): void;
+implement touchOne(dst: &mut List<&T>): void { while (true) {} }
+function f(dst: &mut List<&T>): void { touch(dst); }
+"####;
+
+const NAMED_DIRECT_PAIR: &str = r####"type T = { name: string; id: i32 };
+function touch(dst: &mut List<&T>): void { }
+function touchTwo(dst: &mut List<&T>, source: &T): void { }
+function touchF<D, S>(dst: D, source: S): void;
+implement touchF(dst: &mut List<&T>, source: &T): void { while (true) {} }
+function touchOne<D>(dst: D): void;
+implement touchOne(dst: &mut List<&T>): void { while (true) {} }
+function f(dst: &mut List<&T>, s: &T): void { touchTwo(dst, s); }
+"####;
+
+const NAMED_PIPED_PAIR: &str = r####"type T = { name: string; id: i32 };
+function touch(dst: &mut List<&T>): void { }
+function touchTwo(dst: &mut List<&T>, source: &T): void { }
+function touchF<D, S>(dst: D, source: S): void;
+implement touchF(dst: &mut List<&T>, source: &T): void { while (true) {} }
+function touchOne<D>(dst: D): void;
+implement touchOne(dst: &mut List<&T>): void { while (true) {} }
+function f(dst: &mut List<&T>, s: &T): void { dst |> touchTwo(s); }
+"####;
+
 const R0202_LOCAL: (&str, &str, &str) = ("R0202", "retain(dst, &user)", "&user");
 
 /// R1's known conservative rejection (the chief's condition, ri-ema). The
@@ -533,9 +705,11 @@ fn local_sources_escape_through_every_route_to_the_list() {
 /// Rule 1 for the siblings that pass the free type screen but not the record
 /// lookup (a `string` field, a nested record, an enum) or the contract (an
 /// extra `bool`), and the shapes the screen refuses on the type alone. Each
-/// keeps its outcome and its blocker. The first four pay one lookup in the
-/// parameter and one at the call (+148, +148, +144 work and +3 entries; `Flag`
-/// pays the parameter's, +74); the rest pay nothing and keep their parent caps.
+/// keeps its outcome and its blocker. The first three pay one lookup in the
+/// parameter and one at the call (+148, +148, +144 work and +3 entries); `Flag`
+/// and `grouped` (`retain((dst), source)`, the fifth use of the standing rule-1
+/// exception, review ci-0mdr ST-1) pay the parameter's only (+74 work, +3
+/// entries); the rest pay nothing and keep their parent caps.
 #[test]
 fn list_destination_siblings_keep_their_outcomes_and_blockers() {
     installed(
@@ -642,6 +816,18 @@ fn list_destination_siblings_keep_their_outcomes_and_blockers() {
                     },
                     const {
                         Case {
+                            text: GROUPED,
+                            typed_stats: (327397, 48238, 12),
+                            graph: (GraphCompletion::Incomplete, (188200, 4146, 5)),
+                            roots: &[incomplete(
+                                "grouped",
+                                "retain((dst), source)",
+                                (1979, 45, 3),
+                            )],
+                        }
+                    },
+                    const {
+                        Case {
                             text: LOCAL_DESTINATION,
                             typed_stats: (327114, 48212, 12),
                             graph: (GraphCompletion::Incomplete, (188230, 4139, 5)),
@@ -657,6 +843,179 @@ fn list_destination_siblings_keep_their_outcomes_and_blockers() {
                     (NESTED, &[("forwarded", (1906, 43, 3))], (188192, 4144, 5)),
                     (ENUM, &[("forwarded", (1900, 40, 3))], (188002, 4141, 5)),
                     (FLAG, &[("forwarded", (1917, 49, 3))], (188322, 4150, 5)),
+                    (GROUPED, &[("grouped", (1905, 42, 3))], (188126, 4143, 5)),
+                ],
+            );
+        },
+    );
+}
+
+/// Review ci-0mdr, the "Unverified" item of the Standards axis: which
+/// unsupported shapes pay the charged record lookup beyond the siblings of
+/// `list_destination_siblings_keep_their_outcomes_and_blockers`. A record with a
+/// `string` field behind a `&mut List<&R>` parameter pays one lookup per
+/// parameter that reaches the contents screen (70 to 72 work, no entries) in
+/// every body that declares one, `Checked` or not, and one more at each call
+/// that passes it on, direct or piped (`+144` to `+148` work, up to +3 entries
+/// in `f`). Each keeps its outcome and its blocker; each parent cap (`b6c93f30`)
+/// gives `ResourceLimit`. A nested record and an enum cost the same to within
+/// two work, and are recorded in `ri-px1.11.5.md`.
+#[test]
+fn list_parameter_siblings_pay_their_lookup_and_keep_their_outcomes() {
+    installed(
+        "rfc_cases::list_contents::list_parameter_siblings_pay_their_lookup_and_keep_their_outcomes",
+        |request| {
+            check_cases(
+                &request,
+                &[
+                    const {
+                        Case {
+                            text: NAMED_BORROW,
+                            typed_stats: (331201, 48419, 12),
+                            graph: (GraphCompletion::Incomplete, (192013, 4322, 5)),
+                            roots: &[
+                                checked("touch", (2071, 91, 1)),
+                                checked("touchTwo", (2114, 109, 1)),
+                                incomplete("f", "users", (2303, 121, 1)),
+                            ],
+                        }
+                    },
+                    const {
+                        Case {
+                            text: NAMED_LONE,
+                            typed_stats: (331235, 48359, 12),
+                            graph: (GraphCompletion::Incomplete, (191375, 4263, 5)),
+                            roots: &[
+                                checked("touch", (2057, 84, 1)),
+                                checked("touchTwo", (2100, 102, 1)),
+                                incomplete("f", "touchOne(dst)", (2087, 62, 3)),
+                            ],
+                        }
+                    },
+                    const {
+                        Case {
+                            text: NAMED_FORWARDED,
+                            typed_stats: (331483, 48464, 12),
+                            graph: (GraphCompletion::Incomplete, (191571, 4271, 5)),
+                            roots: &[
+                                checked("touch", (2063, 87, 1)),
+                                checked("touchTwo", (2106, 105, 1)),
+                                incomplete("f", "touchF(dst, s)", (2102, 70, 3)),
+                            ],
+                        }
+                    },
+                    const {
+                        Case {
+                            text: NAMED_FORWARDED_PIPE,
+                            typed_stats: (331493, 48468, 12),
+                            graph: (GraphCompletion::Incomplete, (191497, 4268, 5)),
+                            roots: &[
+                                checked("touch", (2063, 87, 1)),
+                                checked("touchTwo", (2106, 105, 1)),
+                                incomplete("f", "dst |> touchF(s)", (2028, 67, 3)),
+                            ],
+                        }
+                    },
+                    const {
+                        Case {
+                            text: NAMED_DIRECT_EMPTY,
+                            typed_stats: (330802, 48270, 12),
+                            graph: (GraphCompletion::Incomplete, (191442, 4264, 5)),
+                            roots: &[
+                                checked("touch", (2059, 85, 1)),
+                                checked("touchTwo", (2102, 103, 1)),
+                                incomplete("f", "dst", (2094, 63, 3)),
+                            ],
+                        }
+                    },
+                    const {
+                        Case {
+                            text: NAMED_DIRECT_PAIR,
+                            typed_stats: (331011, 48324, 12),
+                            graph: (GraphCompletion::Incomplete, (191638, 4272, 5)),
+                            roots: &[
+                                checked("touch", (2065, 88, 1)),
+                                checked("touchTwo", (2108, 106, 1)),
+                                incomplete("f", "dst", (2109, 71, 3)),
+                            ],
+                        }
+                    },
+                    const {
+                        Case {
+                            text: NAMED_PIPED_PAIR,
+                            typed_stats: (331021, 48328, 12),
+                            graph: (GraphCompletion::Incomplete, (191638, 4269, 5)),
+                            roots: &[
+                                checked("touch", (2065, 88, 1)),
+                                checked("touchTwo", (2108, 106, 1)),
+                                incomplete("f", "dst |> touchTwo(s)", (2109, 68, 3)),
+                            ],
+                        }
+                    },
+                ],
+            );
+            old_root_caps(
+                &request,
+                &[
+                    (
+                        NAMED_BORROW,
+                        &[("touch", (1999, 91, 1)), ("touchTwo", (2042, 109, 1))],
+                        (191869, 4322, 5),
+                    ),
+                    (
+                        NAMED_LONE,
+                        &[
+                            ("touch", (1985, 84, 1)),
+                            ("touchTwo", (2028, 102, 1)),
+                            ("f", (1940, 60, 3)),
+                        ],
+                        (191084, 4261, 5),
+                    ),
+                    (
+                        NAMED_FORWARDED,
+                        &[
+                            ("touch", (1991, 87, 1)),
+                            ("touchTwo", (2034, 105, 1)),
+                            ("f", (1954, 67, 3)),
+                        ],
+                        (191279, 4268, 5),
+                    ),
+                    (
+                        NAMED_FORWARDED_PIPE,
+                        &[
+                            ("touch", (1991, 87, 1)),
+                            ("touchTwo", (2034, 105, 1)),
+                            ("f", (1956, 67, 3)),
+                        ],
+                        (191281, 4268, 5),
+                    ),
+                    (
+                        NAMED_DIRECT_EMPTY,
+                        &[
+                            ("touch", (1987, 85, 1)),
+                            ("touchTwo", (2030, 103, 1)),
+                            ("f", (1950, 63, 3)),
+                        ],
+                        (191154, 4264, 5),
+                    ),
+                    (
+                        NAMED_DIRECT_PAIR,
+                        &[
+                            ("touch", (1993, 88, 1)),
+                            ("touchTwo", (2036, 106, 1)),
+                            ("f", (1965, 71, 3)),
+                        ],
+                        (191350, 4272, 5),
+                    ),
+                    (
+                        NAMED_PIPED_PAIR,
+                        &[
+                            ("touch", (1993, 88, 1)),
+                            ("touchTwo", (2036, 106, 1)),
+                            ("f", (1965, 68, 3)),
+                        ],
+                        (191350, 4269, 5),
+                    ),
                 ],
             );
         },
@@ -1005,6 +1364,247 @@ fn r1_stored_source_outlives_the_call_loan() {
     );
 }
 
+/// RFC 0007 R1: "After the call, the contents of `dst` carry the sources of
+/// that input and their old contents" (review ci-0mdr SP-1). A body-local
+/// source stored first is still in the contents after a later retain of a
+/// parameter, directly or through a forwarding function, so each is R0202; a
+/// strong update (the second call replacing the first source) would check
+/// both. `forward` (a parameter alone) checks beside them.
+#[test]
+fn r1_old_contents_survive_a_later_retain() {
+    installed(
+        "rfc_cases::list_contents::r1_old_contents_survive_a_later_retain",
+        |request| {
+            check_cases(
+                &request,
+                &[const {
+                    Case {
+                        text: OLD_CONTENTS,
+                        typed_stats: (333755, 49416, 12),
+                        graph: (GraphCompletion::SourceRejected, (197880, 5390, 6)),
+                        roots: &[
+                            checked("forward", (3384, 270, 5)),
+                            rejected(
+                                "reversed",
+                                "R0202",
+                                "retain(dst, a)",
+                                "&user",
+                                (5130, 572, 6),
+                            ),
+                            rejected(
+                                "reversedViaCall",
+                                "R0202",
+                                "forward(dst, a)",
+                                "&user",
+                                (4360, 572, 6),
+                            ),
+                        ],
+                    }
+                }],
+            );
+        },
+    );
+}
+
+/// Review ci-0mdr SP-6. The R0202 for a body-local source stored into `dst` is
+/// reported at the last call that retains into `dst` before the exit, with the
+/// body-local borrow as the related site, not at the call that stored the
+/// local. `paramThenLocal` stores the local last (site `retain(dst, &user)`);
+/// `localThenParam` stores it first and a valid parameter call follows (site
+/// `retain(dst, a)`, the valid call). Both still reject; the rule gives the
+/// exit's last retention as the site, and this pins it.
+#[test]
+fn r1_local_then_parameter_reports_the_storing_call() {
+    installed(
+        "rfc_cases::list_contents::r1_local_then_parameter_reports_the_storing_call",
+        |request| {
+            check_cases(
+                &request,
+                &[const {
+                    Case {
+                        text: ORDER,
+                        typed_stats: (332006, 49227, 12),
+                        graph: (GraphCompletion::SourceRejected, (196271, 5172, 6)),
+                        roots: &[
+                            rejected(
+                                "paramThenLocal",
+                                "R0202",
+                                "retain(dst, &user)",
+                                "&user",
+                                (5108, 561, 6),
+                            ),
+                            rejected(
+                                "localThenParam",
+                                "R0202",
+                                "retain(dst, a)",
+                                "&user",
+                                (5104, 559, 6),
+                            ),
+                        ],
+                    }
+                }],
+            );
+        },
+    );
+}
+
+/// RFC 0007 R1: exits "must not retain body-local owners, temporary storage or
+/// destroyed owned-parameter storage" (review ci-0mdr SP-2). A by-value
+/// parameter's storage ends with the call, so retaining a view of it into
+/// `dst` is R0202 directly, through a local view, on one branch, in a loop
+/// whose condition can fail and in a loop that breaks. A temporary source (a
+/// call result or a literal) is not expressible today: the targeted query is
+/// `Incomplete` at the temporary, so no unchecked shape reaches `dst` (a stated
+/// limit, the O12 call-result rule has no list destination).
+#[test]
+fn r1_owned_parameter_and_temporary_sources_do_not_escape() {
+    installed(
+        "rfc_cases::list_contents::r1_owned_parameter_and_temporary_sources_do_not_escape",
+        |request| {
+            check_cases(
+                &request,
+                &[const {
+                    Case {
+                        text: OWNED_SOURCES,
+                        typed_stats: (339046, 50101, 12),
+                        graph: (GraphCompletion::SourceRejected, (201987, 5871, 8)),
+                        roots: &[
+                            rejected(
+                                "byValue",
+                                "R0202",
+                                "retain(dst, &owned)",
+                                "&owned",
+                                (3689, 314, 6),
+                            ),
+                            rejected(
+                                "hop",
+                                "R0202",
+                                "retain(dst, view)",
+                                "&owned",
+                                (3811, 372, 5),
+                            ),
+                            rejected(
+                                "oneBranch",
+                                "R0202",
+                                "retain(dst, &owned)",
+                                "&owned",
+                                (3974, 459, 8),
+                            ),
+                            rejected(
+                                "loopOwned",
+                                "R0202",
+                                "retain(dst, &owned)",
+                                "&owned",
+                                (4234, 584, 8),
+                            ),
+                            rejected(
+                                "loopBreak",
+                                "R0202",
+                                "retain(dst, &owned)",
+                                "&owned",
+                                (3809, 376, 8),
+                            ),
+                        ],
+                    }
+                }],
+            );
+            check_cases(
+                &request,
+                &[const {
+                    Case {
+                        text: TEMPORARY_SOURCES,
+                        typed_stats: (331121, 48738, 12),
+                        graph: (GraphCompletion::Incomplete, (191890, 4301, 6)),
+                        roots: &[
+                            checked("make", (2363, 154, 4)),
+                            incomplete("call", "make()", (2941, 63, 6)),
+                            incomplete("literal", "User { id: 1 }", (2941, 63, 6)),
+                        ],
+                    }
+                }],
+            );
+        },
+    );
+}
+
+/// Rejecting twin of `r1_pair_of_user_sources_checks_with_its_sequence` (review
+/// ci-0mdr SP-5, RFC 0007: a rule "never accepts an invalid program"): one
+/// body-local source in a pair is R0202 at the call, whichever position holds it.
+#[test]
+fn r1_pair_with_one_body_local_source_rejects() {
+    installed(
+        "rfc_cases::list_contents::r1_pair_with_one_body_local_source_rejects",
+        |request| {
+            check_cases(
+                &request,
+                &[const {
+                    Case {
+                        text: PAIR_LOCAL,
+                        typed_stats: (331050, 49095, 12),
+                        graph: (GraphCompletion::SourceRejected, (193688, 4884, 6)),
+                        roots: &[
+                            rejected(
+                                "localSecond",
+                                "R0202",
+                                "retain(dst, a, &user)",
+                                "&user",
+                                (3901, 415, 6),
+                            ),
+                            rejected(
+                                "localFirst",
+                                "R0202",
+                                "retain(dst, &user, a)",
+                                "&user",
+                                (3899, 414, 6),
+                            ),
+                        ],
+                    }
+                }],
+            );
+        },
+    );
+}
+
+/// Rejecting twin of `r1_lone_destination_checks_with_its_sequence` (review
+/// ci-0mdr SP-5): a lone-destination call adds no source but keeps "every
+/// source they already held", so a body-local source stored before or after
+/// it still reaches the exit. R0202 is at the last retaining call: `touch(dst)`
+/// when the local was stored first, the storing call when it came last.
+#[test]
+fn r1_lone_destination_keeps_a_stored_local_rejected() {
+    installed(
+        "rfc_cases::list_contents::r1_lone_destination_keeps_a_stored_local_rejected",
+        |request| {
+            check_cases(
+                &request,
+                &[const {
+                    Case {
+                        text: LONE_LOCAL,
+                        typed_stats: (333673, 49207, 12),
+                        graph: (GraphCompletion::SourceRejected, (197402, 5006, 6)),
+                        roots: &[
+                            rejected(
+                                "loneAfterLocal",
+                                "R0202",
+                                "touch(dst)",
+                                "&user",
+                                (4951, 475, 6),
+                            ),
+                            rejected(
+                                "loneBeforeLocal",
+                                "R0202",
+                                "retain(dst, &user)",
+                                "&user",
+                                (4960, 478, 6),
+                            ),
+                        ],
+                    }
+                }],
+            );
+        },
+    );
+}
+
 /// The stated limit of condition 3, pinned: a caller-provided `&mut User`
 /// source cannot reach `retain` today. The typed pass stops (`Incomplete`, no
 /// receipt, so the ownership pass never sees the call), for the reborrow
@@ -1012,18 +1612,34 @@ fn r1_stored_source_outlives_the_call_loan() {
 /// caller-provided source exclusively while `dst` is live is not expressible.
 /// Rule 8: the outcome is `Incomplete` at exact typed caps, no ownership
 /// receipt is published, and one short on work gives `ResourceLimit`. The
-/// typed report names no body obligation for this stop (its blocker is not
-/// exposed), so the blocker site is not asserted.
+/// typed report names the stop in its Result-use pending list (review
+/// ci-0mdr ST-10): the write `source.id = 2;` (`Storage`) for the reborrow,
+/// and for passing `source` itself the call (`TypedInput`, with body finding
+/// R0300 at the call: the `&mut User` argument does not meet the `&User`
+/// parameter) and the write. It has no body obligation and no core blocker.
 #[test]
 fn r1_caller_provided_exclusive_source_stops_typed() {
     installed(
         "rfc_cases::list_contents::r1_caller_provided_exclusive_source_stops_typed",
         |request| {
-            for (text, stats) in [
-                (EXCLUSIVE_SOURCE, (326581, 48099, 12)),
-                (EXCLUSIVE_PASSED, (326114, 47888, 12)),
+            for (module, stats, pending, findings) in [
+                (
+                    EXCLUSIVE_SOURCE,
+                    (326581, 48099, 12),
+                    &[(ResultUseBlocker::Storage, "source.id = 2;")][..],
+                    &[][..],
+                ),
+                (
+                    EXCLUSIVE_PASSED,
+                    (326114, 47888, 12),
+                    &[
+                        (ResultUseBlocker::TypedInput, "retain(dst, source)"),
+                        (ResultUseBlocker::Storage, "source.id = 2;"),
+                    ][..],
+                    &[("R0300", "retain(dst, source)")][..],
+                ),
             ] {
-                fs::write(&request.entry, format!("{IMPORTS}\n{text}")).unwrap();
+                fs::write(&request.entry, format!("{IMPORTS}\n{module}")).unwrap();
                 for test_mode in [false, true] {
                     let request = InstalledRequest {
                         test_mode,
@@ -1034,6 +1650,25 @@ fn r1_caller_provided_exclusive_source_stops_typed() {
                     assert_eq!(typed.completion(), TypedCompletion::Incomplete);
                     assert_eq!(typed.statistics(), statistics(stats));
                     assert!(typed.receipt().is_none());
+                    let blockers: Vec<_> = typed
+                        .result_use()
+                        .unwrap()
+                        .pending()
+                        .iter()
+                        .map(|p| (p.blocker, text(&p.site)))
+                        .collect();
+                    let pending: Vec<_> =
+                        pending.iter().map(|(b, s)| (*b, s.to_string())).collect();
+                    assert_eq!(blockers, pending);
+                    let body_findings: Vec<_> = typed
+                        .bodies()
+                        .findings()
+                        .iter()
+                        .map(|f| (f.kind.code().unwrap(), text(&f.site)))
+                        .collect();
+                    let findings: Vec<_> =
+                        findings.iter().map(|(c, s)| (*c, s.to_string())).collect();
+                    assert_eq!(body_findings, findings);
                     let (exact, short) = limits(statistics(stats));
                     let replay = analyze_typed(&graph, exact);
                     assert_eq!(replay.completion(), TypedCompletion::Incomplete);

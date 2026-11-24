@@ -133,9 +133,15 @@ fn rfc_counter_caps_include_the_charged_local_reads() {
         |_, module, receipt| {
             let decl = named(module, "counter");
             let query = |cap| lower_body(receipt, module, &decl.id, cap).unwrap();
-            // The reads of `first` and `second` charge "main.rill" (10) three
-            // times each in place of one step: 2 x (10 x 3 - 1) = 58 work.
             let stats = statistics(2562, 329, 6);
+            // Review ci-0mdr ST-16 (R-4): the parent's 2,504 charged each read
+            // of `first` and `second` as one step; now each charges the key's
+            // path plus one, three probes. The +58 is that difference computed
+            // from the module path, and the parent cap now gives `ResourceLimit`.
+            let parent = 2504;
+            let per_read = 3 * (module.key.path.len() + 1) - 1;
+            assert_eq!(stats.work - parent, 2 * per_read);
+            crate::limit::assert_body_limit(&query(caps(statistics(parent, 329, 6)).0));
             let (exact, short) = caps(stats);
             let target = query(exact);
             assert_eq!(target.completion(), Completion::Checked);
