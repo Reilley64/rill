@@ -45,7 +45,7 @@ The typed report has no body obligation and no core blocker for these two progra
 | `retain(dst, &*source); source.id = 2;` | 326,581 / 48,099 / 12 | `(Storage, "source.id = 2;")` | none |
 | `retain(dst, source); source.id = 2;` | 326,114 / 47,888 / 12 | `(TypedInput, "retain(dst, source)")`, `(Storage, "source.id = 2;")` | `R0300` at `retain(dst, source)` |
 
-Finding for the record: the second program is an ordinary type error (`&mut User` where the destination's source parameter is `&User`), so "passing `source` itself" is rejected by the typed pass, not only stopped. The doc comment of the test says so. The `assert_typed_limit_keeping_body_findings` calls stay (pending `ri-68mu`).
+Finding for the record: the second program is an ordinary type error (`&mut User` where the destination's source parameter is `&User`), so "passing `source` itself" is rejected by the typed pass, not only stopped. The doc comment of the test says so. The one-short loop uses `assert_typed_limit` (the `keeping_body_findings` variant went with `ri-68mu`, merged before this branch's last merge).
 
 ## SP-1, SP-2, SP-5, SP-6: new R1 pins (no behaviour change)
 
