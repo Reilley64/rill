@@ -104,7 +104,7 @@ Merged base: `origin/implementation/m5-ownership-cleanup` at `0a8e2caf` (clean m
 
 | Check | Result | Log |
 |---|---|---|
-| `cargo test -p compiler --test m4_5 --test m4_6 --test m4_6_evidence --test m4_7 --test m4_8 --test m4_8_installed_conversions --test m4_8_primitives --test m4_8_ownership --test m4_8_list --test m4_8_scoped_join_caps --test m4_8_match_boolean_snapshots --test m4_8_callable_once --test m4_8_limit_readers` | 13 binaries pass: 18, 26, 27, 18, 20 tests, then eight single-test binaries (`installed_*`, the snapshot and cap tests) and `m4_8_limit_readers` (6 tests); none failed | `c4-m4.log` |
+| `cargo test -p compiler --test m4_5 --test m4_6 --test m4_6_evidence --test m4_7 --test m4_8 --test m4_8_installed_conversions --test m4_8_primitives --test m4_8_ownership --test m4_8_list --test m4_8_scoped_join_caps --test m4_8_match_boolean_snapshots --test m4_8_callable_once --test m4_8_limit_readers` | 13 binaries pass: 18, 26, 27, 18, 20 tests, then seven single-test binaries (`installed_*`, the snapshot and cap tests) and `m4_8_limit_readers` (6 tests); none failed | `c4-m4.log` |
 | `--test m5 -- rfc_cases retained legacy_caps graph::inventory` | 156 passed, 0 failed (382 filtered) | `c4-m5.log` |
 | `cargo fmt --all -- --check` | clean | `fmt.log` |
 | `cargo clippy --locked --no-default-features -p compiler --tests -- -D warnings` | clean | `clippy.log` |
