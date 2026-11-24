@@ -417,6 +417,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 boolean: None,
                 copy_of: CopySource::Unknown,
                 written: None,
+                initializer: None,
             });
         Ok(())
     }
@@ -512,6 +513,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                                 boolean: None,
                                 copy_of: CopySource::Unknown,
                                 written: None,
+                                initializer: None,
                             },
                         );
                     } else {

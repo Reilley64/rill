@@ -189,9 +189,6 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         {
             return Err(pending);
         }
-        // A local descriptor must be written `&mut record.field`. The count is
-        // zero, so ruling the form out costs nothing, unless some binding in
-        // the body was written that way.
         let mut local_descriptor = None;
         match path.root.kind {
             // The descriptor is the record's own member slot, resolved below
@@ -199,6 +196,12 @@ impl<'a, 'g> Build<'a, 'g, '_> {
             DeclarationKind::Binding if member_target => {}
             DeclarationKind::Parameter => {}
             DeclarationKind::Binding if self.exclusive_field_reborrows != 0 => {
+                if target_facts
+                    .initializer
+                    .is_some_and(|init| !self.exclusive_field_reborrow(init, &target_facts.ty))
+                {
+                    return Err(pending);
+                }
                 let slot = self.place(target)?;
                 if !self.slots[slot].exclusive_field_reborrow {
                     return Err(pending);
