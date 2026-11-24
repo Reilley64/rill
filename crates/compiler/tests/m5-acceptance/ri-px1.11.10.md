@@ -73,3 +73,7 @@ With the call to `member_replacement_overlap` removed (flow.rs otherwise as comm
 - Tuples, nested records and custom disposers stay `Incomplete` before the replacement, as in `ri-px1.11.1.md`.
 - A write through a local reborrow of a sibling (`*r += 1i32;`) is `Incomplete`, so a valid use of such a reborrow cannot be pinned `Checked`.
 - Logs: `~/.t3/evidence/rill/m5-build-2026-11-22/ci-51qr/`.
+
+## Correction (2026-11-24, city bead ci-oqw9, ticket ri-px1.11.14)
+
+The charge is `budget.step(staged.loans.len())` (`member_replacement_overlap`, `flow.rs`), so it is +1 per loan carried by the stored value, not one per store. The sentence "`staged.loans.len()` is 1" under "Caps moved" holds for the roots pinned here (each stored value carries one loan), and nothing else in this file changes. The re-review ci-9qga measured +3 for stores whose value carries three loans and +0 for a loan-free value; this ticket did not re-measure them.
