@@ -1,7 +1,7 @@
-use compiler::analysis::AnalysisLimits;
-use compiler::analysis::ownership::{Completion, analyze_ownership};
+use compiler::analysis::ownership::{Completion, Operation, analyze_ownership};
 use compiler::analysis::scalars::{BodyOwner, Site};
 use compiler::analysis::typed::analyze_typed;
+use compiler::analysis::{AnalysisLimits, Statistics};
 use compiler::loader::{self, InstalledRequest, Origin};
 use std::{
     fs,
@@ -35,6 +35,7 @@ pub(crate) struct GraphSummary {
     pub(crate) completion: String,
     pub(crate) roots: Vec<RootSummary>,
     pub(crate) findings: Vec<String>,
+    pub(crate) statistics: Statistics,
 }
 
 #[derive(Debug, Eq, PartialEq)]
@@ -44,6 +45,7 @@ pub(crate) struct RootSummary {
     pub(crate) completion: Completion,
     pub(crate) has_mir: bool,
     pub(crate) blocked_at: Option<String>,
+    pub(crate) whole_value_uses: Vec<String>,
 }
 
 pub(crate) fn summarize(request: &InstalledRequest, app: &Path, entry: &str) -> [ModeSummary; 2] {
@@ -141,6 +143,20 @@ fn outcome(request: InstalledRequest, app: &Path) -> Outcome {
                     completion: root.completion(),
                     has_mir: root.mir().is_some(),
                     blocked_at: root.blocked_at().map(|site| text(&site)),
+                    whole_value_uses: root
+                        .ordinary_mir()
+                        .into_iter()
+                        .flat_map(|mir| &mir.blocks)
+                        .filter_map(|block| match &block.operation {
+                            Operation::Copy { from, .. } if from.projection.is_none() => Some(
+                                format!("Copy {}@{}", text(&block.site), block.site.span.start()),
+                            ),
+                            Operation::Move { from, .. } if from.projection.is_none() => Some(
+                                format!("Move {}@{}", text(&block.site), block.site.span.start()),
+                            ),
+                            _ => None,
+                        })
+                        .collect(),
                 }
             })
             .collect();
@@ -152,13 +168,16 @@ fn outcome(request: InstalledRequest, app: &Path) -> Outcome {
                 .iter()
                 .map(|finding| {
                     format!(
-                        "{} {}@{}",
+                        "{} {}@{} {:?} related {:?}",
                         finding.code(),
                         finding.site.module.path,
-                        finding.site.span.start()
+                        finding.site.span.start(),
+                        text(&finding.site),
+                        text(&finding.related)
                     )
                 })
                 .collect(),
+            statistics: report.statistics(),
         }
     });
     Outcome::Analysed {

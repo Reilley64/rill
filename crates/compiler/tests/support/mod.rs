@@ -18,6 +18,10 @@ pub(crate) fn run_copied_probe(command: &mut Command) -> io::Result<Output> {
             .spawn()?
     };
     let output = child.wait_with_output()?;
+    if std::env::var_os("RILL_M5_PROBE_VERBOSE").is_some() {
+        print!("{}", String::from_utf8_lossy(&output.stdout));
+        eprint!("{}", String::from_utf8_lossy(&output.stderr));
+    }
     if output.status.success() {
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(
