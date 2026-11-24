@@ -78,6 +78,44 @@ impl<'g> GenericReport<'g> {
         &self.facts.findings
     }
 
+    /// Whether the report publishes no finding (metering rule 8). Every field
+    /// is named, so adding one fails to compile until it is decided here. Test
+    /// support for `tests/support/limit.rs`.
+    #[doc(hidden)]
+    pub fn publishes_nothing_at_limit(&self) -> bool {
+        let Self {
+            facts,
+            conditional_findings,
+            declaration_issues,
+            // Selections, evidence and node facts: not findings (the lists
+            // above carry the diagnostics). The rest is identity and counters.
+            graph: _graph,
+            evidence: _evidence,
+            statistics: _statistics,
+            completion: _completion,
+            integrated: _integrated,
+            not_reached: _not_reached,
+            ordinary_calls: _ordinary_calls,
+            ordinary_values: _ordinary_values,
+            conversion_uses: _conversion_uses,
+            conditional_conversion_nodes: _conditional_conversion_nodes,
+        } = self;
+        let ScalarFacts {
+            findings,
+            annotations,
+            // Body and node facts, obligations (blockers) and arrows: not findings.
+            text_iteration_sources: _text_iteration_sources,
+            bodies: _bodies,
+            nodes: _nodes,
+            obligations: _obligations,
+            arrows: _arrows,
+        } = facts;
+        findings.is_empty()
+            && annotations.findings().next().is_none()
+            && conditional_findings.is_empty()
+            && declaration_issues.is_empty()
+    }
+
     /// A `ResourceLimit` report publishes no finding (metering rule 8).
     pub(in crate::analysis) fn withhold_findings(&mut self) {
         self.facts.findings.clear();

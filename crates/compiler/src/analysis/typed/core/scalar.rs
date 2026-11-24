@@ -71,6 +71,24 @@ pub(in crate::analysis) struct PrimitiveCore<'g> {
     pub bridges: std::collections::BTreeMap<&'g DeclarationId, PrimitiveOperation>,
 }
 
+impl PrimitiveCore<'_> {
+    /// No primitive overlap and no `Overlap` verdict (metering rule 8).
+    pub(in crate::analysis::typed) fn publishes_nothing_at_limit(&self) -> bool {
+        let Self {
+            protection,
+            // Roles, providers and bridges: facts, not findings.
+            copy: _copy,
+            dispose: _dispose,
+            equality: _equality,
+            providers: _providers,
+            bridges: _bridges,
+        } = self;
+        protection
+            .iter()
+            .all(|scope| scope.overlaps.is_empty() && scope.coverage != PrimitiveCoverage::Overlap)
+    }
+}
+
 impl PrimitiveRole {
     fn name(self) -> &'static str {
         match self {

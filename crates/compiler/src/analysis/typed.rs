@@ -583,6 +583,43 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
 }
 
 impl TypedReport<'_> {
+    /// Whether the report publishes no finding and no verdict that cites one
+    /// (metering rule 8). Every field of the report and of the components that
+    /// can carry a finding is named, so adding one fails to compile until it is
+    /// decided here. Test support for `tests/support/limit.rs`; it reads what
+    /// the accessors publish and changes nothing.
+    #[doc(hidden)]
+    pub fn publishes_nothing_at_limit(&self) -> bool {
+        let Self {
+            inventory,
+            bodies,
+            public_interface_findings,
+            core,
+            ownership,
+            collections,
+            collection_overlaps,
+            result_use,
+            // The role designation, the completion, an internal flag with no
+            // accessor, blockers, counters and stage names: not findings.
+            routine: _routine,
+            completion: _completion,
+            protected_violation: _protected_violation,
+            core_blockers: _core_blockers,
+            statistics: _statistics,
+            not_performed: _not_performed,
+        } = self;
+        inventory.publishes_nothing_at_limit()
+            && bodies.publishes_nothing_at_limit()
+            && public_interface_findings.is_empty()
+            && core.publishes_nothing_at_limit()
+            && ownership.publishes_nothing_at_limit()
+            && collections.publishes_nothing_at_limit()
+            && collection_overlaps.is_empty()
+            && result_use
+                .as_ref()
+                .is_none_or(ResultUseReport::publishes_nothing_at_limit)
+    }
+
     /// A `ResourceLimit` report publishes no finding (metering rule 8): the
     /// finding lists, the `Overlap` coverage verdict (which says an `R0500`
     /// finding exists, so it reads `Pending`, as for an unresolved region), the

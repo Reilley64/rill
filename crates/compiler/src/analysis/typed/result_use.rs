@@ -127,6 +127,18 @@ impl<'g> ResultUseReport<'g> {
         self.discards.clear();
     }
 
+    /// No Result discard (metering rule 8). `pending` is a blocker list.
+    pub(super) fn publishes_nothing_at_limit(&self) -> bool {
+        let Self {
+            discards,
+            pending: _pending,
+            pair_calls: _pair_calls,
+            routine_bound: _routine_bound,
+            fresh_option_iterators: _fresh_option_iterators,
+        } = self;
+        discards.is_empty()
+    }
+
     pub fn discards(&self) -> &[ResultDiscard<'g>] {
         &self.discards
     }

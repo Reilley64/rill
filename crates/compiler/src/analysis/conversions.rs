@@ -106,6 +106,31 @@ impl<'g> ConversionReport<'_, 'g> {
         self.completion
     }
 
+    /// Whether the report publishes no finding through `type_facts`,
+    /// `header_metadata` and `family` (metering rule 8). At `ResourceLimit`
+    /// those return the withheld facts, no header and no family, so the stored
+    /// issues of the families and the input are not published. Every field is
+    /// named, so adding one fails to compile until it is decided here. Test
+    /// support for `tests/support/limit.rs`; `bodies` is a `GenericReport`.
+    #[doc(hidden)]
+    pub fn publishes_nothing_at_limit(&self) -> bool {
+        let Self {
+            input: _input,
+            extended: _extended,
+            families,
+            completion,
+            // Stored findings and facts, published only through the accessors
+            // read below; a counter.
+            statistics: _statistics,
+            withheld: _withheld,
+        } = self;
+        let limited = *completion == ordinary::Completion::ResourceLimit;
+        self.type_facts().findings().next().is_none()
+            && (limited
+                || (self.input().publishes_nothing_at_limit()
+                    && families.values().all(|family| family.issues.is_empty())))
+    }
+
     /// Inspect all supported captured bodies using this conversion inventory.
     pub fn bodies(&self, limits: AnalysisLimits) -> scalars::generics::GenericReport<'g> {
         scalars::generics::analyze_with_conversions(self.input(), Some(self), limits)

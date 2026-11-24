@@ -136,6 +136,34 @@ pub struct OrdinaryAnalysis<'g> {
 }
 
 impl<'g> OrdinaryAnalysis<'g> {
+    /// Whether the analysis publishes no finding (metering rule 8): the type
+    /// facts' findings, the declaration issues and every header's type
+    /// findings. Every field is named, so adding one fails to compile until it
+    /// is decided here. Test support for `tests/support/limit.rs`.
+    #[doc(hidden)]
+    pub fn publishes_nothing_at_limit(&self) -> bool {
+        let Self {
+            types,
+            declaration_issues,
+            headers,
+            // Metered, not published (`withheld_issues`), or facts, identity
+            // and counters.
+            graph: _graph,
+            lexical: _lexical,
+            families: _families,
+            withheld_issues: _withheld_issues,
+            unusable: _unusable,
+            statistics: _statistics,
+            completion: _completion,
+            reached_validation: _reached_validation,
+        } = self;
+        types.findings().next().is_none()
+            && declaration_issues.is_empty()
+            && headers
+                .values()
+                .all(|header| header.type_metadata().findings().next().is_none())
+    }
+
     pub(super) fn withhold_findings(&mut self) {
         self.types.withhold_findings();
         self.withheld_issues = std::mem::take(&mut self.declaration_issues);

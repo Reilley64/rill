@@ -41,6 +41,23 @@ pub(super) struct InstalledCore<'g> {
     pub(super) conversions: numeric::ConversionCore<'g>,
 }
 
+impl InstalledCore<'_> {
+    /// No registration issue and no primitive overlap (metering rule 8).
+    pub(super) fn publishes_nothing_at_limit(&self) -> bool {
+        let Self {
+            primitives,
+            conversions,
+            // Pinned role declarations: facts, not findings.
+            option: _option,
+            option_inspection: _option_inspection,
+            result: _result,
+            result_inspection: _result_inspection,
+            show: _show,
+        } = self;
+        primitives.publishes_nothing_at_limit() && conversions.publishes_nothing_at_limit()
+    }
+}
+
 /// Check the full installed role inventory without validating provider availability.
 /// A partial capture still retains all individually validated roles.
 pub(super) fn roles_complete(

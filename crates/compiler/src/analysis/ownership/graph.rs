@@ -189,6 +189,36 @@ pub struct RootReport<'g> {
     dependencies: Vec<Dependency<'g>>,
 }
 
+impl RootReport<'_> {
+    /// No MIR, no `SourceRejected` verdict and no rejected delivery, which cite
+    /// a finding (metering rule 8). Every field is named, so adding one fails
+    /// to compile until it is decided here.
+    fn publishes_nothing_at_limit(&self) -> bool {
+        let Self {
+            ordinary_completion,
+            ordinary_mir,
+            enabled_frame,
+            selected_call,
+            forwarded_call,
+            replacement,
+            // A position, the owner, a known blocker and reached edges: not findings.
+            site: _site,
+            owner: _owner,
+            blocked_at: _blocked_at,
+            dependencies: _dependencies,
+        } = self;
+        fn rejected<P>(delivery: &Delivery<'_, P>) -> bool {
+            matches!(delivery, Delivery::Rejected { .. })
+        }
+        *ordinary_completion != Completion::SourceRejected
+            && ordinary_mir.is_none()
+            && !rejected(enabled_frame)
+            && !rejected(selected_call)
+            && !rejected(forwarded_call)
+            && !rejected(replacement)
+    }
+}
+
 impl<'g> RootReport<'g> {
     pub fn site(&self) -> Site<'g> {
         self.site
@@ -299,6 +329,26 @@ impl<'g> GraphReport<'g> {
     /// findings. Each canonical witness is recorded once, not once per caller.
     pub fn findings(&self) -> &[Finding<'g>] {
         &self.findings
+    }
+    /// Whether the report publishes no finding, no verdict that cites one and
+    /// no MIR in any root or active disposer (metering rule 8). Every field is
+    /// named, so adding one fails to compile until it is decided here. Test
+    /// support for `tests/support/limit.rs`.
+    #[doc(hidden)]
+    pub fn publishes_nothing_at_limit(&self) -> bool {
+        let Self {
+            bodies,
+            findings,
+            // Identity, a flag, a root count and a counter. The completion is
+            // `ResourceLimit` by the helper's own check.
+            context: _context,
+            test_mode: _test_mode,
+            completion: _completion,
+            inventory_complete: _inventory_complete,
+            source_roots: _source_roots,
+            statistics: _statistics,
+        } = self;
+        findings.is_empty() && bodies.iter().all(RootReport::publishes_nothing_at_limit)
     }
     pub fn open_obligations(&self) -> &'static [GraphObligation] {
         &[
