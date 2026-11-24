@@ -9,7 +9,7 @@ import std::sql::{Parameter, ParameterType, bindInto, tryBind, BindError,
   KeyCondition, DetailOrigin, NameDetail};
 import std::encoding::json::Value;
 import std::bytes::{Bytes, length as byteLength, get as byteGet};
-import std::string::{bytes, decodeUtf8, Utf8Error};
+import std::string::Utf8Error;
 import std::collection::{List, push, length as listLength, get as listGet};
 import std::sql::driver::bind;
 import std::option::Option;
@@ -26,7 +26,7 @@ implement display(error: &CellError): string {
 type NetworkCell = { data: Bytes; isNull: bool };
 implement tryInto<string>(cell: &NetworkCell): Result<string,CellError> {
   if (cell.isNull) { return Err(CellError.Null); }
-  guard let text = decodeUtf8(&cell.data) else (error) {
+  guard let text = tryInto<string>(&cell.data) else (error) {
     return Err(CellError.Encoding(error));
   }
   return Ok(text);
@@ -92,7 +92,7 @@ function jsonBorrowedDecode(): bool {
   };
 }
 function networkDecode(): bool {
-  let cell = NetworkCell { data: copy(bytes(&"five@example.test")), isNull: false };
+  let cell = NetworkCell { data: copy(into<&Bytes>(&"five@example.test")), isNull: false };
   guard let decoded = tryInto<Email>(&cell) else { return false; }
   return eq(emailText(&decoded), &"five@example.test");
 }
@@ -199,8 +199,8 @@ function uniqueDetailsUnavailable(): bool {
   return false;
 }
 function containsText(text: &string, needle: &string): bool {
-  let hay = bytes(text);
-  let wanted = bytes(needle);
+  let hay = into<&Bytes>(text);
+  let wanted = into<&Bytes>(needle);
   let count = byteLength(wanted);
   if (count > byteLength(hay)) { return false; }
   let mut start = 0u64;

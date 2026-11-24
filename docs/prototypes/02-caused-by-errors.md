@@ -4,7 +4,7 @@ Read the source examples in [`prototypes/02-caused-by-errors.rill`](../../protot
 
 These examples follow [ADR 0013](../adr/0013-caused-by-errors-with-explicit-wrapping.md) and the [published Result/error contracts](../standard-library-contracts.md#4-option-result-origins-and-causes). The source combines the earlier port pipeline and caused-by examples. It declares ten intended-valid expectations, inspected but not executed by a Rill compiler or runtime.
 
-The port example uses parseNumber, guards, pipes, andThen and map. Three expectations preserve successful port boundaries. A fourth checks that an invalid numeric input retains a parse-error cause. The remaining six preserve nested wrapping, explicit construction, success/failure and skipped panic behavior. Error payloads remain ordinary named records; no removed union or literal-type rule is restored.
+The port example uses `tryInto<i32>`, guards, pipes, andThen and map. Three expectations preserve successful port boundaries. A fourth checks that an invalid numeric input retains a parse-error cause. The remaining six preserve nested wrapping, explicit construction, success/failure and skipped panic behavior. Error payloads remain ordinary named records; no removed union or literal-type rule is restored.
 
 ## Expected behavior
 

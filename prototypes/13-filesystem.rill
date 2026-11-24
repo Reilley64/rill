@@ -106,7 +106,7 @@ function componentKinds(): bool {
       PathComponent.Current => {},
       PathComponent.Parent => {},
       PathComponent.Name(name) => { names += 1u64; },
-    }
+    };
   }
   return count == 5u64 && roots == 2u64 && names == 2u64;
 }
@@ -137,7 +137,7 @@ expect copiedPath();
 // validated certificate. Read and close errors remain separately observable.
 enum LoadError {
   Open(Err<IoError>),
-  Read { reading: Err<ReadToEndError<IoError>>, closing: Option<Err<IoError>> },
+  Read { reading: Err<ReadToEndError<IoError>>; closing: Option<Err<IoError>> },
   Close(Err<IoError>),
 }
 implement display(error: &LoadError): string {
@@ -174,10 +174,10 @@ function loadBounded(location: &Path, maximum: u64): Result<Bytes,LoadError> {
 // handles so the caller can observe finalization after either outcome. Pending
 // bytes consumed from input but not accepted by output are retained on failure.
 enum CopyError {
-  Read { copied: u64, pending: Bytes, failure: Err<IoFailure<IoError>> },
-  Write { copied: u64, pending: Bytes, failure: Err<IoFailure<IoError>> },
+  Read { copied: u64; pending: Bytes; failure: Err<IoFailure<IoError>> },
+  Write { copied: u64; pending: Bytes; failure: Err<IoFailure<IoError>> },
   LimitExceeded {
-    copied: u64, extra: Bytes, probeFailure: Option<Err<IoFailure<IoError>>>,
+    copied: u64; extra: Bytes; probeFailure: Option<Err<IoFailure<IoError>>>;
   },
 }
 implement display(error: &CopyError): string {

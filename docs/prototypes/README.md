@@ -10,7 +10,11 @@ M6 ri-qlh tracks the first [prototype build and test targets](../../tests/README
 
 The 2026-11-16 interface direction (ri-48g, comment 6913810445) consolidates core conversions under into/tryInto. [Draft RFC 0006](../rfcs/0006-numbers-strings-and-primitive-operations.md#canonical-core-conversion-interface) records the current matrix and migration rules. Strict numeric parsing selects ParseError; strict UTF-8 decoding selects Utf8Error.
 
-Some maintained sources still use old `parseNumber`, `decodeUtf8` or other conversion helpers. Migrate them to the canonical interface before executable acceptance. Preserve the examples' intended behavior. Keep obsolete spellings in revision history and recorded reports, not in maintained examples. Changes to the sources do not change earlier verification results.
+Groups 02, 08, 09, 10, 14 and 16 use the canonical interface: `tryInto<N>(&text)`, `tryInto<string>(&bytes)`, `tryInto<&string>(&bytes)`, `into<&Bytes>(&text)`, `into<u32>(value)`, `tryInto<char>(value)` and `into<Bytes>(values)`. Groups 12, 13, 15, 23, 24 and 25 still build Bytes with the removed `Bytes([...])` factory. Migrate them to `into<Bytes>` before executable acceptance. Preserve the examples' intended behavior. Keep obsolete spellings in revision history and recorded reports, not in maintained examples. Changes to the sources do not change earlier verification results.
+
+## Entry files
+
+The [prototype status table](../../crates/compiler/tests/m5/prototype-status.tsv) loads one entry per program: hello-world; each top-level `prototypes/*.rill`; the `main.rill` of a directory that has one (07-modules, 10-batch-report, 16-sql-codecs); otherwise every top-level `.rill` of the directory except `rejections/`. The entries of 21-diagnostics are `empty.rill`, `expect-failures.rill`, `locations.rill`, `valid.rill` and `warning.rill`. The entry of 23-tls is `values.rill`. Regenerate the table with `mise run status:prototypes`.
 
 ## Numbering
 

@@ -12,7 +12,7 @@ The numeric cases cover width inference, aliases, generic conversion evidence, c
 
 The text cases cover exact substring copies, byte/scalar boundaries, descriptor and retained-storage dependencies, static literal views and explicit copies of named owners. They also cover exclusive-reference formatting, sequential snapshots, custom canonical show, scalar validation, strict parsing, UTF-8 decoding and lossy replacement. Literal cases distinguish raw strings, escapes, normalization and special float rendering.
 
-Decoding now reads an explicitly constructed Bytes value. decodeUtf8 produces owned text; decodeLossy replaces invalid sequences. String byte lookup first obtains the canonical bytes view. Nothing assumes List contiguity or invents a borrowed List header. Generic copy borrows logical T through `copy(&T)`, including a substring view.
+Decoding reads a Bytes value built with `into<Bytes>`. `tryInto<string>` produces owned text; decodeLossy replaces invalid sequences. String byte lookup first obtains the canonical bytes view with `into<&Bytes>`. Strict parsing uses `tryInto<i32>` and `tryInto<f32>`; scalar conversion uses `into<u32>` and `tryInto<char>`. Nothing assumes List contiguity or invents a borrowed List header. Generic copy borrows logical T through `copy(&T)`, including a substring view.
 
 A primitive canonical formatter cannot implement itself by interpolating the same primitive through that formatter. The [overload](../../prototypes/03-overloads.rill) and [module](../../prototypes/07-modules/formatting.rill) examples instead declare separate show families. Templates inside those bodies still use canonical standard formatting.
 
