@@ -1028,8 +1028,7 @@ fn replay_exact(
 
 /// A write the source language forbids is rejected before Result use: one `ReadOnly`
 /// finding at the statement `write`, `Incomplete`, no receipt, the same numbers on replay at
-/// the exact cap, in both load modes. No one-short pin: `analyze_typed` still publishes body
-/// findings at `ResourceLimit` (`ri-68mu`), and `limit.rs` allows no new site that keeps them.
+/// the exact cap and `ResourceLimit` one short on each meter, in both load modes.
 fn installed_read_only(
     probe: &std::path::Path,
     name: &str,
@@ -1074,7 +1073,7 @@ fn installed_read_only(
             );
         };
         check(&report);
-        replay_exact(&graph, &report, name, &check);
+        exact_and_one_short(&graph, &report, name, &check);
     }
 }
 

@@ -50,7 +50,7 @@ Twins of `pre: immutable local source` (chief of staff condition 3). The immutab
 | `pre: immutable local source reassigned after the copy` | `current = !flag;` | `Incomplete`, `ReadOnly` at `current = !flag;` | 324,920 / 48,237 / 12 |
 | `pre: immutable local source, its parameter written after the copy` | `flag = !flag;` | `Incomplete`, `ReadOnly` at `flag = !flag;` | 324,753 / 48,171 / 12 |
 
-No one-short pin on these two: `analyze_typed` still publishes body findings at `ResourceLimit` (`ri-68mu`), and `support/limit.rs` allows no new site that keeps them (running it fails `assert_typed_limit` with "publishes a body finding"). A source that can be written is the case `pre: mutable source reassigned after the copy` above: an immutable local `before` copying the `let mut` local `current`, which is written after the copy; it is a genuine `R0103` (325,489 / 48,455 / 12). Neither twin is accepted.
+Each is also pinned one short on work, entries and depth (`ResourceLimit`, no finding published: `ri-68mu` is on the base). A source that can be written is the case `pre: mutable source reassigned after the copy` above: an immutable local `before` copying the `let mut` local `current`, which is written after the copy; it is a genuine `R0103` (325,489 / 48,455 / 12). Neither twin is accepted.
 
 Mutable-borrow twins (`flip(&mut before)`, `flip(&mut current)`): `Incomplete`, one pending `Storage` at the borrow, no receipt; the borrow of a Boolean local is unsupported before this change, so these pin that the screen never turns it into `Checked`.
 
