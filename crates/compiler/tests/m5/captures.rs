@@ -4099,6 +4099,83 @@ fn consumed_pair_handoff_does_not_skip_an_unrelated_result() {
 }
 
 #[test]
+fn typed_consumed_pair_fact_binds_the_ownership_rejection() {
+    probe_with_typed(
+        "captures::typed_consumed_pair_fact_binds_the_ownership_rejection",
+        r#"
+            function direct(left: string, right: string): string {
+                let job: once () => [string, string] = () => [right, left];
+                let [first, _] = job();
+                return first;
+            }
+            function repeated(left: string, right: string): [string, string] {
+                let job: once () => [string, string] = () => [left, right];
+                let _ = job();
+                return job();
+            }
+            function conditionalRepeat(flag: bool, first: string, second: string): [string, string] {
+                let job: once () => [string, string] = () => [first, second];
+                if (flag) { let _ = job(); }
+                return job();
+            }
+            function groupedRepeat(left: &bool, right: string): [&bool, string] {
+                let job: once () => [&bool, string] = () => [(left), (right)];
+                let _ = (job)();
+                return (job)();
+            }
+            function restored(first: string, second: string, third: string, fourth: string): [string, string] {
+                let mut job: once () => [string, string] = () => [first, second];
+                let _ = job();
+                job = () => [fourth, third];
+                return job();
+            }
+        "#,
+        |_, module, _, typed| {
+            let declaration = |name| {
+                module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some(name))
+                    .unwrap()
+            };
+            let consumed: Vec<_> = (0..module.syntax.nodes.len())
+                .filter(|&node| {
+                    typed
+                        .bodies()
+                        .node(module, node)
+                        .unwrap()
+                        .is_some_and(|facts| {
+                            facts
+                                .callable
+                                .as_ref()
+                                .and_then(|callable| callable.invocation.as_ref())
+                                .is_some_and(|invocation| invocation.consumed_receiver)
+                        })
+                })
+                .collect();
+            // RFC 0004, "Callable modes and requirements": `once` is consumed by
+            // invocation, so a second invocation of the receiver is a moved access.
+            for name in ["repeated", "conditionalRepeat", "groupedRepeat"] {
+                let report = lower_body(
+                    &typed.receipt().unwrap(),
+                    module,
+                    &declaration(name).id,
+                    AnalysisLimits::default(),
+                )
+                .unwrap();
+                assert_eq!(report.completion(), Completion::SourceRejected, "{name}");
+                let [finding] = report.findings() else {
+                    panic!("{name}: expected a consumed receiver")
+                };
+                assert_eq!(finding.code(), "R0200", "{name}");
+                assert!(consumed.contains(&finding.site.node), "{name}");
+            }
+            assert_eq!(consumed.len(), 3, "only the three repeated invocations");
+        },
+    );
+}
+
+#[test]
 fn broader_invocations_still_need_typed_evidence() {
     use compiler::analysis::typed::{ResultUseBlocker, TypedCompletion};
 

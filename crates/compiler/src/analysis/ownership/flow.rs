@@ -2453,6 +2453,7 @@ pub(super) fn run<'a, 'g>(
         typed,
         copied_origins,
         declared_shared_frame,
+        consumed_receiver,
         module,
         body,
         mut facts,
@@ -5127,6 +5128,9 @@ pub(super) fn run<'a, 'g>(
     } else {
         (None, None)
     };
+    if let Some(node) = consumed_receiver {
+        return Err(Stop::Pending(node));
+    }
     Ok(Lowered {
         mir: Mir {
             entry,

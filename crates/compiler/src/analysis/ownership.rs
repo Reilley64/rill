@@ -2847,6 +2847,7 @@ struct Build<'a, 'g, 'b> {
     /// This body lends a local descriptor to a declared shared frame, so
     /// one-capture formations record their origin for it.
     declared_shared_frame: bool,
+    consumed_receiver: Option<NodeId>,
     dispose: Option<&'g DeclarationId>,
     return_contract: Option<(&'g DeclarationId, &'a Type<'g>)>,
     callable_frame: Option<(CallableLayout, Slot)>,

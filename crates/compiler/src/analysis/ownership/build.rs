@@ -562,6 +562,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             scalar_copy_read: None,
             copied_origins: BTreeSet::new(),
             declared_shared_frame: false,
+            consumed_receiver: None,
             dispose: typed.dispose_role().map(|d| &d.id),
             return_contract,
             callable_frame: None,
@@ -6993,6 +6994,9 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 typed_origin: arrow.map(|arrow| arrow.site.node),
             }
         } else {
+            if invocation.consumed_receiver {
+                self.consumed_receiver = Some(node);
+            }
             PairCall::Once
         };
         let receiver = self.resolve_place(receiver, path)?;
