@@ -151,10 +151,7 @@ fn keeps_parent_caps(test: &str, source: &'static str, graph_stats: Statistics, 
         assert_eq!(graph.completion(), GraphCompletion::Incomplete);
         assert_eq!(graph.statistics(), graph_stats);
         for cap in short {
-            assert_eq!(
-                analyze_ownership(receipt, cap).completion(),
-                GraphCompletion::ResourceLimit
-            );
+            crate::limit::assert_graph_limit(&analyze_ownership(receipt, cap));
         }
         for &(name, work, entries, depth, expected) in rows {
             let decl = named(module, name);
@@ -180,8 +177,7 @@ fn keeps_parent_caps(test: &str, source: &'static str, graph_stats: Statistics, 
             assert_eq!(root.blocked_at().unwrap().span.bytes(), expected.as_bytes());
             for cap in short {
                 let limited = query(cap);
-                assert_eq!(limited.completion(), Completion::ResourceLimit, "{name}");
-                assert!(limited.mir().is_none() && limited.findings().is_empty());
+                crate::limit::assert_body_limit(&limited);
             }
         }
     });
@@ -254,8 +250,7 @@ fn field_addition_checks_with_exact_and_one_short_caps() {
             assert_eq!(ops, ["copy left", "copy right", "add"]);
             for cap in short {
                 let limited = query(cap);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none() && limited.findings().is_empty());
+                crate::limit::assert_body_limit(&limited);
             }
             let graph = analyze_ownership(receipt, AnalysisLimits::default());
             let root = graph

@@ -28,10 +28,7 @@ fn ordinary_only_list_loops_keep_the_pre_delivery_caps() {
             };
             // Metering rule 11 (ri-785.9): the whole-graph cap was
             // 191,781/4,867/6 until the i32 equality source root (+316/+134).
-            assert_eq!(
-                analyze_ownership(receipt, limits(191781, 4867, 6)).completion(),
-                compiler::analysis::ownership::GraphCompletion::ResourceLimit
-            );
+            crate::limit::assert_graph_limit(&analyze_ownership(receipt, limits(191781, 4867, 6)));
             let graph = analyze_ownership(receipt, limits(192097, 5001, 6));
             assert_eq!(
                 graph.statistics(),
@@ -78,7 +75,7 @@ fn ordinary_only_list_loops_keep_the_pre_delivery_caps() {
 fn installed_list_backing_on_budget_delivery() {
     use compiler::analysis::Statistics;
     use compiler::analysis::ownership::{
-        Delivery, GraphCompletion, GraphObligation, GraphReport, analyze_ownership,
+        Delivery, GraphObligation, GraphReport, analyze_ownership,
     };
     use compiler::analysis::typed::CollectionOperation;
 
@@ -258,8 +255,7 @@ fn installed_list_backing_on_budget_delivery() {
             assert!(limited(exact).mir().unwrap().cancellation().is_some());
             for cap in shorts {
                 let short = limited(cap);
-                assert_eq!(short.completion(), Completion::ResourceLimit);
-                assert!(short.mir().is_none());
+                crate::limit::assert_body_limit(&short);
             }
             let (exact, shorts) = caps(graph.statistics());
             let exact_graph = analyze_ownership(receipt, exact);
@@ -269,7 +265,7 @@ fn installed_list_backing_on_budget_delivery() {
             ));
             for cap in shorts {
                 let short = analyze_ownership(receipt, cap);
-                assert_eq!(short.completion(), GraphCompletion::ResourceLimit);
+                crate::limit::assert_graph_limit(&short);
                 assert!(short.roots().iter().all(|root| root.mir().is_none()
                     && matches!(root.enabled_frame(), Delivery::Unresolved)));
             }
@@ -284,9 +280,7 @@ fn installed_list_backing_on_budget_delivery() {
 #[test]
 fn installed_guard_release_on_budget_delivery() {
     use compiler::analysis::Statistics;
-    use compiler::analysis::ownership::{
-        Delivery, GraphCompletion, GraphReport, analyze_ownership,
-    };
+    use compiler::analysis::ownership::{Delivery, GraphReport, analyze_ownership};
     use compiler::analysis::typed::{NativeOwnershipAction, OwnershipCoverage, OwnershipRule};
 
     probe_with_typed(
@@ -470,8 +464,7 @@ fn installed_guard_release_on_budget_delivery() {
                 );
                 for cap in shorts(exact) {
                     let short = lower(name, cap);
-                    assert_eq!(short.completion(), Completion::ResourceLimit, "{name}");
-                    assert!(short.mir().is_none());
+                    crate::limit::assert_body_limit(&short);
                 }
             }
             let (work, entries, depth) = (188887, 4635, 5);
@@ -486,7 +479,7 @@ fn installed_guard_release_on_budget_delivery() {
             }
             for cap in shorts(exact) {
                 let short = analyze_ownership(receipt, cap);
-                assert_eq!(short.completion(), GraphCompletion::ResourceLimit);
+                crate::limit::assert_graph_limit(&short);
                 assert!(short.roots().iter().all(|root| root.mir().is_none()
                     && matches!(root.enabled_frame(), Delivery::Unresolved)));
             }
@@ -537,10 +530,7 @@ fn guard_loops_without_a_proof_keep_their_parent_caps() {
             let graph = analyze_ownership(receipt, graph_exact);
             assert_eq!(graph.completion(), GraphCompletion::Incomplete);
             for cap in shorts(graph_exact) {
-                assert_eq!(
-                    analyze_ownership(receipt, cap).completion(),
-                    GraphCompletion::ResourceLimit
-                );
+                crate::limit::assert_graph_limit(&analyze_ownership(receipt, cap));
             }
             for (name, work, entries, depth, completion) in [
                 ("entryOnly", 1992, 83, 1, Completion::Checked),
@@ -563,7 +553,7 @@ fn guard_loops_without_a_proof_keep_their_parent_caps() {
                 );
                 for cap in shorts(exact) {
                     let short = lower_body(receipt, module, &d.id, cap).unwrap();
-                    assert_eq!(short.completion(), Completion::ResourceLimit, "{name}");
+                    crate::limit::assert_body_limit(&short);
                 }
                 let root = graph
                     .roots()
@@ -624,8 +614,7 @@ fn guard_returned_after_a_loop_keeps_its_parent_caps() {
             assert!(graph.findings().is_empty());
             for cap in shorts(graph_exact) {
                 let short = analyze_ownership(receipt, cap);
-                assert_eq!(short.completion(), GraphCompletion::ResourceLimit);
-                assert!(short.roots().iter().all(|root| root.mir().is_none()));
+                crate::limit::assert_graph_limit(&short);
             }
             let d = module
                 .declarations
@@ -643,8 +632,7 @@ fn guard_returned_after_a_loop_keeps_its_parent_caps() {
             assert!(local.mir().is_none() && local.findings().is_empty());
             for cap in shorts(exact) {
                 let short = lower_body(receipt, module, &d.id, cap).unwrap();
-                assert_eq!(short.completion(), Completion::ResourceLimit);
-                assert!(short.mir().is_none() && short.findings().is_empty());
+                crate::limit::assert_body_limit(&short);
             }
             let root = graph
                 .roots()
@@ -1199,8 +1187,7 @@ function callerOfNestedBody(enter: bool): void {
                         },
                     ] {
                         let report = at(short);
-                        assert_eq!(report.completion(), Completion::ResourceLimit);
-                        assert!(report.mir().is_none());
+                        crate::limit::assert_body_limit(&report);
                     }
                 }
             }
@@ -1338,12 +1325,7 @@ fn assert_forwarded_cleanup(
             },
         ] {
             let exhausted = run(short);
-            assert_eq!(
-                exhausted.completion(),
-                Completion::ResourceLimit,
-                "{short:?}"
-            );
-            assert!(exhausted.mir().is_none() && exhausted.findings().is_empty());
+            crate::limit::assert_body_limit(&exhausted);
             assert!(exhausted.rejected_forwarding_calls().is_none());
         }
     }
@@ -1412,8 +1394,7 @@ function outsideSubset(value: bool): void {
                         },
                     ] {
                         let short = lower_body(receipt, module, &declaration.id, limit).unwrap();
-                        assert_eq!(short.completion(), Completion::ResourceLimit);
-                        assert!(short.mir().is_none());
+                        crate::limit::assert_body_limit(&short);
                     }
                 }
                 let mir = report.mir().unwrap();
@@ -1561,8 +1542,7 @@ fn empty_entry_proof_costs_an_entry() {
             };
             let short =
                 lower_body(receipt, module, &declaration(module, "leaf").id, limits).unwrap();
-            assert_eq!(short.completion(), Completion::ResourceLimit);
-            assert!(short.mir().is_none());
+            crate::limit::assert_body_limit(&short);
         },
     );
 }
@@ -1773,8 +1753,7 @@ fn check_pair(test: &str, source: &str, checkpoint: &[u8]) {
                     },
                 ] {
                     let short = lower_body(receipt, module, &decl.id, limit).unwrap();
-                    assert_eq!(short.completion(), Completion::ResourceLimit);
-                    assert!(short.mir().is_none());
+                    crate::limit::assert_body_limit(&short);
                 }
                 assert_eq!(proof.entry_site.node, body.site.node);
                 let entry_exit = &proof.on_entry_delivery;

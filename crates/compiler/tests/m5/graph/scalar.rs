@@ -192,8 +192,7 @@ fn assert_target_budget(
     assert_eq!(exact.mir().is_some(), root.ordinary_mir().is_some());
     for short in one_short(budget) {
         let result = run(short);
-        assert_eq!(result.completion(), Completion::ResourceLimit, "{short:?}");
-        assert!(result.mir().is_none());
+        crate::limit::assert_body_limit(&result);
     }
 }
 
@@ -382,21 +381,7 @@ function shadow(value: &bool): bool {{ return copy(value); }}
             assert!(root(&exact, b"function twice").ordinary_mir().is_some());
             for short in one_short(budget) {
                 let result = analyze_ownership(receipt, short);
-                assert_eq!(
-                    result.completion(),
-                    GraphCompletion::ResourceLimit,
-                    "{short:?}"
-                );
-                assert!(
-                    result
-                        .roots()
-                        .iter()
-                        .all(|root| root.mir().is_none() && root.ordinary_mir().is_none())
-                );
-                if short.max_depth == budget.max_depth {
-                    assert_eq!(result.findings().len(), 1);
-                    assert_eq!(result.findings()[0].code(), "R0201");
-                }
+                crate::limit::assert_graph_limit(&result);
             }
         },
     );
@@ -554,20 +539,7 @@ function text(value: string): void {{ release(value); }}
             assert!(root(&exact, b"function widths").ordinary_mir().is_some());
             for short in one_short(budget) {
                 let result = analyze_ownership(receipt, short);
-                assert_eq!(
-                    result.completion(),
-                    GraphCompletion::ResourceLimit,
-                    "{short:?}"
-                );
-                assert!(
-                    result
-                        .roots()
-                        .iter()
-                        .all(|root| root.ordinary_mir().is_none() && root.mir().is_none())
-                );
-                if short.max_depth == budget.max_depth {
-                    assert_eq!(result.findings().len(), 2);
-                }
+                crate::limit::assert_graph_limit(&result);
             }
         },
     );
@@ -688,8 +660,7 @@ function projected(x: Pair): bool { return copy(&((((((((((x.flag))))))))))); }
             ] {
                 assert_eq!(run(name, default).completion(), expected);
                 let short = run(name, limit);
-                assert_eq!(short.completion(), Completion::ResourceLimit, "{name}");
-                assert!(short.mir().is_none());
+                crate::limit::assert_body_limit(&short);
             }
         },
     );

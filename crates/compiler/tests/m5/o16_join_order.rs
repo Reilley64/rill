@@ -534,8 +534,7 @@ fn replay_caps<'g>(
     assert_eq!(replay.statistics(), target.statistics(), "{context}");
     for short in short {
         let limited = root_query(receipt, module, name, short);
-        assert_eq!(limited.completion(), Completion::ResourceLimit, "{context}");
-        assert!(limited.mir().is_none() && limited.findings().is_empty());
+        crate::limit::assert_body_limit(&limited);
     }
     let whole = graph_of(receipt);
     assert_eq!(whole.statistics(), stats(graph), "{context}: graph");
@@ -546,11 +545,7 @@ fn replay_caps<'g>(
         "{context}"
     );
     for short in short {
-        assert_eq!(
-            analyze_ownership(receipt, short).completion(),
-            GraphCompletion::ResourceLimit,
-            "{context}"
-        );
+        crate::limit::assert_graph_limit(&analyze_ownership(receipt, short));
     }
 }
 
@@ -606,7 +601,7 @@ fn old_stop_caps_give_resource_limit() {
     each(
         "o16_join_order::old_stop_caps_give_resource_limit",
         &[("O16", format!("{JOINED}{ORDER}"))],
-        |context, module, receipt| {
+        |_, module, receipt| {
             for (name, (max_work, max_entries, max_depth)) in
                 [("joinedOrder", OLD_JOINED_ORDER), ("expect", OLD_EXPECT)]
             {
@@ -616,8 +611,7 @@ fn old_stop_caps_give_resource_limit() {
                     max_depth,
                 };
                 let limited = root_query(receipt, module, name, old);
-                assert_eq!(limited.completion(), Completion::ResourceLimit, "{context}");
-                assert!(limited.mir().is_none() && limited.findings().is_empty());
+                crate::limit::assert_body_limit(&limited);
             }
             let (max_work, max_entries, max_depth) = OLD_GRAPH;
             let old = AnalysisLimits {
@@ -625,11 +619,7 @@ fn old_stop_caps_give_resource_limit() {
                 max_entries,
                 max_depth,
             };
-            assert_eq!(
-                analyze_ownership(receipt, old).completion(),
-                GraphCompletion::ResourceLimit,
-                "{context}"
-            );
+            crate::limit::assert_graph_limit(&analyze_ownership(receipt, old));
         },
     );
 }
@@ -667,11 +657,7 @@ fn old_fixture_graph_caps_give_resource_limit() {
                         max_entries,
                         max_depth,
                     };
-                    assert_eq!(
-                        analyze_ownership(&receipt, old).completion(),
-                        GraphCompletion::ResourceLimit,
-                        "{fixture} test_mode={test_mode}"
-                    );
+                    crate::limit::assert_graph_limit(&analyze_ownership(&receipt, old));
                     assert_eq!(
                         graph_of(&receipt).statistics(),
                         stats(new),

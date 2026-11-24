@@ -45,14 +45,7 @@ fn consuming_list_transfers_the_actual_option_tag() {
             assert!(replay.findings().is_empty());
             for cap in short {
                 let limited = analyze_ownership(receipt, cap);
-                assert_eq!(limited.completion(), GraphCompletion::ResourceLimit);
-                assert!(limited.findings().is_empty());
-                assert!(
-                    limited
-                        .roots()
-                        .iter()
-                        .all(|root| root.ordinary_mir().is_none())
-                );
+                crate::limit::assert_graph_limit(&limited);
             }
             let collection = |operation| {
                 typed
@@ -90,7 +83,7 @@ fn consuming_list_transfers_the_actual_option_tag() {
                 let (exact, short) = limits(run(AnalysisLimits::default()).statistics());
                 for cap in short {
                     let limited = run(cap);
-                    assert_eq!(limited.completion(), Completion::ResourceLimit, "{name}");
+                    crate::limit::assert_body_limit(&limited);
                     assert!(limited.findings().is_empty() && limited.mir().is_none());
                 }
                 let report = run(exact);
@@ -321,8 +314,7 @@ fn unrelated_and_unadmitted_option_lists_keep_the_first_blocker() {
             assert!(graph.findings().is_empty());
             for cap in short {
                 let limited = analyze_ownership(receipt, cap);
-                assert_eq!(limited.completion(), GraphCompletion::ResourceLimit);
-                assert!(limited.roots().iter().all(|r| r.ordinary_mir().is_none()));
+                crate::limit::assert_graph_limit(&limited);
             }
             for (name, work, entries) in [
                 ("unused", 1_955, 69),
@@ -358,8 +350,7 @@ fn unrelated_and_unadmitted_option_lists_keep_the_first_blocker() {
                 assert!(root.dependencies().is_empty() && root.ordinary_mir().is_none());
                 for cap in short {
                     let limited = run(cap);
-                    assert_eq!(limited.completion(), Completion::ResourceLimit);
-                    assert!(limited.mir().is_none() && limited.findings().is_empty());
+                    crate::limit::assert_body_limit(&limited);
                 }
             }
         },
@@ -520,8 +511,7 @@ fn review_counterexamples_keep_their_outcomes_at_exact_caps() {
                 assert!(target.mir().is_none());
                 for cap in short {
                     let limited = run(cap);
-                    assert_eq!(limited.completion(), Completion::ResourceLimit, "{source}");
-                    assert!(limited.mir().is_none() && limited.findings().is_empty());
+                    crate::limit::assert_body_limit(&limited);
                 }
                 assert_pre_equality_graph_cap(receipt, pre_equality);
                 let (exact, short) = limits(whole);
@@ -536,11 +526,7 @@ fn review_counterexamples_keep_their_outcomes_at_exact_caps() {
                 assert!(root.ordinary_mir().is_none());
                 for cap in short {
                     let limited = analyze_ownership(receipt, cap);
-                    assert_eq!(
-                        limited.completion(),
-                        GraphCompletion::ResourceLimit,
-                        "{source}"
-                    );
+                    crate::limit::assert_graph_limit(&limited);
                     // Findings recorded before exhaustion survive it.
                     let key = |f: &compiler::analysis::ownership::Finding<'_>| {
                         (f.code(), f.site.node, f.related.node)

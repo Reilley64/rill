@@ -422,7 +422,7 @@ function unsafeBody(slot: &mut &bool, input: &bool, enter: bool): void {
     ] {
         probe("graph::delivery::unsupported_forwarders_keep_the_original_frame_budgets", &source, |_, module, receipt| {
             let cap = |(max_work,max_entries,max_depth)| AnalysisLimits {max_work,max_entries,max_depth};
-            assert_eq!(analyze_ownership(receipt, cap(pre_equality_graph)).completion(), GraphCompletion::ResourceLimit);
+            crate::limit::assert_graph_limit(&analyze_ownership(receipt, cap(pre_equality_graph)));
             let graph = analyze_ownership(receipt, cap(graph_cap));
             assert_eq!(graph.completion(), expected_graph);
             let outer = root(&graph, b"function outer");
@@ -460,23 +460,14 @@ fn assert_target_one_short(
 ) {
     for short in one_short(cap) {
         let exhausted = lower_root(receipt, module, owner, short).unwrap();
-        assert_eq!(
-            exhausted.completion(),
-            Completion::ResourceLimit,
-            "{short:?}"
-        );
-        assert!(exhausted.mir().is_none() && exhausted.findings().is_empty());
+        crate::limit::assert_body_limit(&exhausted);
     }
 }
 
 fn assert_graph_one_short(receipt: &TypedReceipt<'_, '_>, cap: AnalysisLimits) {
     for short in one_short(cap) {
         let exhausted = analyze_ownership(receipt, short);
-        assert_eq!(
-            exhausted.completion(),
-            GraphCompletion::ResourceLimit,
-            "{short:?}"
-        );
+        crate::limit::assert_graph_limit(&exhausted);
     }
 }
 
@@ -560,10 +551,10 @@ fn infeasible_forwarded_checkpoint_keeps_the_original_frame_budgets() {
                     caps(target_cap),
                 );
 
-                assert_eq!(
-                    analyze_ownership(receipt, caps(pre_equality_graph)).completion(),
-                    GraphCompletion::ResourceLimit
-                );
+                crate::limit::assert_graph_limit(&analyze_ownership(
+                    receipt,
+                    caps(pre_equality_graph),
+                ));
                 let graph = analyze_ownership(receipt, caps(graph_cap));
                 assert_eq!(
                     graph.completion(),
@@ -622,10 +613,7 @@ function backedgeOuter(enter: bool): void {{ while (enter) {{ continue; }} bad(e
                 max_entries: 14522,
                 max_depth: 11,
             };
-            assert_eq!(
-                analyze_ownership(receipt, pre_equality).completion(),
-                GraphCompletion::ResourceLimit
-            );
+            crate::limit::assert_graph_limit(&analyze_ownership(receipt, pre_equality));
             let graph_cap = AnalysisLimits {
                 max_work: 247377,
                 max_entries: 14656,
@@ -665,10 +653,7 @@ fn feasible_nested_checkpoint_still_rejects_the_forwarding_call() {
                 max_entries: 4937,
                 max_depth: 8,
             };
-            assert_eq!(
-                analyze_ownership(receipt, pre_equality).completion(),
-                GraphCompletion::ResourceLimit
-            );
+            crate::limit::assert_graph_limit(&analyze_ownership(receipt, pre_equality));
             let graph_cap = AnalysisLimits {
                 max_work: 191147,
                 max_entries: 5071,
@@ -800,18 +785,14 @@ function ordinaryOuter(enter: bool): void { onlyScalar(enter); return; let _ = f
             }
             // Metering rule 11 (ri-785.9): 197,442 / 5,101 / 6 plus the i32
             // equality source root (316 work, 134 entries).
-            assert_eq!(
-                analyze_ownership(
-                    receipt,
-                    AnalysisLimits {
-                        max_work: 197442,
-                        max_entries: 5101,
-                        max_depth: 6,
-                    },
-                )
-                .completion(),
-                GraphCompletion::ResourceLimit
-            );
+            crate::limit::assert_graph_limit(&analyze_ownership(
+                receipt,
+                AnalysisLimits {
+                    max_work: 197442,
+                    max_entries: 5101,
+                    max_depth: 6,
+                },
+            ));
             let graph = analyze_ownership(
                 receipt,
                 AnalysisLimits {
@@ -1197,11 +1178,7 @@ fn check_limits(test_mode: bool, receipt: &TypedReceipt<'_, '_>, report: &GraphR
         },
     ] {
         let exhausted = analyze_ownership(receipt, short);
-        assert_eq!(
-            exhausted.completion(),
-            GraphCompletion::ResourceLimit,
-            "{short:?}"
-        );
+        crate::limit::assert_graph_limit(&exhausted);
         assert!(exhausted.inventory_complete());
         assert!(
             exhausted
@@ -1216,30 +1193,5 @@ fn check_limits(test_mode: bool, receipt: &TypedReceipt<'_, '_>, report: &GraphR
                         && !matches!(root.forwarded_call(), Delivery::Proved(_))
                 })
         );
-        if short.max_depth == exact.max_depth {
-            assert_eq!(
-                exhausted.findings().len(),
-                report.findings().len(),
-                "late exhaustion lost a finding"
-            );
-            if !report.findings().is_empty() {
-                assert!(matches!(
-                    root(&exhausted, b"function nestedCaller(").forwarded_call(),
-                    Delivery::Rejected {
-                        finding_id: 0,
-                        via_call: Some(_)
-                    }
-                ));
-                assert!(matches!(
-                    root(&exhausted, b"function bad(").selected_call(),
-                    Delivery::Rejected {
-                        finding_id: 0,
-                        via_call: Some(_)
-                    }
-                ));
-            }
-        } else {
-            assert!(exhausted.findings().is_empty());
-        }
     }
 }

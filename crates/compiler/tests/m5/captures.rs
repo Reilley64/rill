@@ -244,8 +244,7 @@ fn canonical_copy_of_owned_text_uses_the_pinned_effect_and_cleans_both_owners() 
             check_mir(run(exact).mir().unwrap());
             for short in short_capture_limits(exact) {
                 let short = run(short);
-                assert_eq!(short.completion(), Completion::ResourceLimit);
-                assert!(short.mir().is_none() && short.findings().is_empty());
+                crate::limit::assert_body_limit(&short);
             }
             let exact = bounds(graph.statistics());
             let exact_graph = analyze_ownership(receipt, exact);
@@ -257,8 +256,7 @@ fn canonical_copy_of_owned_text_uses_the_pinned_effect_and_cleans_both_owners() 
             );
             for short in short_capture_limits(exact) {
                 let short = analyze_ownership(receipt, short);
-                assert_eq!(short.completion(), GraphCompletion::ResourceLimit);
-                assert!(short.roots().iter().all(|root| root.mir().is_none()));
+                crate::limit::assert_graph_limit(&short);
             }
         },
     );
@@ -417,7 +415,6 @@ function discard(flag: bool, a: bool, b: bool): void {
 
 #[test]
 fn canonical_copy_typed_handoff_is_exactly_bounded() {
-    use compiler::analysis::typed::TypedCompletion;
     installed(
         "captures::canonical_copy_typed_handoff_is_exactly_bounded",
         |request| {
@@ -462,8 +459,7 @@ fn canonical_copy_typed_handoff_is_exactly_bounded() {
                 assert_eq!(exact_typed.receipt().unwrap().context(), graph.id());
                 for short in short_capture_limits(exact) {
                     let short = check(short);
-                    assert_eq!(short.completion(), TypedCompletion::ResourceLimit);
-                    assert!(short.receipt().is_none());
+                    crate::limit::assert_typed_limit(&short);
                 }
             }
         },
@@ -555,8 +551,7 @@ fn local_exclusive_capture_transfers_the_loan_until_discard() {
             assert!(run(exact).mir().is_some());
             for short in short_capture_limits(exact) {
                 let exhausted = run(short);
-                assert_eq!(exhausted.completion(), Completion::ResourceLimit);
-                assert!(exhausted.mir().is_none() && exhausted.findings().is_empty());
+                crate::limit::assert_body_limit(&exhausted);
             }
 
             let used = graph.statistics();
@@ -577,8 +572,7 @@ fn local_exclusive_capture_transfers_the_loan_until_discard() {
             }
             for short in short_capture_limits(exact) {
                 let exhausted = analyze_ownership(receipt, short);
-                assert_eq!(exhausted.completion(), GraphCompletion::ResourceLimit);
-                assert!(exhausted.roots().iter().all(|root| root.mir().is_none()));
+                crate::limit::assert_graph_limit(&exhausted);
             }
         },
     );
@@ -622,8 +616,7 @@ function both(seed: bool): void { let mut flag = seed; let job: mut () => &mut b
                         ..Default::default()
                     },
                 );
-                assert_eq!(limited.completion(), Completion::ResourceLimit, "{name}");
-                assert!(limited.mir().is_none() && limited.findings().is_empty());
+                crate::limit::assert_body_limit(&limited);
             }
         },
     );
@@ -1496,8 +1489,7 @@ fn private_callable_transfer_keeps_backing_and_owns_string_cleanup() {
                 },
             ] {
                 let exhausted = run(short);
-                assert_eq!(exhausted.completion(), Completion::ResourceLimit);
-                assert!(exhausted.mir().is_none() && exhausted.findings().is_empty());
+                crate::limit::assert_body_limit(&exhausted);
             }
             let overlap = lower("overlap");
             assert_eq!(overlap.completion(), Completion::SourceRejected);
@@ -1910,8 +1902,7 @@ function computed(flag: bool, bit: bool): void { let held = forward(() => [&flag
             ] {
                 assert_eq!(query(name, default).completion(), expected, "{name}");
                 let result = query(name, limit);
-                assert_eq!(result.completion(), Completion::ResourceLimit, "{name}");
-                assert!(result.mir().is_none());
+                crate::limit::assert_body_limit(&result);
             }
         },
     );
@@ -2204,8 +2195,7 @@ fn stored_pair_captures_transfer_backing_and_cleanup() {
                 },
             ] {
                 let limited = check("owned", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
 
             for (name, code, at, related) in [
@@ -2599,8 +2589,7 @@ fn invokes_a_known_once_pair_and_transfers_its_contents() {
                 },
             ] {
                 let report = check("selected", short);
-                assert_eq!(report.completion(), Completion::ResourceLimit);
-                assert!(report.mir().is_none());
+                crate::limit::assert_body_limit(&report);
             }
             let consumed = lower("consumed");
             assert_eq!(consumed.completion(), Completion::SourceRejected);
@@ -2706,11 +2695,7 @@ fn invokes_a_known_once_pair_and_transfers_its_contents() {
                 },
             ] {
                 let report = type_check(short);
-                assert_eq!(
-                    report.completion(),
-                    compiler::analysis::typed::TypedCompletion::ResourceLimit
-                );
-                assert!(report.receipt().is_none());
+                crate::limit::assert_typed_limit(&report);
             }
         },
     );
@@ -2967,8 +2952,7 @@ fn invokes_a_known_mutable_scalar_cell_twice() {
                 },
             ] {
                 let result = query(short);
-                assert_eq!(result.completion(), Completion::ResourceLimit);
-                assert!(result.mir().is_none() && result.findings().is_empty());
+                crate::limit::assert_body_limit(&result);
             }
             let mir = report.mir().unwrap_or_else(|| {
                 panic!(
@@ -3343,7 +3327,7 @@ function f(): i32 {
                 max_depth: 4,
                 ..Default::default()
             });
-            assert_eq!(short.completion(), Completion::ResourceLimit);
+            crate::limit::assert_body_limit(&short);
             assert!(short.mir().is_none() && short.blocked_at().is_none());
         },
     );
@@ -3550,8 +3534,7 @@ fn repeated_descriptor_pairs_keep_backing_through_last_use() {
                 },
             ] {
                 let report = check("after", short);
-                assert_eq!(report.completion(), Completion::ResourceLimit);
-                assert!(report.mir().is_none());
+                crate::limit::assert_body_limit(&report);
             }
         },
     );
@@ -3690,8 +3673,7 @@ function grouped(left: bool, right: bool): [bool, bool] { let job: () => [bool, 
             };
             assert!(check("bare", limits).mir().is_some());
             let short = check("grouped", limits);
-            assert_eq!(short.completion(), Completion::ResourceLimit);
-            assert!(short.mir().is_none());
+            crate::limit::assert_body_limit(&short);
         },
     );
 }
@@ -4023,8 +4005,7 @@ fn borrowed_pair_invocation_transfers_backing_not_receiver_storage() {
                 },
             ] {
                 let report = check("external", short);
-                assert_eq!(report.completion(), Completion::ResourceLimit);
-                assert!(report.mir().is_none());
+                crate::limit::assert_body_limit(&report);
             }
             let type_limits = AnalysisLimits {
                 max_work: typed.statistics().work,
@@ -4045,11 +4026,7 @@ fn borrowed_pair_invocation_transfers_backing_not_receiver_storage() {
                 },
             ] {
                 let report = type_check(short);
-                assert_eq!(
-                    report.completion(),
-                    compiler::analysis::typed::TypedCompletion::ResourceLimit
-                );
-                assert!(report.receipt().is_none());
+                crate::limit::assert_typed_limit(&report);
             }
         },
     );
@@ -4313,8 +4290,7 @@ fn declared_once_formal_invokes_the_actual_pair_in_one_call_frame() {
             assert_declared_once_frame(module, run(exact).mir().unwrap(), b"flag: &bool");
             for short in short_capture_limits(exact) {
                 let limited = run(short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit, "{short:?}");
-                assert!(limited.mir().is_none() && limited.findings().is_empty());
+                crate::limit::assert_body_limit(&limited);
             }
             assert_pre_equality_graph_cap(receipt, (190_668, 4_266, 6));
             let used = graph.statistics();
@@ -4337,17 +4313,7 @@ fn declared_once_formal_invokes_the_actual_pair_in_one_call_frame() {
             );
             for short in short_capture_limits(exact) {
                 let limited = analyze_ownership(receipt, short);
-                assert_eq!(
-                    limited.completion(),
-                    GraphCompletion::ResourceLimit,
-                    "{short:?}"
-                );
-                assert!(
-                    limited
-                        .roots()
-                        .iter()
-                        .all(|root| root.ordinary_mir().is_none() && root.mir().is_none())
-                );
+                crate::limit::assert_graph_limit(&limited);
             }
         },
     );
@@ -4437,12 +4403,7 @@ fn declared_once_frame_keeps_capture_provenance_and_rejects_without_mir() {
                 assert_eq!(replay.findings().len(), target.findings().len(), "{name}");
                 for short in short_capture_limits(exact) {
                     let limited = run(short);
-                    assert_eq!(
-                        limited.completion(),
-                        Completion::ResourceLimit,
-                        "{name} {short:?}"
-                    );
-                    assert!(limited.mir().is_none() && limited.findings().is_empty());
+                    crate::limit::assert_body_limit(&limited);
                 }
             }
             assert_pre_equality_graph_cap(receipt, (207_024, 5_391, 6));
@@ -4460,12 +4421,7 @@ fn declared_once_frame_keeps_capture_provenance_and_rejects_without_mir() {
             assert_eq!(bounded.findings().len(), 3);
             for short in short_capture_limits(exact) {
                 let limited = analyze_ownership(receipt, short);
-                assert_eq!(
-                    limited.completion(),
-                    GraphCompletion::ResourceLimit,
-                    "{short:?}"
-                );
-                assert!(limited.roots().iter().all(|root| root.mir().is_none()));
+                crate::limit::assert_graph_limit(&limited);
             }
         },
     );
@@ -4584,11 +4540,7 @@ fn declared_once_siblings_keep_their_parent_typed_caps() {
                 assert_eq!(replay.statistics(), used, "{name}");
                 for short in short_capture_limits(exact) {
                     let limited = analyze_typed(&graph, short);
-                    assert_eq!(
-                        limited.completion(),
-                        TypedCompletion::ResourceLimit,
-                        "{name}"
-                    );
+                    crate::limit::assert_typed_limit(&limited);
                     assert!(limited.receipt().is_none(), "{name}");
                 }
             },

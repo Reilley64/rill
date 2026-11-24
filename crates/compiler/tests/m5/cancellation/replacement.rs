@@ -80,8 +80,7 @@ fn installed_defers_delivery_through_replacement() {
             assert!(exact.mir().unwrap().replacement_cancellation().is_some());
             for short in one_short(limits) {
                 let limited = run(short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit, "{short:?}");
-                assert!(limited.mir().is_none() && limited.findings().is_empty());
+                crate::limit::assert_body_limit(&limited);
             }
 
             let graph = |limits| analyze_ownership(receipt, limits);
@@ -133,11 +132,7 @@ fn installed_defers_delivery_through_replacement() {
             ));
             for short in one_short(limits) {
                 let limited = graph(short);
-                assert_eq!(
-                    limited.completion(),
-                    GraphCompletion::ResourceLimit,
-                    "{short:?}"
-                );
+                crate::limit::assert_graph_limit(&limited);
                 let root = graph_root(&limited, initialized);
                 assert!(
                     root.mir().is_none()
@@ -178,10 +173,7 @@ fn installed_replacement_without_the_proved_leaf_stays_unresolved() {
                 max_entries: 8126,
                 max_depth: 3,
             };
-            assert_eq!(
-                analyze_ownership(receipt, old).completion(),
-                GraphCompletion::ResourceLimit
-            );
+            crate::limit::assert_graph_limit(&analyze_ownership(receipt, old));
             let graph = analyze_ownership(
                 receipt,
                 AnalysisLimits {

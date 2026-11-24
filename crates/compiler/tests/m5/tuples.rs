@@ -141,8 +141,7 @@ fn named_nested_tuple_leaf_transfers_keep_the_sibling_live_at_the_join() {
                 },
             ] {
                 let limited = check("split", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
 
             for (name, read, moved) in [
@@ -484,8 +483,7 @@ fn whole_nested_tuple_moves_preserve_initialization_at_scope_exit() {
             };
             assert!(check("giveBare", depth).mir().is_some());
             let grouped = check("give", depth);
-            assert_eq!(grouped.completion(), Completion::ResourceLimit);
-            assert!(grouped.mir().is_none());
+            crate::limit::assert_body_limit(&grouped);
             for short in [
                 AnalysisLimits {
                     max_work: exact.max_work - 1,
@@ -497,8 +495,7 @@ fn whole_nested_tuple_moves_preserve_initialization_at_scope_exit() {
                 },
             ] {
                 let limited = check("give", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
 
             let copied = lower("copyWhole");
@@ -946,8 +943,7 @@ fn fixed_tuple_places_preserve_initialization_and_order() {
                 },
             ] {
                 let limited = check(short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
             let restored = lower("restore");
             let mir = restored.mir().expect("tuple replacement MIR");
@@ -1369,8 +1365,7 @@ fn fixed_tuple_loans_track_exact_members_without_proving_disjointness() {
                 },
             ] {
                 let limited = lower("groupedCycle", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
         },
     );
@@ -1625,8 +1620,7 @@ fn direct_calls_keep_exclusive_tuple_backing_only_in_borrowing_results() {
                 },
             ] {
                 let limited = lower("explicitChain", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
             assert!(
                 matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(old), Obligation::Drop(replacement)]
@@ -2196,8 +2190,7 @@ fn assert_exact_tuple_call_limits<'g>(
         },
     ] {
         let limited = lower(short);
-        assert_eq!(limited.completion(), Completion::ResourceLimit);
-        assert!(limited.mir().is_none());
+        crate::limit::assert_body_limit(&limited);
     }
 }
 
@@ -2865,8 +2858,7 @@ fn direct_shared_tuple_calls_keep_only_the_result_backing() {
                 },
             ] {
                 let limited = lower("caller", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
             let narrow = check("callNarrow");
             let wide = check("callWide");
@@ -3140,8 +3132,7 @@ fn tuple_calls_with_leaf_arguments_keep_all_possible_backing() {
                 },
             ] {
                 let limited = lower("forward", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
             let resumes = check("resumes");
             let mir = resumes
@@ -3415,8 +3406,7 @@ fn direct_calls_with_two_tuple_descriptors_keep_both_restrictions() {
                 },
             ] {
                 let limited = lower("distinct", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
             let mixed = check("nestedAndFlat");
             let mir = mixed
@@ -3611,8 +3601,7 @@ fn direct_pipes_evaluate_the_input_before_its_earlier_parameters() {
                 },
             ] {
                 let limited = lower("forward", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
             let bare = check("bare");
             let mir = bare.mir().expect("a bare step stages its single argument");

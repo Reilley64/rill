@@ -275,14 +275,11 @@ fn incomplete_borrowed_temporary_caps_now_give_resource_limit() {
                         .unwrap();
                     let (old, _) = limits(statistics(old));
                     let limited = lower_body(&receipt, module, &declaration.id, old).unwrap();
-                    assert_eq!(limited.completion(), Completion::ResourceLimit, "{name}");
-                    assert!(limited.mir().is_none() && limited.findings().is_empty());
+                    crate::limit::assert_body_limit(&limited);
                 }
                 let (old, _) = limits(statistics((188807, 4385, 5)));
                 let limited = analyze_ownership(&receipt, old);
-                assert_eq!(limited.completion(), GraphCompletion::ResourceLimit);
-                assert!(limited.findings().is_empty());
-                assert!(limited.roots().iter().all(|r| r.ordinary_mir().is_none()));
+                crate::limit::assert_graph_limit(&limited);
             }
         },
     );
@@ -350,8 +347,7 @@ function viewField(): i32 { let view = &shifted(Point { x: 1, y: 2 }); return vi
                     .unwrap();
                 let (old, _) = limits(statistics((1986, 86, 3)));
                 let limited = lower_body(&receipt, module, &declaration.id, old).unwrap();
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none() && limited.findings().is_empty());
+                crate::limit::assert_body_limit(&limited);
             }
         },
     );
@@ -636,14 +632,11 @@ function textBind(): void { let view = &named(); }
                         .unwrap();
                     let (parent, _) = limits(statistics(parent));
                     let limited = lower_body(&receipt, module, &declaration.id, parent).unwrap();
-                    assert_eq!(limited.completion(), Completion::ResourceLimit, "{name}");
-                    assert!(limited.mir().is_none() && limited.findings().is_empty());
+                    crate::limit::assert_body_limit(&limited);
                 }
                 let (parent, _) = limits(statistics((187421, 4277, 5)));
                 let limited = analyze_ownership(&receipt, parent);
-                assert_eq!(limited.completion(), GraphCompletion::ResourceLimit);
-                assert!(limited.findings().is_empty());
-                assert!(limited.roots().iter().all(|r| r.ordinary_mir().is_none()));
+                crate::limit::assert_graph_limit(&limited);
             }
         },
     );

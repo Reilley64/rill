@@ -509,8 +509,7 @@ fn protected_guard_cleanup_follows_the_initialized_owner() {
                 },
             ] {
                 let limited = check("paths", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
             let rejected = lower("rejects");
             assert_eq!(rejected.completion(), Completion::SourceRejected);
@@ -883,8 +882,7 @@ fn protected_fields_keep_their_obligation_through_disposer_cleanup() {
                 },
             ] {
                 let limited = check("branch", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
             for (name, code) in [
                 ("duplicateRelease", "R0200"),
@@ -1137,8 +1135,7 @@ fn active_disposer_cleans_only_remaining_fields() {
                 },
             ] {
                 let limited = at_limits(short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
 
             let checked = lower("normal");
@@ -1313,7 +1310,7 @@ fn active_disposer_cleans_only_remaining_fields() {
                 ..AnalysisLimits::default()
             };
             let short = lower_body(receipt, module, &normal.id, limits).unwrap();
-            assert_eq!(short.completion(), Completion::ResourceLimit);
+            crate::limit::assert_body_limit(&short);
             assert!(
                 short.mir().is_none(),
                 "do not publish an unchecked disposer graph"

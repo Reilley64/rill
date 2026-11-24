@@ -121,8 +121,7 @@ fn shared_descriptor_invokes_the_reaching_local_pair() {
             verify(run(exact(target.statistics())).mir().unwrap());
             for short in short_capture_limits(exact(target.statistics())) {
                 let limited = run(short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none() && limited.findings().is_empty());
+                crate::limit::assert_body_limit(&limited);
             }
             let bounded = analyze_ownership(receipt, exact(graph.statistics()));
             verify(
@@ -132,13 +131,7 @@ fn shared_descriptor_invokes_the_reaching_local_pair() {
             );
             for short in short_capture_limits(exact(graph.statistics())) {
                 let limited = analyze_ownership(receipt, short);
-                assert_eq!(limited.completion(), GraphCompletion::ResourceLimit);
-                assert!(
-                    limited
-                        .roots()
-                        .iter()
-                        .all(|root| root.ordinary_mir().is_none() && root.mir().is_none())
-                );
+                crate::limit::assert_graph_limit(&limited);
             }
             let foreign = loader::load_installed(request.clone()).unwrap();
             let duplicate = foreign
@@ -322,8 +315,7 @@ fn borrowed_once_and_unproved_bodies_do_not_issue_receipts() {
                 assert_eq!(analyze_typed(&graph, limit).completion(), expected);
                 for short in short_capture_limits(exact(typed.statistics())) {
                     let limited = analyze_typed(&graph, short);
-                    assert_eq!(limited.completion(), TypedCompletion::ResourceLimit);
-                    assert!(limited.receipt().is_none());
+                    crate::limit::assert_typed_limit_keeping_body_findings(&limited);
                 }
             },
         );

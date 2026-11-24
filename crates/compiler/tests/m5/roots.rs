@@ -176,11 +176,7 @@ fn assert_limits(
         },
     ] {
         let result = lower_root(receipt, module, owner, short).unwrap();
-        assert_eq!(
-            result.completion(),
-            Completion::ResourceLimit,
-            "{short:?}: {result:?}"
-        );
+        crate::limit::assert_body_limit(&result);
         assert!(
             result.findings().is_empty() && result.mir().is_none() && result.blocked_at().is_none()
         );
@@ -415,8 +411,7 @@ expect ((Decision {{ allowed: false, text: "scratch" }}).allowed);
                 },
             )
             .unwrap();
-            assert_eq!(short.completion(), Completion::ResourceLimit);
-            assert!(short.mir().is_none());
+            crate::limit::assert_body_limit(&short);
             let result = lower_root(
                 receipt,
                 helper,
@@ -553,8 +548,7 @@ fn rejects_foreign_modules_and_body_ids_even_at_zero_budget() {
                 }
             }
             let own = lower_root(receipt, helper, BodyOwner::Startup, zero).unwrap();
-            assert_eq!(own.completion(), Completion::ResourceLimit);
-            assert!(own.mir().is_none());
+            crate::limit::assert_body_limit(&own);
         },
     );
 }

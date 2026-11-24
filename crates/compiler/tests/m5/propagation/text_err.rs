@@ -530,8 +530,7 @@ fn string_error_cases_keep_their_outcomes_at_exact_caps() {
                 assert_eq!(target.mir().is_some(), expected == Completion::Checked);
                 for cap in short {
                     let limited = run(cap);
-                    assert_eq!(limited.completion(), Completion::ResourceLimit, "{source}");
-                    assert!(limited.mir().is_none() && limited.findings().is_empty());
+                    crate::limit::assert_body_limit(&limited);
                 }
                 assert_pre_equality_graph_cap(receipt, pre_equality);
                 let (exact, short) = limits(whole);
@@ -549,12 +548,7 @@ fn string_error_cases_keep_their_outcomes_at_exact_caps() {
                 );
                 for cap in short {
                     let limited = analyze_ownership(receipt, cap);
-                    assert_eq!(
-                        limited.completion(),
-                        GraphCompletion::ResourceLimit,
-                        "{source}"
-                    );
-                    assert!(limited.roots().iter().all(|r| r.ordinary_mir().is_none()));
+                    crate::limit::assert_graph_limit(&limited);
                 }
                 match outcome {
                     Outcome::Checked => {

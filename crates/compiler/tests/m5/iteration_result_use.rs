@@ -650,12 +650,7 @@ fn replay_exact(request: &InstalledRequest) {
         },
     ] {
         let limited = analyze_typed(&graph, short);
-        assert_eq!(
-            limited.completion(),
-            TypedCompletion::ResourceLimit,
-            "{short:?}"
-        );
-        assert!(limited.receipt().is_none());
+        crate::limit::assert_typed_limit(&limited);
     }
 }
 

@@ -149,8 +149,7 @@ fn grouped_cursor_postfix_retains_the_two_real_edges() {
                 },
             )
             .unwrap();
-            assert_eq!(limited.completion(), Completion::ResourceLimit);
-            assert!(limited.mir().is_none());
+            crate::limit::assert_body_limit(&limited);
             let opt = typed.option_role().unwrap();
             for mir in [local.mir().unwrap(), root.ordinary_mir().unwrap()] {
                 let (yielded, _) = branch_targets(mir);
@@ -202,8 +201,7 @@ fn installed_postfix_with_live_string_cursor() {
             );
             for cap in short {
                 let limited = analyze_typed(&capture, cap);
-                assert_eq!(limited.completion(), TypedCompletion::ResourceLimit);
-                assert!(limited.receipt().is_none());
+                crate::limit::assert_typed_limit(&limited);
             }
             let measured = analyze_ownership(receipt, AnalysisLimits::default());
             let (exact, short) = limits(measured.statistics());
@@ -216,13 +214,7 @@ fn installed_postfix_with_live_string_cursor() {
             assert_eq!(graph.context(), receipt.context());
             for cap in short {
                 let limited = analyze_ownership(receipt, cap);
-                assert_eq!(limited.completion(), GraphCompletion::ResourceLimit);
-                assert!(
-                    limited
-                        .roots()
-                        .iter()
-                        .all(|root| root.ordinary_mir().is_none())
-                );
+                crate::limit::assert_graph_limit(&limited);
                 assert!(limited.findings().is_empty());
             }
             for name in ["onPostfix", "knownSome", "knownNone", "afterMove"] {
@@ -246,8 +238,7 @@ fn installed_postfix_with_live_string_cursor() {
                 assert!(body.findings().is_empty());
                 for cap in short {
                     let limited = run(cap);
-                    assert_eq!(limited.completion(), Completion::ResourceLimit);
-                    assert!(limited.mir().is_none() && limited.findings().is_empty());
+                    crate::limit::assert_body_limit(&limited);
                 }
                 let root = graph
                     .roots()
@@ -309,8 +300,7 @@ fn installed_postfix_keeps_unadmitted_loop_shapes_pending() {
             assert!(analyze_typed(&capture, exact).receipt().is_some());
             for cap in short {
                 let report = analyze_typed(&capture, cap);
-                assert_eq!(report.completion(), TypedCompletion::ResourceLimit);
-                assert!(report.receipt().is_none());
+                crate::limit::assert_typed_limit(&report);
             }
 
             assert_pre_equality_graph_cap(receipt, (191_179, 4_263, 4));
@@ -326,8 +316,7 @@ fn installed_postfix_keeps_unadmitted_loop_shapes_pending() {
             assert!(graph.findings().is_empty());
             for cap in short {
                 let limited = analyze_ownership(receipt, cap);
-                assert_eq!(limited.completion(), GraphCompletion::ResourceLimit);
-                assert!(limited.roots().iter().all(|r| r.ordinary_mir().is_none()));
+                crate::limit::assert_graph_limit(&limited);
             }
             for (name, work, entries, max_depth) in [
                 ("complex", 1_976, 79, 0),
@@ -367,8 +356,7 @@ fn installed_postfix_keeps_unadmitted_loop_shapes_pending() {
                 assert!(root.ordinary_mir().is_none());
                 for cap in short {
                     let limited = run(cap);
-                    assert_eq!(limited.completion(), Completion::ResourceLimit);
-                    assert!(limited.mir().is_none() && limited.findings().is_empty());
+                    crate::limit::assert_body_limit(&limited);
                 }
             }
         },
@@ -403,8 +391,7 @@ function siblingPostfix(xs: List<string>, unrelated: List<string>, gate: Option<
             assert!(graph.findings().is_empty());
             for cap in short {
                 let limited = analyze_ownership(receipt, cap);
-                assert_eq!(limited.completion(), GraphCompletion::ResourceLimit);
-                assert!(limited.roots().iter().all(|r| r.ordinary_mir().is_none()));
+                crate::limit::assert_graph_limit(&limited);
             }
             for (name, work, entries) in [("deadPostfix", 1_912, 47), ("siblingPostfix", 1_914, 48)]
             {
@@ -436,8 +423,7 @@ function siblingPostfix(xs: List<string>, unrelated: List<string>, gate: Option<
                 assert!(root.ordinary_mir().is_none());
                 for cap in short {
                     let limited = run(cap);
-                    assert_eq!(limited.completion(), Completion::ResourceLimit);
-                    assert!(limited.mir().is_none() && limited.findings().is_empty());
+                    crate::limit::assert_body_limit(&limited);
                 }
             }
         },

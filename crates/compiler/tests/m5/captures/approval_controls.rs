@@ -76,8 +76,7 @@ fn assert_pinned(test: &str, pin: &Pin) {
         assert_eq!(bounded.statistics(), pin.used);
         for short in short_capture_limits(exact) {
             let limited = analyze_typed(&graph, short);
-            assert_eq!(limited.completion(), TypedCompletion::ResourceLimit);
-            assert!(limited.receipt().is_none());
+            crate::limit::assert_typed_limit(&limited);
         }
     });
 }

@@ -138,11 +138,7 @@ fn run_with(test: &str, sources: &[Source], extra: impl Fn(usize, &loader::Graph
                         check_receipt(&context, &typed, module, *whole, roots);
                         let receipt = typed.receipt().unwrap();
                         let (old, _) = limits(statistics(*pre_equality_graph));
-                        assert_eq!(
-                            analyze_ownership(&receipt, old).completion(),
-                            GraphCompletion::ResourceLimit,
-                            "{context}"
-                        );
+                        crate::limit::assert_graph_limit(&analyze_ownership(&receipt, old));
                     }
                 }
                 extra(index, &graph, &context);
@@ -273,11 +269,7 @@ fn check_typed(
     assert_eq!(replay.statistics(), typed.statistics(), "{context}");
     for short in short {
         let limited = analyze_typed(graph, short);
-        assert_eq!(
-            limited.completion(),
-            TypedCompletion::ResourceLimit,
-            "{context}"
-        );
+        crate::limit::assert_typed_limit_keeping_body_findings(&limited);
         assert!(limited.receipt().is_none(), "{context}");
     }
 }
@@ -298,11 +290,7 @@ fn check_receipt<'g>(
     assert_eq!(replay.completion(), whole, "{context}");
     assert_eq!(replay.statistics(), ownership.statistics(), "{context}");
     for short in short {
-        assert_eq!(
-            analyze_ownership(&receipt, short).completion(),
-            GraphCompletion::ResourceLimit,
-            "{context}"
-        );
+        crate::limit::assert_graph_limit(&analyze_ownership(&receipt, short));
     }
 
     let mut rejected = Vec::new();
@@ -363,8 +351,7 @@ fn check_receipt<'g>(
         assert_eq!(replay.statistics(), target.statistics(), "{context}");
         for short in short {
             let limited = query(short);
-            assert_eq!(limited.completion(), Completion::ResourceLimit, "{context}");
-            assert!(limited.mir().is_none() && limited.findings().is_empty());
+            crate::limit::assert_body_limit(&limited);
         }
 
         let graph_root = ownership
@@ -2591,11 +2578,7 @@ fn old_typed_caps(test: &str, sources: &[Source], old: Triple) {
                 let graph = loader::load_installed(request).unwrap();
                 let (parent, _) = limits(statistics(old));
                 let typed = analyze_typed(&graph, parent);
-                assert_eq!(
-                    typed.completion(),
-                    TypedCompletion::ResourceLimit,
-                    "test_mode {test_mode}"
-                );
+                crate::limit::assert_typed_limit(&typed);
                 assert!(typed.receipt().is_none(), "test_mode {test_mode}");
             }
         }
@@ -2744,13 +2727,9 @@ fn o07_pre_admission_caps_now_give_resource_limit() {
                     .unwrap();
                 let (old, _) = limits(statistics((2233, 88, 1)));
                 let limited = lower_body(&receipt, module, &overlap.id, old).unwrap();
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none() && limited.findings().is_empty());
+                crate::limit::assert_body_limit(&limited);
                 let (old, _) = limits(statistics((187028, 4183, 5)));
-                assert_eq!(
-                    analyze_ownership(&receipt, old).completion(),
-                    GraphCompletion::ResourceLimit
-                );
+                crate::limit::assert_graph_limit(&analyze_ownership(&receipt, old));
             }
         },
     );
@@ -2832,8 +2811,7 @@ fn o10_pre_extraction_typed_cap_now_gives_resource_limit() {
                 let graph = loader::load_installed(request).unwrap();
                 let (old, _) = limits(statistics((323289, 47677, 12)));
                 let typed = analyze_typed(&graph, old);
-                assert_eq!(typed.completion(), TypedCompletion::ResourceLimit);
-                assert!(typed.receipt().is_none());
+                crate::limit::assert_typed_limit(&typed);
             }
         },
     );
@@ -2872,8 +2850,7 @@ fn o10_pre_slot_get_typed_cap_now_gives_resource_limit() {
                 let graph = loader::load_installed(request).unwrap();
                 let (old, _) = limits(statistics((325319, 47875, 12)));
                 let typed = analyze_typed(&graph, old);
-                assert_eq!(typed.completion(), TypedCompletion::ResourceLimit);
-                assert!(typed.receipt().is_none());
+                crate::limit::assert_typed_limit(&typed);
             }
         },
     );
@@ -2911,13 +2888,9 @@ fn o10_pre_slot_lookup_caps_now_give_resource_limit() {
                     .unwrap();
                 let (old, _) = limits(statistics((1869, 22, 2)));
                 let limited = lower_body(&receipt, module, &root.id, old).unwrap();
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none() && limited.findings().is_empty());
+                crate::limit::assert_body_limit(&limited);
                 let (old, _) = limits(statistics((186123, 4117, 5)));
-                assert_eq!(
-                    analyze_ownership(&receipt, old).completion(),
-                    GraphCompletion::ResourceLimit
-                );
+                crate::limit::assert_graph_limit(&analyze_ownership(&receipt, old));
             }
         },
     );
@@ -2966,14 +2939,10 @@ fn o11_pre_family_call_caps_now_give_resource_limit() {
                         .unwrap();
                     let (old, _) = limits(statistics(old));
                     let limited = lower_body(&receipt, module, &root.id, old).unwrap();
-                    assert_eq!(limited.completion(), Completion::ResourceLimit, "{name}");
-                    assert!(limited.mir().is_none() && limited.findings().is_empty());
+                    crate::limit::assert_body_limit(&limited);
                 }
                 let (old, _) = limits(statistics((189575, 4219, 5)));
-                assert_eq!(
-                    analyze_ownership(&receipt, old).completion(),
-                    GraphCompletion::ResourceLimit
-                );
+                crate::limit::assert_graph_limit(&analyze_ownership(&receipt, old));
             }
         },
     );
@@ -3065,14 +3034,10 @@ fn o13_pre_retained_string_caps_now_give_resource_limit() {
                         .unwrap();
                     let (old, _) = limits(statistics(old));
                     let limited = lower_body(&receipt, module, &root.id, old).unwrap();
-                    assert_eq!(limited.completion(), Completion::ResourceLimit, "{name}");
-                    assert!(limited.mir().is_none() && limited.findings().is_empty());
+                    crate::limit::assert_body_limit(&limited);
                 }
                 let (old, _) = limits(statistics((190003, 4236, 5)));
-                assert_eq!(
-                    analyze_ownership(&receipt, old).completion(),
-                    GraphCompletion::ResourceLimit
-                );
+                crate::limit::assert_graph_limit(&analyze_ownership(&receipt, old));
             }
         },
     );
@@ -3117,8 +3082,7 @@ fn o14_pre_field_edge_graph_cap_now_gives_resource_limit() {
                 let receipt = typed.receipt().unwrap();
                 let (old, _) = limits(statistics((192578, 5361, 5)));
                 let limited = analyze_ownership(&receipt, old);
-                assert_eq!(limited.completion(), GraphCompletion::ResourceLimit);
-                assert!(limited.roots().iter().all(|root| root.mir().is_none()));
+                crate::limit::assert_graph_limit(&limited);
             }
         },
     );
@@ -3163,11 +3127,10 @@ fn o15_pre_charge_counter_caps_now_give_resource_limit() {
                     .unwrap();
                 let (old, _) = limits(statistics((2504, 329, 6)));
                 let limited = lower_body(&receipt, module, &counter.id, old).unwrap();
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none() && limited.findings().is_empty());
+                crate::limit::assert_body_limit(&limited);
                 let (old, _) = limits(statistics((187485, 4297, 6)));
                 let report = analyze_ownership(&receipt, old);
-                assert_eq!(report.completion(), GraphCompletion::ResourceLimit);
+                crate::limit::assert_graph_limit(&report);
                 // Rule 8 (review ci-uaa1 R-5): no MIR and no finding either.
                 assert!(report.findings().is_empty());
                 assert!(
@@ -3219,8 +3182,7 @@ fn equality_expectations_exceed_their_incomplete_caps() {
                     let limited =
                         lower_root(&receipt, module, BodyOwner::Declaration(&expect.id), old)
                             .unwrap();
-                    assert_eq!(limited.completion(), Completion::ResourceLimit);
-                    assert!(limited.mir().is_none() && limited.findings().is_empty());
+                    crate::limit::assert_body_limit(&limited);
                 }
             }
         },
@@ -3249,7 +3211,7 @@ fn o05_old_caps_give_resource_limit() {
                 .unwrap();
             let (old, _) = limits(statistics((188006, 4283, 5)));
             let whole = analyze_ownership(&receipt, old);
-            assert_eq!(whole.completion(), GraphCompletion::ResourceLimit);
+            crate::limit::assert_graph_limit(&whole);
             for (kind, old) in [
                 (DeclarationKind::Function, (2281, 116, 3)),
                 (DeclarationKind::Expectation, (4305, 216, 3)),
@@ -3271,8 +3233,7 @@ fn o05_old_caps_give_resource_limit() {
                     lower_body(&receipt, module, &declaration.id, old)
                 }
                 .unwrap();
-                assert_eq!(limited.completion(), Completion::ResourceLimit, "{kind:?}");
-                assert!(limited.mir().is_none() && limited.findings().is_empty());
+                crate::limit::assert_body_limit(&limited);
             }
         }
     });
@@ -3503,13 +3464,9 @@ fn o19_pre_admission_caps_now_give_resource_limit() {
                     .unwrap();
                 let (old, _) = limits(statistics((2250, 93, 1)));
                 let limited = lower_body(&receipt, module, &ordered.id, old).unwrap();
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none() && limited.findings().is_empty());
+                crate::limit::assert_body_limit(&limited);
                 let (old, _) = limits(statistics((187190, 4193, 5)));
-                assert_eq!(
-                    analyze_ownership(&receipt, old).completion(),
-                    GraphCompletion::ResourceLimit
-                );
+                crate::limit::assert_graph_limit(&analyze_ownership(&receipt, old));
             }
         },
     );
@@ -3535,22 +3492,14 @@ fn o21_guard_release_replacement_reports_r0500() {
             if index != 0 {
                 let (parent, _) = limits(statistics(O21_SIBLINGS_PARENT[index - 1]));
                 let sibling = analyze_typed(graph, parent);
-                assert_eq!(
-                    sibling.completion(),
-                    TypedCompletion::ResourceLimit,
-                    "{context}"
-                );
+                crate::limit::assert_typed_limit(&sibling);
                 assert!(sibling.receipt().is_none(), "{context}");
                 assert!(sibling.bodies().findings().is_empty(), "{context}");
                 return;
             }
             let (old, _) = limits(statistics(O21_PRE_REJECTION));
             let limited = analyze_typed(graph, old);
-            assert_eq!(
-                limited.completion(),
-                TypedCompletion::ResourceLimit,
-                "{context}"
-            );
+            crate::limit::assert_typed_limit(&limited);
             assert!(limited.receipt().is_none(), "{context}");
             assert!(limited.bodies().findings().is_empty(), "{context}");
         },
@@ -3568,11 +3517,7 @@ fn o22_descriptor_disposal_ends_only_that_descriptor_and_owner_disposal_rejects(
             }
             let (old, _) = limits(statistics(O22_PRE_DESCRIPTOR_END));
             let limited = analyze_typed(graph, old);
-            assert_eq!(
-                limited.completion(),
-                TypedCompletion::ResourceLimit,
-                "{context}"
-            );
+            crate::limit::assert_typed_limit(&limited);
             assert!(limited.receipt().is_none(), "{context}");
             assert!(limited.bodies().findings().is_empty(), "{context}");
         },

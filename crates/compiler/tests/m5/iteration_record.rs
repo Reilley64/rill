@@ -127,8 +127,7 @@ fn record_yield_cleans_the_partial_item_then_the_suffix() {
             assert_eq!(at.receipt().unwrap().statistics(), receipt_stats);
             for cap in short {
                 let limited = analyze_typed(&capture, cap);
-                assert_eq!(limited.completion(), TypedCompletion::ResourceLimit);
-                assert!(limited.receipt().is_none());
+                crate::limit::assert_typed_limit(&limited);
             }
 
             assert_pre_equality_graph_cap(receipt, (234_907, 13_094, 9));
@@ -142,8 +141,7 @@ fn record_yield_cleans_the_partial_item_then_the_suffix() {
             assert_eq!(graph.context(), receipt.context());
             for cap in short {
                 let limited = analyze_ownership(receipt, cap);
-                assert_eq!(limited.completion(), GraphCompletion::ResourceLimit);
-                assert!(limited.roots().iter().all(|r| r.ordinary_mir().is_none()));
+                crate::limit::assert_graph_limit(&limited);
             }
 
             let lane = Lane::new(module, typed);
@@ -196,8 +194,7 @@ fn record_yield_cleans_the_partial_item_then_the_suffix() {
                 assert_eq!(root.ordinary_completion(), expected, "{name}");
                 for cap in short {
                     let limited = run(cap);
-                    assert_eq!(limited.completion(), Completion::ResourceLimit, "{name}");
-                    assert!(limited.mir().is_none() && limited.findings().is_empty());
+                    crate::limit::assert_body_limit(&limited);
                 }
                 match expected {
                     Completion::Checked => {
@@ -265,8 +262,7 @@ fn record_yield_cleans_the_partial_item_then_the_suffix() {
                     .find(|d| d.name.as_deref() == Some(name))
                     .unwrap();
                 let limited = lower_body(receipt, module, &function.id, limits(parent).0).unwrap();
-                assert_eq!(limited.completion(), Completion::ResourceLimit, "{name}");
-                assert!(limited.mir().is_none() && limited.findings().is_empty());
+                crate::limit::assert_body_limit(&limited);
             }
         },
     );
@@ -680,8 +676,7 @@ fn string_on_break_keeps_its_cap() {
             assert_eq!(body.completion(), Completion::Checked);
             for cap in short {
                 let limited = lower_body(receipt, module, &function.id, cap).unwrap();
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none() && limited.findings().is_empty());
+                crate::limit::assert_body_limit(&limited);
             }
         },
     );

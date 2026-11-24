@@ -155,8 +155,7 @@ fn observes_borrowed_scalar_temporary_within_its_statement() {
                         },
                     ] {
                         let limited = check(name, short);
-                        assert_eq!(limited.completion(), Completion::ResourceLimit);
-                        assert!(limited.mir().is_none());
+                        crate::limit::assert_body_limit(&limited);
                     }
                 }
             }
@@ -179,8 +178,7 @@ fn observes_borrowed_scalar_temporary_within_its_statement() {
                         ..AnalysisLimits::default()
                     },
                 );
-                assert_eq!(limited.completion(), Completion::ResourceLimit, "{name}");
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
             let reached = check("reached", AnalysisLimits::default());
             assert_eq!(reached.completion(), Completion::SourceRejected);
@@ -537,8 +535,7 @@ fn incoming_shared_record_copies_carried_field() {
                         },
                     ] {
                         let limited = check(name, short);
-                        assert_eq!(limited.completion(), Completion::ResourceLimit, "{name}");
-                        assert!(limited.mir().is_none());
+                        crate::limit::assert_body_limit(&limited);
                     }
                 }
                 assert!(lower("grouped").mir().is_some());
@@ -549,8 +546,7 @@ fn incoming_shared_record_copies_carried_field() {
                         ..AnalysisLimits::default()
                     },
                 );
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
                 let local_slot = lower("localSlot");
                 assert_eq!(local_slot.completion(), Completion::SourceRejected);
                 assert!(local_slot.mir().is_none());
@@ -886,7 +882,7 @@ fn borrowed_result_calls_forward_and_use_shared_record_inputs() {
                     },
                 ] {
                     let report = lower(short);
-                    assert_eq!(report.completion(), Completion::ResourceLimit, "{name}");
+                    crate::limit::assert_body_limit(&report);
                     assert!(report.mir().is_none(), "{name}");
                 }
             }
@@ -1523,8 +1519,7 @@ fn carried_field_and_slot_borrow_differ() {
                 },
             ] {
                 let limited = lower_with("groupedOnly", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
 
             for name in [

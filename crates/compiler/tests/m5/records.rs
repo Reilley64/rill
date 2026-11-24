@@ -232,8 +232,7 @@ fn nested_owned_records_clean_initialized_leaves_on_exit() {
                 },
             ] {
                 let limited = lower("customRoot", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none() && limited.findings().is_empty());
+                crate::limit::assert_body_limit(&limited);
             }
 
             let exact = AnalysisLimits {
@@ -253,8 +252,7 @@ fn nested_owned_records_clean_initialized_leaves_on_exit() {
                 },
             ] {
                 let limited = lower("cleanup", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
         },
     );
@@ -540,8 +538,7 @@ fn moving_a_nested_record_field_leaves_its_sibling_initialized() {
                 },
             ] {
                 let limited = lower("branch", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
         },
     );
@@ -782,8 +779,7 @@ fn whole_nested_record_transfers_rehome_cleanup_and_require_initialized_children
                 },
             ] {
                 let limited = lower("afterWhole", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
         },
     );
@@ -1031,8 +1027,7 @@ fn restoring_a_nested_record_child_repairs_the_whole_value_and_backedge() {
                 },
             ] {
                 let limited = lower("loopRestore", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
         },
     );
@@ -1139,7 +1134,7 @@ fn replacing_an_initialized_nested_string_leaf_preserves_its_neighbors() {
                 max_depth: exact_depth - 1,
                 ..AnalysisLimits::default()
             });
-            assert_eq!(one_short.completion(), Completion::ResourceLimit);
+            crate::limit::assert_body_limit(&one_short);
             assert!(one_short.findings().is_empty() && one_short.mir().is_none());
 
             for (name, moved_at) in [
@@ -1185,8 +1180,7 @@ fn replacing_an_initialized_nested_string_leaf_preserves_its_neighbors() {
                     max_depth: report.statistics().max_depth,
                     ..AnalysisLimits::default()
                 });
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
                 let mir = report.mir().unwrap();
                 let ops = linear(mir, mir.entry);
                 let from_fresh = |op: &&Operation<'_>| {
@@ -1432,8 +1426,7 @@ fn nested_leaf_borrow_groups_count_toward_depth() {
             };
             assert!(lower("bare", limits).mir().is_some());
             let grouped = lower("grouped", limits);
-            assert_eq!(grouped.completion(), Completion::ResourceLimit);
-            assert!(grouped.mir().is_none());
+            crate::limit::assert_body_limit(&grouped);
         },
     );
 }
@@ -1919,8 +1912,7 @@ fn owned_nested_record_pattern_transfers_exact_leaves_and_cleans_the_remainder()
                 },
             ] {
                 let report = lower("unpack", short);
-                assert_eq!(report.completion(), Completion::ResourceLimit);
-                assert!(report.mir().is_none());
+                crate::limit::assert_body_limit(&report);
             }
         },
     );
@@ -2162,8 +2154,7 @@ fn nested_record_initializers_transfer_written_fields_into_canonical_storage() {
                 },
             ] {
                 let report = lower("cleanup", short);
-                assert_eq!(report.completion(), Completion::ResourceLimit);
-                assert!(report.mir().is_none());
+                crate::limit::assert_body_limit(&report);
             }
         },
     );
@@ -2401,8 +2392,7 @@ fn named_nested_record_cleanup_after_one_edge_child_move() {
                         },
                     ] {
                         let limited = check(short);
-                        assert_eq!(limited.completion(), Completion::ResourceLimit);
-                        assert!(limited.mir().is_none() && limited.findings().is_empty());
+                        crate::limit::assert_body_limit(&limited);
                     }
                     continue;
                 }
@@ -2907,8 +2897,7 @@ fn interrupted_record_initialization_cleans_only_the_reached_fields() {
                     },
                 ] {
                     let limited = lower(name, short);
-                    assert_eq!(limited.completion(), Completion::ResourceLimit, "{name}");
-                    assert!(limited.mir().is_none() && limited.findings().is_empty());
+                    crate::limit::assert_body_limit(&limited);
                 }
             }
 
@@ -3258,8 +3247,7 @@ fn named_flat_rebuild_stages_before_displacement_and_transfers_cleanup() {
                 },
             ] {
                 let limited = lower(short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
         },
     );
@@ -3343,8 +3331,7 @@ fn flat_rebuild_distinguishes_moved_inputs_live_loans_and_unsupported_bases() {
                 Completion::SourceRejected
             );
             let limited = check("movedFieldGrouped", depth);
-            assert_eq!(limited.completion(), Completion::ResourceLimit);
-            assert!(limited.mir().is_none() && limited.findings().is_empty());
+            crate::limit::assert_body_limit(&limited);
             for (name, code, site, related) in [
                 (
                     "reused",

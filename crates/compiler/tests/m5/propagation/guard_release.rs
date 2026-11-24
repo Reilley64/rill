@@ -302,8 +302,7 @@ fn bare_guard_is_released_once_on_each_propagation_exit() {
                 assert!(at_cap.mir().is_some());
                 for short in shorts(exact) {
                     let limited = lower(name, short);
-                    assert_eq!(limited.completion(), Completion::ResourceLimit, "{name}");
-                    assert!(limited.mir().is_none() && limited.findings().is_empty());
+                    crate::limit::assert_body_limit(&limited);
                 }
             }
             // Groups add depth, not new actions: the grouped form is one
@@ -334,8 +333,7 @@ fn bare_guard_is_released_once_on_each_propagation_exit() {
                 assert_eq!(at_cap.blocked_at().unwrap().span.bytes(), site, "{name}");
                 for short in shorts(exact) {
                     let limited = lower(name, short);
-                    assert_eq!(limited.completion(), Completion::ResourceLimit, "{name}");
-                    assert!(limited.mir().is_none() && limited.findings().is_empty());
+                    crate::limit::assert_body_limit(&limited);
                 }
             }
             // A guard moved into a local is released at its own name in the
@@ -363,8 +361,7 @@ fn bare_guard_is_released_once_on_each_propagation_exit() {
             assert_eq!(lower("movedLocal", exact).completion(), Completion::Checked);
             for short in shorts(exact) {
                 let limited = lower("movedLocal", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none() && limited.findings().is_empty());
+                crate::limit::assert_body_limit(&limited);
             }
 
             // The fixture's whole graph.
@@ -383,9 +380,7 @@ fn bare_guard_is_released_once_on_each_propagation_exit() {
             }
             for short in shorts(exact) {
                 let limited = analyze_ownership(receipt, short);
-                assert_eq!(limited.completion(), GraphCompletion::ResourceLimit);
-                assert!(limited.findings().is_empty());
-                assert!(limited.roots().iter().all(|root| root.mir().is_none()));
+                crate::limit::assert_graph_limit(&limited);
             }
         },
     );

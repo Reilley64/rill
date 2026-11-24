@@ -460,8 +460,7 @@ fn old_caps(request: &InstalledRequest, olds: &[(&str, Triple)]) {
             let graph = loader::load_installed(request).unwrap();
             let (old, _) = limits(statistics(*old));
             let typed = analyze_typed(&graph, old);
-            assert_eq!(typed.completion(), TypedCompletion::ResourceLimit);
-            assert!(typed.receipt().is_none());
+            crate::limit::assert_typed_limit(&typed);
         }
     }
 }
