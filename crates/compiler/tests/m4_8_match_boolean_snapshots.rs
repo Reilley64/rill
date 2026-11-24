@@ -784,13 +784,6 @@ const AXES: [Axis; 4] = [
 
 fn boolean_copy_cells() -> Vec<Cell<Outcome>> {
     vec![
-        // Review ci-0mdr Q4 (SP-7, ri-px1.11.2). A mutable local that is never written is as
-        // good a copy as an immutable one, so the first two rows check with a receipt. Their
-        // parent numbers are the rejections measured at da5bec50 (both paid before their
-        // `R0103`, rule 1 exception ri-2s0.10). The third row is the same source with an
-        // immutable local: it shares the screen, so it checks too. Measured at a4e56651 (C3's
-        // base) it was the same `R0103` as the mutable source, 324529 / 48133 / 12, and it
-        // costs less now, so that parent cap still gives `Checked`.
         Cell {
             name: "pre: mutable binder",
             at: &["parameter", "mutable", "none", "none"],
@@ -815,23 +808,6 @@ fn boolean_copy_cells() -> Vec<Cell<Outcome>> {
             exact: (324518, 48115, 12),
             outcome: Outcome::Checked,
         },
-        // Genuine rejections stay R0103: the written value is not the matched source. Exact
-        // numbers at 7002855e, then here. `pre: copy of another parameter` pays a few steps to
-        // read the written binding before it rejects, so its parent cap no longer holds. The
-        // `computed` row costs no more. Rule 1 exception (chief of staff, 2026-11-23,
-        // ri-2s0.10): `pre: copy of another parameter` (+14 work) pays before `R0103`, and its
-        // parent cap (7002855e) gives `ResourceLimit`. The write twins pay nothing before
-        // their rejection that the parents did not: their parent numbers are the ones measured
-        // at 81d317b3, before the widened gate (review ci-b4b2 A-F1, ri-px1.11.9), and each
-        // parent cap still holds. Named rule-1 exception (chief of staff, 2026-11-24 16:53
-        // AEDT, ri-j6fm; `compiler-metering.md` rule 1): the `ri-j6fm` rows write or lend a
-        // different local after the source, so the free `last_written` screen no longer names
-        // the source and it pays its scan before the same `R0103` (+86 and +90 work over the
-        // parents measured at 81d317b3); each parent cap gives `ResourceLimit`. Widened by the
-        // chief of staff, 2026-11-24 17:54 AEDT (chief-rulings-21.md): the source or the copy
-        // pays its scan when another local is written or lent before the match, so the 2A-F2
-        // rows (source lent, +90; copy lent, +50) are pinned the same way. The row of 2A-F1
-        // costs its parent cap (81d317b3), so it carries no exception.
         Cell {
             name: "pre: copy of another parameter",
             at: &["other parameter", "immutable", "none", "none"],
@@ -922,13 +898,6 @@ fn boolean_copy_cells() -> Vec<Cell<Outcome>> {
             exact: (325886, 48394, 12),
             outcome: Outcome::Unpaid,
         },
-        // A mutable borrow of the copy or the source stays `Incomplete` (Storage) at the
-        // `*value = !*value;` write inside `flip`, with the unpaid `R0103` still published,
-        // whatever the match does, so neither can reach `Checked`. Parent numbers measured at
-        // 81d317b3 (review ci-b4b2 A-F1, ri-px1.11.9): same outcome and blocker, and the
-        // rejection costs no more than it did there. The last row is the third `ri-j6fm` form
-        // (the named exception of the rejections above): the same outcome and blocker as its
-        // parent, `flip(&mut z)` of another local after the source was written, +90 work.
         Cell {
             name: "pre: mutable binder lent mutably before the match",
             at: &["parameter", "mutable", "lend copy by call", "none"],
