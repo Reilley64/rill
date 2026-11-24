@@ -934,14 +934,6 @@ fn local_sources_escape_through_every_route_to_the_list() {
     );
 }
 
-/// Rule 1 for the siblings that pass the free type screen but not the record
-/// lookup (a `string` field, a nested record, an enum) or the contract (an
-/// extra `bool`), and the shapes the screen refuses on the type alone. Each
-/// keeps its outcome and its blocker. The first three pay one lookup in the
-/// parameter and one at the call (+148, +148, +144 work and +3 entries); `Flag`
-/// and `grouped` (`retain((dst), source)`, the fifth use of the standing rule-1
-/// exception, review ci-0mdr ST-1) pay the parameter's only (+74 work, +3
-/// entries); the rest pay nothing and keep their parent caps.
 #[test]
 fn list_destination_siblings_keep_their_outcomes_and_blockers() {
     installed(
@@ -978,11 +970,11 @@ fn list_destination_siblings_keep_their_outcomes_and_blockers() {
                         Case {
                             text: ENUM,
                             typed_stats: (326303, 48119, 12),
-                            graph: (GraphCompletion::Incomplete, (188146, 4144, 5)),
+                            graph: (GraphCompletion::Incomplete, (188002, 4141, 5)),
                             roots: &[incomplete(
                                 "forwarded",
                                 "retain(dst, source)",
-                                (2044, 43, 3),
+                                (1900, 40, 3),
                             )],
                         }
                     },
@@ -1073,7 +1065,6 @@ fn list_destination_siblings_keep_their_outcomes_and_blockers() {
                 &[
                     (NAMED, &[("forwarded", (1904, 42, 3))], (188126, 4143, 5)),
                     (NESTED, &[("forwarded", (1906, 43, 3))], (188192, 4144, 5)),
-                    (ENUM, &[("forwarded", (1900, 40, 3))], (188002, 4141, 5)),
                     (FLAG, &[("forwarded", (1917, 49, 3))], (188322, 4150, 5)),
                     (GROUPED, &[("grouped", (1905, 42, 3))], (188126, 4143, 5)),
                 ],
@@ -1082,16 +1073,6 @@ fn list_destination_siblings_keep_their_outcomes_and_blockers() {
     );
 }
 
-/// Review ci-0mdr, the "Unverified" item of the Standards axis: which
-/// unsupported shapes pay the charged record lookup beyond the siblings of
-/// `list_destination_siblings_keep_their_outcomes_and_blockers`. A record with a
-/// `string` field behind a `&mut List<&R>` parameter pays one lookup per
-/// parameter that reaches the contents screen (70 to 72 work, no entries) in
-/// every body that declares one, `Checked` or not, and one more at each call
-/// that passes it on, direct or piped (`+144` to `+148` work, up to +3 entries
-/// in `f`). Each keeps its outcome and its blocker; each parent cap (`b6c93f30`)
-/// gives `ResourceLimit`. A nested record and an enum cost the same to within
-/// two work, and are recorded in `ri-px1.11.5.md`.
 #[test]
 fn list_parameter_siblings_pay_their_lookup_and_keep_their_outcomes() {
     installed(
@@ -1254,16 +1235,6 @@ fn list_parameter_siblings_pay_their_lookup_and_keep_their_outcomes() {
     );
 }
 
-/// Review ci-b4b2 C-6: the nested-record and enum siblings that
-/// `list_parameter_siblings_pay_their_lookup_and_keep_their_outcomes` left
-/// unpinned (`ri-px1.11.5.md`, "measured and not pinned"). Same forms, same
-/// roots: every body that declares a `&mut List<&R>` parameter pays one
-/// charged declaration lookup (+72 work for a nested record, +70 for an enum),
-/// and a root that also passes it on pays a second (up to +148 work and +3
-/// entries in `f`), inside bound (c) of the standing rule-1 exception. Each
-/// keeps its outcome and blocker site; each parent cap (`b6c93f30`, equal at
-/// `bc9bfdd5`) gives `ResourceLimit` through the shared helper. The `BORROW`
-/// roots `f` stop at `users` or `a` before the screen and do not move.
 #[test]
 fn list_parameter_siblings_of_nested_records_and_enums_pay_their_lookup() {
     installed(
@@ -1360,10 +1331,10 @@ fn list_parameter_siblings_of_nested_records_and_enums_pay_their_lookup() {
                         Case {
                             text: ENUM_BORROW,
                             typed_stats: (330627, 48360, 12),
-                            graph: (GraphCompletion::Incomplete, (191395, 4256, 5)),
+                            graph: (GraphCompletion::Incomplete, (191255, 4256, 5)),
                             roots: &[
-                                checked("touch", (2061, 87, 1)),
-                                checked("touchTwo", (2104, 105, 1)),
+                                checked("touch", (1991, 87, 1)),
+                                checked("touchTwo", (2034, 105, 1)),
                                 incomplete("f", "a", (1929, 55, 1)),
                             ],
                         }
@@ -1372,11 +1343,11 @@ fn list_parameter_siblings_of_nested_records_and_enums_pay_their_lookup() {
                         Case {
                             text: ENUM_LONE,
                             typed_stats: (330818, 48358, 12),
-                            graph: (GraphCompletion::Incomplete, (191243, 4261, 5)),
+                            graph: (GraphCompletion::Incomplete, (190960, 4259, 5)),
                             roots: &[
-                                checked("touch", (2051, 82, 1)),
-                                checked("touchTwo", (2094, 100, 1)),
-                                incomplete("f", "touchOne(dst)", (2079, 60, 3)),
+                                checked("touch", (1981, 82, 1)),
+                                checked("touchTwo", (2024, 100, 1)),
+                                incomplete("f", "touchOne(dst)", (1936, 58, 3)),
                             ],
                         }
                     },
@@ -1384,11 +1355,11 @@ fn list_parameter_siblings_of_nested_records_and_enums_pay_their_lookup() {
                         Case {
                             text: ENUM_FORWARDED,
                             typed_stats: (331135, 48503, 12),
-                            graph: (GraphCompletion::Incomplete, (191439, 4269, 5)),
+                            graph: (GraphCompletion::Incomplete, (191155, 4266, 5)),
                             roots: &[
-                                checked("touch", (2057, 85, 1)),
-                                checked("touchTwo", (2100, 103, 1)),
-                                incomplete("f", "touchF(dst, s)", (2094, 68, 3)),
+                                checked("touch", (1987, 85, 1)),
+                                checked("touchTwo", (2030, 103, 1)),
+                                incomplete("f", "touchF(dst, s)", (1950, 65, 3)),
                             ],
                         }
                     },
@@ -1396,11 +1367,11 @@ fn list_parameter_siblings_of_nested_records_and_enums_pay_their_lookup() {
                         Case {
                             text: ENUM_FORWARDED_PIPE,
                             typed_stats: (331145, 48507, 12),
-                            graph: (GraphCompletion::Incomplete, (191367, 4266, 5)),
+                            graph: (GraphCompletion::Incomplete, (191157, 4266, 5)),
                             roots: &[
-                                checked("touch", (2057, 85, 1)),
-                                checked("touchTwo", (2100, 103, 1)),
-                                incomplete("f", "dst |> touchF(s)", (2022, 65, 3)),
+                                checked("touch", (1987, 85, 1)),
+                                checked("touchTwo", (2030, 103, 1)),
+                                incomplete("f", "dst |> touchF(s)", (1952, 65, 3)),
                             ],
                         }
                     },
@@ -1408,11 +1379,11 @@ fn list_parameter_siblings_of_nested_records_and_enums_pay_their_lookup() {
                         Case {
                             text: ENUM_DIRECT_EMPTY,
                             typed_stats: (330385, 48269, 12),
-                            graph: (GraphCompletion::Incomplete, (191310, 4262, 5)),
+                            graph: (GraphCompletion::Incomplete, (191030, 4262, 5)),
                             roots: &[
-                                checked("touch", (2053, 83, 1)),
-                                checked("touchTwo", (2096, 101, 1)),
-                                incomplete("f", "dst", (2086, 61, 3)),
+                                checked("touch", (1983, 83, 1)),
+                                checked("touchTwo", (2026, 101, 1)),
+                                incomplete("f", "dst", (1946, 61, 3)),
                             ],
                         }
                     },
@@ -1420,11 +1391,11 @@ fn list_parameter_siblings_of_nested_records_and_enums_pay_their_lookup() {
                         Case {
                             text: ENUM_DIRECT_PAIR,
                             typed_stats: (330591, 48323, 12),
-                            graph: (GraphCompletion::Incomplete, (191506, 4270, 5)),
+                            graph: (GraphCompletion::Incomplete, (191226, 4270, 5)),
                             roots: &[
-                                checked("touch", (2059, 86, 1)),
-                                checked("touchTwo", (2102, 104, 1)),
-                                incomplete("f", "dst", (2101, 69, 3)),
+                                checked("touch", (1989, 86, 1)),
+                                checked("touchTwo", (2032, 104, 1)),
+                                incomplete("f", "dst", (1961, 69, 3)),
                             ],
                         }
                     },
@@ -1432,11 +1403,11 @@ fn list_parameter_siblings_of_nested_records_and_enums_pay_their_lookup() {
                         Case {
                             text: ENUM_PIPED_PAIR,
                             typed_stats: (330601, 48327, 12),
-                            graph: (GraphCompletion::Incomplete, (191506, 4267, 5)),
+                            graph: (GraphCompletion::Incomplete, (191226, 4267, 5)),
                             roots: &[
-                                checked("touch", (2059, 86, 1)),
-                                checked("touchTwo", (2102, 104, 1)),
-                                incomplete("f", "dst |> touchTwo(s)", (2101, 66, 3)),
+                                checked("touch", (1989, 86, 1)),
+                                checked("touchTwo", (2032, 104, 1)),
+                                incomplete("f", "dst |> touchTwo(s)", (1961, 66, 3)),
                             ],
                         }
                     },
@@ -1503,65 +1474,6 @@ fn list_parameter_siblings_of_nested_records_and_enums_pay_their_lookup() {
                             ("f", (1967, 69, 3)),
                         ],
                         (191416, 4270, 5),
-                    ),
-                    (
-                        ENUM_BORROW,
-                        &[("touch", (1991, 87, 1)), ("touchTwo", (2034, 105, 1))],
-                        (191255, 4256, 5),
-                    ),
-                    (
-                        ENUM_LONE,
-                        &[
-                            ("touch", (1981, 82, 1)),
-                            ("touchTwo", (2024, 100, 1)),
-                            ("f", (1936, 58, 3)),
-                        ],
-                        (190960, 4259, 5),
-                    ),
-                    (
-                        ENUM_FORWARDED,
-                        &[
-                            ("touch", (1987, 85, 1)),
-                            ("touchTwo", (2030, 103, 1)),
-                            ("f", (1950, 65, 3)),
-                        ],
-                        (191155, 4266, 5),
-                    ),
-                    (
-                        ENUM_FORWARDED_PIPE,
-                        &[
-                            ("touch", (1987, 85, 1)),
-                            ("touchTwo", (2030, 103, 1)),
-                            ("f", (1952, 65, 3)),
-                        ],
-                        (191157, 4266, 5),
-                    ),
-                    (
-                        ENUM_DIRECT_EMPTY,
-                        &[
-                            ("touch", (1983, 83, 1)),
-                            ("touchTwo", (2026, 101, 1)),
-                            ("f", (1946, 61, 3)),
-                        ],
-                        (191030, 4262, 5),
-                    ),
-                    (
-                        ENUM_DIRECT_PAIR,
-                        &[
-                            ("touch", (1989, 86, 1)),
-                            ("touchTwo", (2032, 104, 1)),
-                            ("f", (1961, 69, 3)),
-                        ],
-                        (191226, 4270, 5),
-                    ),
-                    (
-                        ENUM_PIPED_PAIR,
-                        &[
-                            ("touch", (1989, 86, 1)),
-                            ("touchTwo", (2032, 104, 1)),
-                            ("f", (1961, 66, 3)),
-                        ],
-                        (191226, 4267, 5),
                     ),
                 ],
             );

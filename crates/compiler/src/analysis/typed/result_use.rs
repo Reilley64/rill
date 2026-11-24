@@ -84,6 +84,7 @@ pub struct ResultUseReport<'g> {
     // Temporary until the integrated analysis attaches each proof directly to
     // its originating call. The key indexes this report's typed node array.
     pair_calls: BTreeMap<usize, pairs::CheckedTransfer<'g>>,
+    consumed_receivers: BTreeSet<usize>,
     routine_bound: bool,
     fresh_option_iterators: Vec<(&'g DeclarationId, &'g DeclarationId, NodeId)>,
 }
@@ -103,6 +104,24 @@ impl<'g> ResultUseReport<'g> {
                 pairs::CheckedTransfer::Serial(proof) => call.list_arrows = Some(proof),
                 pairs::CheckedTransfer::Scoped(proof) => call.scoped_join = Some(proof),
             }
+        }
+        Ok(())
+    }
+
+    pub(super) fn attach_consumed_receivers(
+        &mut self,
+        bodies: &mut GenericReport<'g>,
+        budget: &mut Budget,
+    ) -> Work<()> {
+        budget.step(self.consumed_receivers.len())?;
+        for index in std::mem::take(&mut self.consumed_receivers) {
+            let invocation = bodies
+                .typed_node_mut(index)
+                .callable
+                .as_mut()
+                .and_then(|callable| Arc::get_mut(callable.invocation.as_mut()?))
+                .expect("checked invocation");
+            invocation.consumed_receiver = true;
         }
         Ok(())
     }
@@ -133,6 +152,7 @@ impl<'g> ResultUseReport<'g> {
             discards,
             pending: _pending,
             pair_calls: _pair_calls,
+            consumed_receivers: _consumed_receivers,
             routine_bound: _routine_bound,
             fresh_option_iterators: _fresh_option_iterators,
         } = self;

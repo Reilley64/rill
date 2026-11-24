@@ -2168,9 +2168,6 @@ fn retained_destination_contents<'a, 'g>(
     }
 }
 
-// Rule R1 (RFC 0007, nested routing): a `&mut List<&R>` destination holds the
-// element contents `&R`, with `R` a non-generic application nominal. The type
-// alone decides this, free; the record lookup is `retained_i32_record`'s.
 fn retained_list_candidate<'a, 'g>(
     typed: &TypedReport<'g>,
     ty: &'a TypeTerm<'g>,
@@ -2200,7 +2197,8 @@ fn retained_list_candidate<'a, 'g>(
     };
     matches!(element.as_ref(), TypeTerm::Reference { mutable: false, referent: record }
         if matches!(record.as_ref(), TypeTerm::Nominal { declaration, arguments }
-            if declaration.module.origin == crate::loader::Origin::Application
+            if declaration.kind == DeclarationKind::Record
+                && declaration.module.origin == crate::loader::Origin::Application
                 && arguments.is_empty()))
     .then_some(element)
 }
@@ -2865,6 +2863,7 @@ struct Build<'a, 'g, 'b> {
     /// This body lends a local descriptor to a declared shared frame, so
     /// one-capture formations record their origin for it.
     declared_shared_frame: bool,
+    consumed_receiver: Option<NodeId>,
     dispose: Option<&'g DeclarationId>,
     return_contract: Option<(&'g DeclarationId, &'a Type<'g>)>,
     callable_frame: Option<(CallableLayout, Slot)>,
