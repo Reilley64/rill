@@ -229,6 +229,216 @@ fn member_replacement_overlap_gives_r0201_at_its_parent_caps() {
     );
 }
 
+/// Review ci-b4b2 D-F1, D-F2 (chief rulings 11 Q3 and 18): a replacement that
+/// stores a reborrow of a sibling member into another member rejects R0201 at
+/// the replacement, as construction rejects `Pair { x: &mut *r, y: &mut *r }`.
+/// The reborrow is a child of the sibling's loan, so the borrow check at its
+/// creation sees no overlap; the store does. The site is the replacement and
+/// the related site the reborrow. It holds directly (`reborrowDirect`, and
+/// `reborrowThenWrite` with a later write), through a local (`reborrowLocal`),
+/// through a call's result (`reborrowCall`), in a record parameter
+/// (`reborrowParam`) and for a shared member (`reborrowShared`).
+/// `siblingReplacedAfter` is D-F2: the later replacement of `holder.x` does not
+/// make the overlap go away, so it rejects at the first replacement (it was
+/// R0203 at `holder.x = &mut c;`, conservatively, before). The twins reborrow
+/// a sibling without storing it into a member (held, read, passed to a call
+/// that does not return it, and the shared reborrow) and check; a write
+/// through the reborrow, `*r += 1i32`, is `Incomplete` and not pinned.
+const REBORROW: Case = Case {
+    text: r#"
+type Pair = { x: &mut i32; y: &mut i32 };
+type Holder = { first: &mut i32; second: &i32 };
+function same(r: &mut i32): &mut i32 { return r; }
+function peek(r: &mut i32): i32 { return *r; }
+function reborrowDirect(): i32 {
+  let mut a = 1i32;
+  let mut b = 2i32;
+  let mut holder = Pair { x: &mut a, y: &mut b };
+  holder.y = &mut *holder.x;
+  return 0i32;
+}
+function reborrowThenWrite(): i32 {
+  let mut a = 1i32;
+  let mut b = 2i32;
+  let mut holder = Pair { x: &mut a, y: &mut b };
+  holder.y = &mut *holder.x;
+  *holder.y += 1i32;
+  return 0i32;
+}
+function reborrowLocal(): i32 {
+  let mut a = 1i32;
+  let mut b = 2i32;
+  let mut holder = Pair { x: &mut a, y: &mut b };
+  let r = &mut *holder.x;
+  holder.y = r;
+  return 0i32;
+}
+function reborrowCall(): i32 {
+  let mut a = 1i32;
+  let mut b = 2i32;
+  let mut holder = Pair { x: &mut a, y: &mut b };
+  holder.y = same(&mut *holder.x);
+  return 0i32;
+}
+function reborrowParam(h: Pair): i32 {
+  let mut k = h;
+  k.y = &mut *k.x;
+  return 0i32;
+}
+function reborrowShared(): i32 {
+  let mut a = 1i32;
+  let b = 2i32;
+  let mut holder = Holder { first: &mut a, second: &b };
+  holder.second = &*holder.first;
+  return 0i32;
+}
+function siblingReplacedAfter(): i32 {
+  let mut a = 1i32;
+  let mut b = 2i32;
+  let mut holder = Pair { x: &mut a, y: &mut b };
+  let mut c = 3i32;
+  holder.y = &mut *holder.x;
+  holder.x = &mut c;
+  *holder.x += 1i32;
+  *holder.y += 1i32;
+  return 0i32;
+}
+function reborrowKept(): i32 {
+  let mut a = 1i32;
+  let mut b = 2i32;
+  let mut holder = Pair { x: &mut a, y: &mut b };
+  let r = &mut *holder.x;
+  return 0i32;
+}
+function reborrowRead(): i32 {
+  let mut a = 1i32;
+  let mut b = 2i32;
+  let mut holder = Pair { x: &mut a, y: &mut b };
+  let r = &mut *holder.x;
+  return *r;
+}
+function reborrowPassed(): i32 {
+  let mut a = 1i32;
+  let mut b = 2i32;
+  let mut holder = Pair { x: &mut a, y: &mut b };
+  return peek(&mut *holder.x);
+}
+function reborrowSharedKept(): i32 {
+  let mut a = 1i32;
+  let b = 2i32;
+  let mut holder = Holder { first: &mut a, second: &b };
+  let r = &*holder.first;
+  return *r;
+}
+"#,
+    typed_stats: (355194, 52171, 12),
+    graph: (GraphCompletion::SourceRejected, (215061, 8614, 6)),
+    roots: &[
+        Root {
+            name: "reborrowDirect",
+            want: Want::Rejected {
+                code: "R0201",
+                site: r####"holder.y = &mut *holder.x;"####,
+                related: r####"&mut *holder.x"####,
+            },
+            graph: None,
+            stats: (3230, 577, 5),
+        },
+        Root {
+            name: "reborrowThenWrite",
+            want: Want::Rejected {
+                code: "R0201",
+                site: r####"holder.y = &mut *holder.x;"####,
+                related: r####"&mut *holder.x"####,
+            },
+            graph: None,
+            stats: (3446, 684, 5),
+        },
+        Root {
+            name: "reborrowLocal",
+            want: Want::Rejected {
+                code: "R0201",
+                site: r####"holder.y = r;"####,
+                related: r####"&mut *holder.x"####,
+            },
+            graph: None,
+            stats: (3342, 625, 5),
+        },
+        Root {
+            name: "reborrowCall",
+            want: Want::Rejected {
+                code: "R0201",
+                site: r####"holder.y = same(&mut *holder.x);"####,
+                related: r####"&mut *holder.x"####,
+            },
+            graph: None,
+            stats: (3325, 629, 6),
+        },
+        Root {
+            name: "reborrowParam",
+            want: Want::Rejected {
+                code: "R0201",
+                site: r####"k.y = &mut *k.x;"####,
+                related: r####"&mut *k.x"####,
+            },
+            graph: None,
+            stats: (3392, 545, 4),
+        },
+        Root {
+            name: "reborrowShared",
+            want: Want::Rejected {
+                code: "R0201",
+                site: r####"holder.second = &*holder.first;"####,
+                related: r####"&*holder.first"####,
+            },
+            graph: None,
+            stats: (3230, 577, 5),
+        },
+        Root {
+            name: "siblingReplacedAfter",
+            want: Want::Rejected {
+                code: "R0201",
+                site: r####"holder.y = &mut *holder.x;"####,
+                related: r####"&mut *holder.x"####,
+            },
+            graph: None,
+            stats: (3898, 908, 5),
+        },
+        Root {
+            name: "reborrowKept",
+            want: Want::Checked,
+            graph: None,
+            stats: (3316, 611, 5),
+        },
+        Root {
+            name: "reborrowRead",
+            want: Want::Checked,
+            graph: None,
+            stats: (3331, 613, 5),
+        },
+        Root {
+            name: "reborrowPassed",
+            want: Want::Checked,
+            graph: None,
+            stats: (5762, 933, 6),
+        },
+        Root {
+            name: "reborrowSharedKept",
+            want: Want::Checked,
+            graph: None,
+            stats: (3332, 613, 5),
+        },
+    ],
+};
+
+#[test]
+fn member_replacement_through_a_sibling_reborrow_rejects_r0201() {
+    check(
+        "rfc_cases::o07::member_replacement_through_a_sibling_reborrow_rejects_r0201",
+        &REBORROW,
+    );
+}
+
 /// What a root or graph does at the caps the parent revision measured.
 pub(super) enum Parent {
     /// The check now costs more: the old caps give `ResourceLimit`.

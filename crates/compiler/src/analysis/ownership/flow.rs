@@ -430,6 +430,42 @@ fn liveness(
     Ok(live)
 }
 
+/// Ruling 11 Q3: a member replacement that leaves two members of one record
+/// pointing at the same place rejects at the replacement, as construction
+/// does. A reborrow of a sibling member (held directly, through a local or
+/// through a call's result) carries a loan on that member's slot. It is the
+/// sibling's loan reborrowed, so the borrow check at its creation does not see
+/// an overlap: the store does. A reborrow of the replaced member itself is not
+/// one.
+fn member_replacement_overlap(
+    slots: &[Local<'_>],
+    state: &[State],
+    target: Slot,
+    incoming: Slot,
+    site: NodeId,
+    budget: &mut Budget,
+) -> ResultOf<()> {
+    let owner = slots[target].owner;
+    if owner == target || !slots[owner].exclusive_member {
+        return Ok(());
+    }
+    let State::Initialized(staged) = &state[incoming] else {
+        return Ok(());
+    };
+    budget.step(staged.loans.len())?;
+    let siblings = owner + 1..owner + 1 + slots[owner].members;
+    for &loan in staged.loans.iter() {
+        if loan.source != target && siblings.contains(&loan.source) {
+            return Err(Stop::Rejected {
+                site,
+                related: loan.site,
+                kind: Conflict::Access,
+            });
+        }
+    }
+    Ok(())
+}
+
 fn overlap(slots: &[Local<'_>], a: Slot, b: Slot) -> bool {
     a < slots[b].storage(b).end && b < slots[a].storage(a).end
 }
@@ -4398,6 +4434,7 @@ pub(super) fn run<'a, 'g>(
                     if slots[target].members != slots[incoming].members {
                         return Err(Stop::Pending(node));
                     }
+                    member_replacement_overlap(&slots, &state, target, incoming, node, budget)?;
                     let storage = slots[target].storage(target);
                     budget.step(storage.len())?;
                     for member in storage {
