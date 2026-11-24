@@ -29,7 +29,15 @@ Named by the ticket. Parent `b6c93f30`, typed unchanged at 329,382 / 48,563 / 12
 | `local` | `Incomplete` at `retain(dst, &user)`, 2,292 / 118 / 3 | `SourceRejected`, R0202 at `retain(dst, &user)`, related `&user`, 3,726 / 332 / 6 |
 | whole graph | `Incomplete`, 189,463 / 4,237 / 5 | `SourceRejected`, 192,306 / 4,641 / 6 |
 
-Per-root attribution of the graph move: `forwarded` +1,400 work, +188 entries; `local` +1,434 work, +214 entries; the sum is +2,834 work and +402 entries, and the graph moved by +2,843 and +404. The remaining +9 work and +2 entries are not attributed to a root; the targeted queries are the per-root figures. Depth 6 is `local` (the exit check). The old caps (each root and the graph) give `ResourceLimit` (`rfc_cases::o09_pre_list_contents_caps_now_give_resource_limit`). `pre_equality_graph` of the row is unchanged and still gives `ResourceLimit`. Both modes, targeted query and ordinary graph root, exact and one short on each axis.
+Per-root attribution of the graph move (D2 (b)), measured from the graph, not from the targeted queries, with the module cut down to the roots named (`attr-parent.txt`, `attr-candidate.txt` in the logs; the parent is a `git worktree add` at `b6c93f30` with its own target directory, removed after). The base module (`type User`, the family declaration and `implement retain`, no other root) is 187,149 / 4,112 / 5 at the parent and now: the implementation root moves nothing. A root's share is the graph with it less the graph without it.
+
+| Root | Parent | Now | Move |
+| --- | --- | --- | --- |
+| `forwarded` | 914 / 30 | 2,321 / 219 | +1,407 work, +189 entries |
+| `local` | 1,400 / 95 | 2,836 / 310 | +1,436 work, +215 entries |
+| sum | 2,314 / 125 | 5,157 / 529 | +2,843 work, +404 entries |
+
+The sum is the move of the whole graph, 189,463 / 4,237 / 5 to 192,306 / 4,641 / 6, exactly. Depth is a maximum: `local` sets the new depth 6 (the module with only `forwarded` is depth 5; with only `local`, 6). The old caps (each root and the graph) give `ResourceLimit` (`rfc_cases::o09_pre_list_contents_caps_now_give_resource_limit`). `pre_equality_graph` of the row is unchanged and still gives `ResourceLimit`. Both modes, targeted query and ordinary graph root, exact and one short on each axis.
 
 ## Other tests (`rfc_cases::list_contents`), both modes, exact and one short, old caps give `ResourceLimit`
 
@@ -53,7 +61,7 @@ The list candidate is a free type screen (the List role, an element `&` of an ap
 | an extra `bool` beside the source | 1,917 / 49 / 3 (graph 188,322 / 4,150 / 5) | 1,991 / 52 / 3 (+74, the parameter's lookup only; graph 188,396 / 4,153 / 5) | `retain(dst, source, flag)` |
 | generic `Box<i32>`, owned `List<User>`, `List<&mut User>`, shared `&List<&User>`, a caller-owned list `&mut users` | unchanged | unchanged | the same |
 
-All four are under 150 work and at most two lookups, and the parent caps give `ResourceLimit`. They are listed by test name in the rule-1 note of `docs/agents/compiler-metering.md`. The siblings never reach a different outcome, so (a) to (d) hold.
+All four are under 150 work and at most two lookups, and the parent caps (each root's and the graph's, both asserted by `old_root_caps`) give `ResourceLimit`. They are listed by test name in the rule-1 note of `docs/agents/compiler-metering.md`. The siblings never reach a different outcome, so (a) to (d) hold.
 
 `lower()`'s first loop (which looks for a retained parameter to read `exclusive_source` from) keeps `retained_contents_of`, which never names a list. A list is never a destination that loop could use (its sources are never exclusive), so it would only pay a third lookup.
 
