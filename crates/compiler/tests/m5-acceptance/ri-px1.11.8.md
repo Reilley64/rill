@@ -26,6 +26,8 @@ Child of `ri-px1.11`, spec `ri-2s0`. Source: focused re-review `ci-b4b2` of `d87
 
 Other entry points: I read every public accessor of `TypedReport` and `ConversionReport`. None of the remaining ones carries a finding: roles, providers, `core_blockers()` and `result_use().pending()` are facts or blockers, and `conversion_provider` reads `registered`, not issues. No further entry point found.
 
+*Correction (2026-11-24, `ri-px1.11.15` (city bead `ci-d5gm`, re-review `ci-9qga`), 2B-F1).* "None of the remaining ones carries a finding" is wrong. `TypedReport::bodies().conversion_use(..).blockers` (`PairBlocker::Registration`) and `.goals()[..].state` (`Unresolved(ConversionPair(Registration))`) disclosed a rejected registration (R0310 to R0312) at a typed `ResourceLimit`, and `assert_typed_limit` passed it (reproduced by the re-review at 408 sampled work caps on the `rejected_registrations` source). C15b (`ri-px1.11.12`, merge `b082e6ac`) withholds them, with the other conversion-use verdicts and `OutputAgreement::Disagrees`. The residue C15b swept and did not withhold (`OrdinaryCall::outcome` `NoMatch` and `Ambiguous`, a conversion use's `InsufficientContext`) is recorded as known residue under `ri-qlh.9.1` (ruling 24 (2)). The line above is not edited.
+
 ## Helpers
 
 - `typed_limit_flaws` checks every list above (and the lists C8 added). `conversion_limit_flaws` also checks `family(..)` issues for every family declaration of the graph.
