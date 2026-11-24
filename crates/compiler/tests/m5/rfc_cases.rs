@@ -20,6 +20,10 @@ use compiler::analysis::scalars::{BodyOwner, Site};
 use compiler::analysis::typed::TypedCompletion;
 use compiler::loader::DeclarationKind;
 
+#[path = "rfc_cases/o07.rs"]
+mod o07;
+#[path = "rfc_cases/o07_forms.rs"]
+mod o07_forms;
 #[path = "rfc_cases/o12.rs"]
 mod o12;
 #[path = "rfc_cases/o20.rs"]
@@ -863,15 +867,17 @@ function overlap(): i32 {
 "#,
     outcome: Outcome::Receipt {
         typed_stats: (324564, 47874, 12),
-        graph: (GraphCompletion::Incomplete, (187028, 4183, 5)),
+        graph: (GraphCompletion::SourceRejected, (187450, 4378, 5)),
         pre_equality_graph: (186712, 4049, 3),
         roots: &[Root {
             name: "overlap",
-            want: Want::Incomplete {
-                blocker: r####"holder"####,
+            want: Want::Rejected {
+                code: "R0201",
+                site: r####"&value"####,
+                related: r####"&mut value"####,
             },
             graph: None,
-            stats: (2233, 88, 1),
+            stats: (2653, 282, 5),
         }],
     },
 }];
@@ -2695,10 +2701,52 @@ fn o01_call_field_equality_operands_check_and_siblings_keep_their_screens() {
 }
 
 #[test]
-fn o07_overlapping_reference_fields_are_not_yet_rejected() {
+fn o07_overlapping_reference_fields_reject_r0201() {
     run(
-        "rfc_cases::o07_overlapping_reference_fields_are_not_yet_rejected",
+        "rfc_cases::o07_overlapping_reference_fields_reject_r0201",
         O7,
+    );
+}
+
+/// Metering rule 11 (ri-pfxi's mandated flip): admitting the `&mut` member
+/// moved the O7 caps, so the caps before it, `overlap` 2,233/88/1 and the
+/// graph 187,028/4,183/5 (both `Incomplete` at `holder`), now give
+/// `ResourceLimit`. `m5-acceptance/ri-pfxi.md` holds the reason.
+#[test]
+fn o07_pre_admission_caps_now_give_resource_limit() {
+    installed(
+        "rfc_cases::o07_pre_admission_caps_now_give_resource_limit",
+        |request| {
+            fs::write(&request.entry, format!("{IMPORTS}\n{}", O7[0].text)).unwrap();
+            for test_mode in [false, true] {
+                let request = InstalledRequest {
+                    test_mode,
+                    ..request.clone()
+                };
+                let graph = loader::load_installed(request).unwrap();
+                let typed = analyze_typed(&graph, AnalysisLimits::default());
+                let receipt = typed.receipt().unwrap();
+                let module = graph
+                    .modules()
+                    .iter()
+                    .find(|m| m.key.origin == Origin::Application && m.key.path == "main.rill")
+                    .unwrap();
+                let overlap = module
+                    .declarations
+                    .iter()
+                    .find(|d| d.name.as_deref() == Some("overlap"))
+                    .unwrap();
+                let (old, _) = limits(statistics((2233, 88, 1)));
+                let limited = lower_body(&receipt, module, &overlap.id, old).unwrap();
+                assert_eq!(limited.completion(), Completion::ResourceLimit);
+                assert!(limited.mir().is_none() && limited.findings().is_empty());
+                let (old, _) = limits(statistics((187028, 4183, 5)));
+                assert_eq!(
+                    analyze_ownership(&receipt, old).completion(),
+                    GraphCompletion::ResourceLimit
+                );
+            }
+        },
     );
 }
 

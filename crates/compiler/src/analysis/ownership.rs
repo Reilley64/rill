@@ -2226,6 +2226,9 @@ struct Local<'g> {
     scalar_borrow_temporary: bool,
     /// A local `&mut i32` written `&mut record.field` (see `Build`).
     exclusive_field_reborrow: bool,
+    /// A record with an `&mut` member: its construction uses every member
+    /// (`Action::Init`), so loans staged into it conflict (RFC 0007 O7).
+    exclusive_member: bool,
     reference_option: Option<ReferenceOption>,
     moves: bool,
     cleanup: StorageCleanup<'g>,

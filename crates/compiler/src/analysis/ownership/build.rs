@@ -231,6 +231,12 @@ fn shared_record_reference(ty: &TypeTerm<'_>) -> bool {
         if matches!(referent.as_ref(), TypeTerm::Nominal { .. }))
 }
 
+/// The one exclusive member a record may hold (RFC 0007 O7): `&mut i32`.
+fn exclusive_i32_reference(ty: &TypeTerm<'_>) -> bool {
+    matches!(ty, TypeTerm::Reference { mutable: true, referent }
+        if matches!(referent.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32"))
+}
+
 fn shared_primitive_reference(ty: &TypeTerm<'_>) -> bool {
     matches!(ty, TypeTerm::Reference { mutable: false, .. }) && primitive_reference(ty)
 }
@@ -1026,6 +1032,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             custom_disposer: None,
             scalar_borrow_temporary: false,
             exclusive_field_reborrow: false,
+            exclusive_member: false,
             reference_option,
             moves,
             cleanup,
@@ -1522,6 +1529,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             custom_disposer,
             scalar_borrow_temporary: false,
             exclusive_field_reborrow: false,
+            exclusive_member: false,
             reference_option: None,
             moves: custom_disposer.is_some(),
             cleanup: StorageCleanup::End,
@@ -1542,8 +1550,14 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         let mut observed = false;
         for (projection, ty) in members {
             self.budget.step(1)?;
-            let reference_member = shared_primitive_reference(ty);
+            // Only a record field, and only without a custom disposer, which
+            // could read the member when it runs. Free facts: no charge.
+            let exclusive_member = custom_disposer.is_none()
+                && matches!(projection, Projection::Field(_))
+                && exclusive_i32_reference(ty);
+            let reference_member = shared_primitive_reference(ty) || exclusive_member;
             observed |= reference_member;
+            self.slots[root].exclusive_member |= exclusive_member;
             let cleanup = if owns_text(ty) {
                 StorageCleanup::Drop
             } else if reference_member || matches!(ty.as_ref(), TypeTerm::Primitive(_)) {
@@ -1556,7 +1570,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             } else {
                 return Err(Stop::Pending(node));
             };
-            let moves = cleanup != StorageCleanup::End;
+            let moves = cleanup != StorageCleanup::End || exclusive_member;
             self.slots[root].moves |= moves;
             self.slots.push(Local {
                 node,
@@ -1568,6 +1582,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 custom_disposer: None,
                 scalar_borrow_temporary: false,
                 exclusive_field_reborrow: false,
+                exclusive_member: false,
                 reference_option: None,
                 moves,
                 cleanup,
