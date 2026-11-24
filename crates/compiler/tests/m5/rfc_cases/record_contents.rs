@@ -45,15 +45,15 @@ fn record_view_reads_check() {
                     Case {
                         text: READS,
                         typed_stats: (333458, 48578, 12),
-                        graph: (GraphCompletion::Incomplete, (193340, 5239, 5)),
+                        graph: (GraphCompletion::Incomplete, (193433, 5239, 5)),
                         roots: &[
-                            checked("viaParam", (2093, 137, 3)),
-                            checked("second", (2093, 137, 3)),
-                            checked("bound", (2206, 193, 3)),
-                            checked("grouped", (2093, 137, 3)),
-                            checked("looped", (2153, 170, 5)),
-                            checked("named", (2699, 312, 4)),
-                            checked("late", (3240, 460, 4)),
+                            checked("viaParam", (2102, 137, 3)),
+                            checked("second", (2102, 137, 3)),
+                            checked("bound", (2225, 193, 3)),
+                            checked("grouped", (2102, 137, 3)),
+                            checked("looped", (2162, 170, 5)),
+                            checked("named", (2718, 312, 4)),
+                            checked("late", (3259, 460, 4)),
                         ],
                     }
                 }],
@@ -107,7 +107,7 @@ fn unsupported_record_reads_keep_their_parent_caps() {
                         Case {
                             text: NAMED_READS,
                             typed_stats: (325120, 47705, 12),
-                            graph: (GraphCompletion::SourceRejected, (186564, 4221, 5)),
+                            graph: (GraphCompletion::SourceRejected, (186573, 4221, 5)),
                             roots: &[
                                 Root {
                                     name: "text",
@@ -119,7 +119,7 @@ fn unsupported_record_reads_keep_their_parent_caps() {
                                     graph: None,
                                     stats: (1914, 55, 3),
                                 },
-                                checked("id", (1983, 82, 3)),
+                                checked("id", (1992, 82, 3)),
                             ],
                         }
                     },
@@ -256,23 +256,23 @@ fn stored_source_loans_reach_the_caller_view() {
                     Case {
                         text: FORMS,
                         typed_stats: (346876, 51370, 12),
-                        graph: (GraphCompletion::SourceRejected, (215791, 9533, 8)),
+                        graph: (GraphCompletion::SourceRejected, (215934, 9533, 8)),
                         roots: &[
                             checked("remember", (2810, 339, 3)),
-                            checked("grouped", (7066, 1199, 7)),
-                            checked("looped", (7201, 1277, 8)),
-                            checked("other", (7061, 1199, 6)),
-                            checked("groupedRead", (7061, 1199, 6)),
+                            checked("grouped", (7085, 1199, 7)),
+                            checked("looped", (7220, 1277, 8)),
+                            checked("other", (7080, 1199, 6)),
+                            checked("groupedRead", (7080, 1199, 6)),
                             rejected(
                                 "early",
                                 "R0203",
                                 r####"{\n    let second = Point { x: 9, y: 10 };\n    remember(&mut view, &second);\n  }"####,
                                 "&second",
-                                (4196, 862, 8),
+                                (4215, 862, 8),
                             ),
-                            checked("dead", (3049, 491, 4)),
+                            checked("dead", (3068, 491, 4)),
                             checked("unread", (7018, 1190, 8)),
-                            checked("released", (7195, 1271, 6)),
+                            checked("released", (7224, 1271, 6)),
                         ],
                     }
                 }],
@@ -408,16 +408,16 @@ fn empty_body_and_family_calls_with_record_contents() {
                         Case {
                             text: EMPTY_BODY,
                             typed_stats: (329185, 48511, 12),
-                            graph: (GraphCompletion::SourceRejected, (193577, 5558, 8)),
+                            graph: (GraphCompletion::SourceRejected, (193615, 5558, 8)),
                             roots: &[
                                 checked("remember", (2322, 138, 1)),
-                                checked("selected", (6269, 845, 6)),
+                                checked("selected", (6288, 845, 6)),
                                 rejected(
                                     "early",
                                     "R0203",
                                     r####"{\n    let second = Point { x: 9, y: 10 };\n    remember(&mut view, &second);\n  }"####,
                                     "&second",
-                                    (3888, 708, 8),
+                                    (3907, 708, 8),
                                 ),
                             ],
                         }
@@ -426,11 +426,11 @@ fn empty_body_and_family_calls_with_record_contents() {
                         Case {
                             text: FAMILY,
                             typed_stats: (328618, 48501, 12),
-                            graph: (GraphCompletion::Incomplete, (189426, 4282, 5)),
+                            graph: (GraphCompletion::Incomplete, (189445, 4282, 5)),
                             roots: &[incomplete(
                                 "selected",
                                 "remember(&mut view, &second)",
-                                (2663, 181, 3),
+                                (2682, 181, 3),
                             )],
                         }
                     },
@@ -726,3 +726,54 @@ const EXPECTED_SEQUENCE: [&str; 13] = [
     "export view.x",
     "end view; end second; end second; end second; end first; end first; end first",
 ];
+
+/// Metering rule 11, mandated charge (ri-px1.11.4, ST-3): a scalar field read
+/// through a named `&Record` probes `locals` through `charge_key`, so the
+/// roots below moved. Each parent cap (`eabe14ad`) now gives `ResourceLimit`,
+/// in both modes. `m5-acceptance/ri-px1.11.4.md` holds old, new and reason.
+#[test]
+fn record_roots_pre_charge_caps_now_give_resource_limit() {
+    installed(
+        "rfc_cases::record_contents::record_roots_pre_charge_caps_now_give_resource_limit",
+        |request| {
+            super::list_contents::old_root_caps(
+                &request,
+                &[
+                    (
+                        READS,
+                        &[
+                            ("viaParam", (2093, 137, 3)),
+                            ("second", (2093, 137, 3)),
+                            ("bound", (2206, 193, 3)),
+                            ("grouped", (2093, 137, 3)),
+                            ("looped", (2153, 170, 5)),
+                            ("named", (2699, 312, 4)),
+                            ("late", (3240, 460, 4)),
+                        ],
+                        (193340, 5239, 5),
+                    ),
+                    (NAMED_READS, &[("id", (1983, 82, 3))], (186564, 4221, 5)),
+                    (
+                        FORMS,
+                        &[
+                            ("grouped", (7066, 1199, 7)),
+                            ("looped", (7201, 1277, 8)),
+                            ("other", (7061, 1199, 6)),
+                            ("groupedRead", (7061, 1199, 6)),
+                            ("early", (4196, 862, 8)),
+                            ("dead", (3049, 491, 4)),
+                            ("released", (7195, 1271, 6)),
+                        ],
+                        (215791, 9533, 8),
+                    ),
+                    (
+                        EMPTY_BODY,
+                        &[("selected", (6269, 845, 6)), ("early", (3888, 708, 8))],
+                        (193577, 5558, 8),
+                    ),
+                    (FAMILY, &[("selected", (2663, 181, 3))], (189426, 4282, 5)),
+                ],
+            );
+        },
+    );
+}

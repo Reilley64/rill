@@ -433,7 +433,7 @@ expect shifted(Point { x: 2, y: 3 }).x == 3i32;
     // root's attributed work and entries removed (8913, 1139).
     outcome: Outcome::Receipt {
         typed_stats: (326220, 47997, 12),
-        graph: (GraphCompletion::Incomplete, (190759, 5183, 6)),
+        graph: (GraphCompletion::Incomplete, (190760, 5184, 6)),
         pre_equality_graph: (181846, 4044, 6),
         roots: &[
             Root {
@@ -452,7 +452,7 @@ expect shifted(Point { x: 2, y: 3 }).x == 3i32;
                 name: "expect",
                 want: Want::Checked,
                 graph: None,
-                stats: (8913, 1139, 6),
+                stats: (8914, 1140, 6),
             },
         ],
     },
@@ -480,7 +480,7 @@ expect selected() == 9i32;
     // attributed work and entries removed (8410, 961).
     outcome: Outcome::Receipt {
         typed_stats: (326933, 48161, 12),
-        graph: (GraphCompletion::Incomplete, (190814, 5004, 6)),
+        graph: (GraphCompletion::Incomplete, (190833, 5004, 6)),
         pre_equality_graph: (182404, 4043, 6),
         roots: &[
             Root {
@@ -493,13 +493,13 @@ expect selected() == 9i32;
                 name: "selected",
                 want: Want::Checked,
                 graph: None,
-                stats: (6373, 855, 6),
+                stats: (6392, 855, 6),
             },
             Root {
                 name: "expect",
                 want: Want::Checked,
                 graph: None,
-                stats: (8410, 961, 6),
+                stats: (8429, 961, 6),
             },
         ],
     },
@@ -895,7 +895,7 @@ function poison(slot: &mut &Point): void {
     // pins it. `pre_equality_graph` removes the expectation root (8494, 1003).
     outcome: Outcome::Receipt {
         typed_stats: (328745, 48394, 12),
-        graph: (GraphCompletion::SourceRejected, (192713, 5271, 6)),
+        graph: (GraphCompletion::SourceRejected, (192732, 5271, 6)),
         pre_equality_graph: (184219, 4268, 6),
         roots: &[
             Root {
@@ -908,13 +908,13 @@ function poison(slot: &mut &Point): void {
                 name: "selected",
                 want: Want::Checked,
                 graph: None,
-                stats: (6429, 883, 6),
+                stats: (6448, 883, 6),
             },
             Root {
                 name: "expect",
                 want: Want::Checked,
                 graph: None,
-                stats: (8494, 1003, 6),
+                stats: (8513, 1003, 6),
             },
             Root {
                 name: "poison",
@@ -981,13 +981,13 @@ function extract(users: List<&User>): Option<&User> {
 "#,
         outcome: Outcome::Receipt {
             typed_stats: (324131, 47845, 12),
-            graph: (GraphCompletion::Incomplete, (188037, 4612, 6)),
+            graph: (GraphCompletion::Incomplete, (188047, 4612, 6)),
             pre_equality_graph: (187721, 4478, 3),
             roots: &[Root {
                 name: "extract",
                 want: Want::Checked,
                 graph: None,
-                stats: (3539, 513, 6),
+                stats: (3549, 513, 6),
             }],
         },
     },
@@ -999,7 +999,7 @@ function slot(users: List<&User>): Option<&&User> { return get(&users, 0u64); }
 "#,
         outcome: Outcome::Receipt {
             typed_stats: (325899, 48063, 12),
-            graph: (GraphCompletion::SourceRejected, (187315, 4363, 5)),
+            graph: (GraphCompletion::SourceRejected, (187325, 4363, 5)),
             pre_equality_graph: (186999, 4229, 5),
             roots: &[Root {
                 name: "slot",
@@ -1009,7 +1009,7 @@ function slot(users: List<&User>): Option<&&User> { return get(&users, 0u64); }
                     related: "get(&users, 0u64)",
                 },
                 graph: None,
-                stats: (3059, 267, 5),
+                stats: (3069, 267, 5),
             }],
         },
     },
@@ -1021,7 +1021,7 @@ function indexed(users: List<&User>, index: u64): Option<&&User> { return get(&u
 "#,
         outcome: Outcome::Receipt {
             typed_stats: (325821, 48013, 12),
-            graph: (GraphCompletion::SourceRejected, (187398, 4374, 5)),
+            graph: (GraphCompletion::SourceRejected, (187408, 4374, 5)),
             pre_equality_graph: (187082, 4240, 5),
             roots: &[Root {
                 name: "indexed",
@@ -1031,7 +1031,7 @@ function indexed(users: List<&User>, index: u64): Option<&&User> { return get(&u
                     related: "get(&users, index)",
                 },
                 graph: None,
-                stats: (3081, 278, 5),
+                stats: (3091, 278, 5),
             }],
         },
     },
@@ -1087,7 +1087,7 @@ function discarded(users: List<&User>): void { get(&users, 0u64); }
 "#,
     outcome: Outcome::Receipt {
         typed_stats: (342897, 50941, 12),
-        graph: (GraphCompletion::Incomplete, (191091, 4248, 5)),
+        graph: (GraphCompletion::Incomplete, (191141, 4248, 5)),
         pre_equality_graph: (190775, 4114, 3),
         roots: &[
             Root {
@@ -1096,7 +1096,7 @@ function discarded(users: List<&User>): void { get(&users, 0u64); }
                     blocker: "get(&users, index + 1u64)",
                 },
                 graph: None,
-                stats: (2009, 93, 2),
+                stats: (2019, 93, 2),
             },
             Root {
                 name: "grouped",
@@ -1104,7 +1104,7 @@ function discarded(users: List<&User>): void { get(&users, 0u64); }
                     blocker: "get(&users, (0u64))",
                 },
                 graph: None,
-                stats: (2003, 89, 2),
+                stats: (2013, 89, 2),
             },
             Root {
                 name: "view",
@@ -1120,13 +1120,13 @@ function discarded(users: List<&User>): void { get(&users, 0u64); }
                     blocker: "first(&users)",
                 },
                 graph: None,
-                stats: (2003, 89, 2),
+                stats: (2013, 89, 2),
             },
             Root {
                 name: "bound",
                 want: Want::Incomplete { blocker: "found" },
                 graph: None,
-                stats: (2002, 89, 1),
+                stats: (2012, 89, 1),
             },
             Root {
                 name: "discarded",
@@ -1134,7 +1134,7 @@ function discarded(users: List<&User>): void { get(&users, 0u64); }
                     blocker: "get(&users, 0u64)",
                 },
                 graph: None,
-                stats: (2011, 89, 3),
+                stats: (2021, 89, 3),
             },
         ],
     },
@@ -2491,7 +2491,7 @@ function looped(flag: bool): bool { while (flag) { return mk().x == 2i32; } retu
 "#,
     outcome: Outcome::Receipt {
         typed_stats: (340057, 48998, 12),
-        graph: (GraphCompletion::Incomplete, (197917, 5950, 6)),
+        graph: (GraphCompletion::Incomplete, (197923, 5956, 6)),
         pre_equality_graph: (193367, 4510, 5),
         roots: &[
             Root {
@@ -2512,25 +2512,25 @@ function looped(flag: bool): bool { while (flag) { return mk().x == 2i32; } retu
                 name: "bare",
                 want: Want::Checked,
                 graph: None,
-                stats: (5192, 547, 4),
+                stats: (5193, 548, 4),
             },
             Root {
                 name: "grouped",
                 want: Want::Checked,
                 graph: None,
-                stats: (5197, 547, 5),
+                stats: (5198, 548, 5),
             },
             Root {
                 name: "both",
                 want: Want::Checked,
                 graph: None,
-                stats: (5705, 687, 4),
+                stats: (5707, 689, 4),
             },
             Root {
                 name: "viaLocal",
                 want: Want::Checked,
                 graph: None,
-                stats: (5282, 593, 4),
+                stats: (5283, 594, 4),
             },
             Root {
                 name: "bound",
@@ -2558,7 +2558,7 @@ function looped(flag: bool): bool { while (flag) { return mk().x == 2i32; } retu
                 name: "looped",
                 want: Want::Checked,
                 graph: None,
-                stats: (5493, 720, 6),
+                stats: (5494, 721, 6),
             },
         ],
     },
@@ -3785,6 +3785,165 @@ fn o19_neighbours_reject_an_earlier_ending_source() {
                     ],
                 );
             }
+        },
+    );
+}
+
+/// ST-3 (review ci-0mdr, ri-px1.11.4): a scalar field read through a named
+/// `&Record` probes `locals`, a map keyed by a `DeclarationId` that ends in a
+/// module path, so each probe costs `path.len() + 1` (metering rule 3,
+/// `charge_key`), not one. `afterLocals` has four locals, so three probes.
+const FIELD_THROUGH_REFERENCE: &str = r####"
+type Point = { x: i32; y: i32 };
+function viaParam(view: &Point): i32 { return view.x; }
+function afterLocals(view: &Point): i32 {
+  let a = 1i32;
+  let b = 2i32;
+  let c = 3i32;
+  return view.x;
+}
+"####;
+
+#[test]
+fn field_through_reference_charges_its_local_probe() {
+    installed(
+        "rfc_cases::field_through_reference_charges_its_local_probe",
+        |request| {
+            o12::check_cases(
+                &request,
+                &[const {
+                    o12::Case {
+                        text: FIELD_THROUGH_REFERENCE,
+                        typed_stats: (325383, 47792, 12),
+                        graph: (GraphCompletion::Incomplete, (187332, 4397, 5)),
+                        roots: &[
+                            record_contents::checked("viaParam", (2004, 88, 3)),
+                            record_contents::checked("afterLocals", (2307, 232, 3)),
+                        ],
+                    }
+                }],
+            );
+            list_contents::old_root_caps(
+                &request,
+                &[(
+                    FIELD_THROUGH_REFERENCE,
+                    &[("viaParam", (1995, 88, 3)), ("afterLocals", (2278, 232, 3))],
+                    (187294, 4397, 5),
+                )],
+            );
+        },
+    );
+}
+
+/// ST-8 (review ci-0mdr, ri-px1.11.4): the scratch `Vec` of an equality with
+/// two projected call results reserves one entry per result (metering rule 4).
+const CALL_FIELD_SCRATCH: &str = r####"
+type Point = { x: i32; y: i32 };
+function a(): Point { return Point { x: 2i32, y: 3i32 }; }
+function b(): Point { return Point { x: 2i32, y: 3i32 }; }
+function same(): bool { return a().x == b().x; }
+function one(): bool { return a().x == 2i32; }
+function plain(n: i32): bool { return n == 2i32; }
+"####;
+
+#[test]
+fn call_field_equality_reserves_its_scratch() {
+    installed(
+        "rfc_cases::call_field_equality_reserves_its_scratch",
+        |request| {
+            o12::check_cases(
+                &request,
+                &[const {
+                    o12::Case {
+                        text: CALL_FIELD_SCRATCH,
+                        typed_stats: (329736, 48162, 12),
+                        graph: (GraphCompletion::Incomplete, (191480, 5128, 5)),
+                        roots: &[
+                            record_contents::checked("a", (2407, 176, 4)),
+                            record_contents::checked("b", (2407, 176, 4)),
+                            record_contents::checked("same", (7896, 756, 4)),
+                            record_contents::checked("one", (4973, 438, 4)),
+                            record_contents::checked("plain", (2110, 152, 4)),
+                        ],
+                    }
+                }],
+            );
+            list_contents::old_root_caps(
+                &request,
+                &[(
+                    CALL_FIELD_SCRATCH,
+                    &[("same", (7894, 754, 4)), ("one", (4972, 437, 4))],
+                    (191477, 5125, 5),
+                )],
+            );
+        },
+    );
+}
+
+/// Metering rule 11, mandated charges (ri-px1.11.4, ST-3 and ST-8): a scalar
+/// field read through a named `&Record` and the insert of a `List<&Record>`
+/// parameter probe `locals` through `charge_key`, and an equality with a
+/// projected call result reserves its scratch. The roots below moved; each
+/// parent cap (`eabe14ad`) now gives `ResourceLimit`, in both modes.
+/// `m5-acceptance/ri-px1.11.4.md` holds old, new and reason.
+#[test]
+fn o_rows_pre_charge_caps_now_give_resource_limit() {
+    installed(
+        "rfc_cases::o_rows_pre_charge_caps_now_give_resource_limit",
+        |request| {
+            list_contents::old_root_caps(
+                &request,
+                &[
+                    (
+                        O1[0].text,
+                        &[("expect", (8913, 1139, 6))],
+                        (190759, 5183, 6),
+                    ),
+                    (
+                        O2[0].text,
+                        &[("selected", (6373, 855, 6)), ("expect", (8410, 961, 6))],
+                        (190814, 5004, 6),
+                    ),
+                    (
+                        O8[0].text,
+                        &[("selected", (6429, 883, 6)), ("expect", (8494, 1003, 6))],
+                        (192713, 5271, 6),
+                    ),
+                    (
+                        O10[0].text,
+                        &[("extract", (3539, 513, 6))],
+                        (188037, 4612, 6),
+                    ),
+                    (O10[1].text, &[("slot", (3059, 267, 5))], (187315, 4363, 5)),
+                    (
+                        O10[2].text,
+                        &[("indexed", (3081, 278, 5))],
+                        (187398, 4374, 5),
+                    ),
+                    (
+                        O10_LOOKUP_SIBLINGS[0].text,
+                        &[
+                            ("computed", (2009, 93, 2)),
+                            ("grouped", (2003, 89, 2)),
+                            ("head", (2003, 89, 2)),
+                            ("bound", (2002, 89, 1)),
+                            ("discarded", (2011, 89, 3)),
+                        ],
+                        (191091, 4248, 5),
+                    ),
+                    (
+                        CALL_FIELD_EQUALITY[0].text,
+                        &[
+                            ("bare", (5192, 547, 4)),
+                            ("grouped", (5197, 547, 5)),
+                            ("both", (5705, 687, 4)),
+                            ("viaLocal", (5282, 593, 4)),
+                            ("looped", (5493, 720, 6)),
+                        ],
+                        (197917, 5950, 6),
+                    ),
+                ],
+            );
         },
     );
 }
