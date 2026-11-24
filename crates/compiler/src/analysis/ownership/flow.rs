@@ -436,7 +436,8 @@ fn liveness(
 /// through a call's result) carries a loan on that member's slot. It is the
 /// sibling's loan reborrowed, so the borrow check at its creation does not see
 /// an overlap: the store does. A reborrow of the replaced member itself is not
-/// one.
+/// one. Only a sibling reference member counts: a value member cannot point at
+/// the same place as the replaced reference.
 fn member_replacement_overlap(
     slots: &[Local<'_>],
     state: &[State],
@@ -455,7 +456,10 @@ fn member_replacement_overlap(
     budget.step(staged.loans.len())?;
     let siblings = owner + 1..owner + 1 + slots[owner].members;
     for &loan in staged.loans.iter() {
-        if loan.source != target && siblings.contains(&loan.source) {
+        if loan.source != target
+            && siblings.contains(&loan.source)
+            && slots[loan.source].reference_member
+        {
             return Err(Stop::Rejected {
                 site,
                 related: loan.site,

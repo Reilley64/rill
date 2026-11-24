@@ -26,6 +26,8 @@ mod list_contents;
 mod o07;
 #[path = "rfc_cases/o07_forms.rs"]
 mod o07_forms;
+#[path = "rfc_cases/o07_self_borrow.rs"]
+mod o07_self_borrow;
 #[path = "rfc_cases/o12.rs"]
 mod o12;
 #[path = "rfc_cases/o20.rs"]
