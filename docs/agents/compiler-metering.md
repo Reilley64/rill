@@ -73,7 +73,7 @@ A determination reused across revisits is valid only while every premise it used
 
 `Incomplete` means a supported analysis reached an unsupported shape. `ResourceLimit` means a cap ran out. `SourceRejected` means the source carries a finding (an `R`-code diagnostic). A test that asserts "not `Checked`" accepts all three and hides a swap between them.
 
-- **Check:** every assertion names the expected outcome. An `Incomplete` assertion also names the blocker span (`blocked_at`). A `SourceRejected` assertion also names the finding. A `ResourceLimit` assertion also asserts that no MIR and no finding is published. Call `assert_graph_limit`, `assert_body_limit` or `assert_typed_limit` from `crates/compiler/tests/support/limit.rs` (a typed report: no receipt and no body finding); do not write the assertion by hand.
+- **Check:** every assertion names the expected outcome. An `Incomplete` assertion also names the blocker span (`blocked_at`). A `SourceRejected` assertion also names the finding. A `ResourceLimit` assertion also asserts that no MIR and no finding is published. Call `assert_graph_limit`, `assert_body_limit` or `assert_typed_limit` from `crates/compiler/tests/support/limit.rs` (a typed report: no receipt and no finding in any list it publishes); do not write the assertion by hand.
 - **Example:** `62243cb3` asserts the blocker site of each cyclic shape, so a different `Incomplete` fails.
 
 ## 9. Tests assert the whole sequence

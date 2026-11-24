@@ -843,7 +843,11 @@ fn one_budget_leaves_unfinished_work_unproved() {
             let exact = analyze_ownership(receipt, limits);
             assert_eq!(exact.statistics(), stats);
             assert_eq!(exact.completion(), report.completion());
-            assert_eq!(exact.findings().len(), 1);
+            // Late exhaustion: one short publishes no finding (below).
+            let [finding] = exact.findings() else {
+                panic!("{:?}", exact.findings())
+            };
+            assert_eq!(finding.code(), "R0200");
             assert_eq!(
                 exact
                     .roots()
@@ -1144,14 +1148,50 @@ function closed(other: string): void {{ dispose(other); }}
                 Completion::SourceRejected
             );
             assert!(root(&full, b"function closed(").ordinary_mir().is_some());
+            let stats = full.statistics();
+            let exact = AnalysisLimits {
+                max_work: stats.work,
+                max_entries: stats.entries,
+                max_depth: stats.max_depth,
+            };
+            let at = analyze_ownership(receipt, exact);
+            assert_eq!(at.completion(), GraphCompletion::SourceRejected);
+            assert_eq!(at.statistics(), stats);
+            let [finding] = at.findings() else {
+                panic!("{:?}", at.findings())
+            };
+            assert_eq!(finding.code(), "R0200");
+            assert_eq!(
+                finding.site.span.start(),
+                source.find("again = v").unwrap() + "again = ".len()
+            );
+            assert_eq!(
+                finding.related.span.start(),
+                source.find("first = v").unwrap() + "first = ".len()
+            );
+            for short in [
+                AnalysisLimits {
+                    max_work: exact.max_work - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_entries: exact.max_entries - 1,
+                    ..exact
+                },
+                AnalysisLimits {
+                    max_depth: exact.max_depth - 1,
+                    ..exact
+                },
+            ] {
+                crate::limit::assert_graph_limit(&analyze_ownership(receipt, short));
+            }
             let short = analyze_ownership(
                 receipt,
                 AnalysisLimits {
-                    max_entries: full.statistics().entries - 1,
+                    max_entries: stats.entries - 1,
                     ..Default::default()
                 },
             );
-            crate::limit::assert_graph_limit(&short);
             let pending = root(&short, b"function combined(");
             assert_eq!(pending.completion(), Completion::ResourceLimit);
             assert_eq!(

@@ -379,7 +379,7 @@ fn check_sources(entry: &Path) {
                 },
             ] {
                 let short_report = analyze_typed(&graph, short);
-                crate::limit::assert_typed_limit_keeping_body_findings(&short_report);
+                crate::limit::assert_typed_limit(&short_report);
             }
             // Rule 1 exception (chief of staff, 2026-11-23, ri-2s0.10): these
             // three siblings pay for their rejection before no paid fact can
