@@ -123,9 +123,15 @@ impl<'a, 'g> Check<'a, 'g> {
         {
             return Ok(None);
         }
-        // A copy that was written or lent already is rejected by the scan below, and the
-        // parent rejected it here for free, so no mutability lookup is paid first.
-        if written.is_some_and(|w| std::ptr::eq(w, id)) {
+        // A copy of a local source that was written or lent already is rejected by the scan
+        // below, and the parent rejected it here for free, so no lookup is paid first. A
+        // parameter source keeps the check after the lookup, so its pins do not move.
+        if written.is_some_and(|w| std::ptr::eq(w, id))
+            && !self.wildcard_sources.iter().any(|(root, path)| {
+                path.is_empty()
+                    && matches!(root, Root::Local(p) if p.kind == DeclarationKind::Parameter)
+            })
+        {
             return Ok(None);
         }
         let Some((name, parent)) = self.written_binding(id)? else {
@@ -136,6 +142,10 @@ impl<'a, 'g> Check<'a, 'g> {
         let NodeKind::Binding { mutable } = nodes[parent].kind else {
             return Ok(None);
         };
+        // A mutable copy that was written or lent already: the scan below would say so.
+        if mutable && written.is_some_and(|w| std::ptr::eq(w, id)) {
+            return Ok(None);
+        }
         let (pattern, init) = (
             nodes[parent].children[0],
             *nodes[parent].children.last().unwrap(),
