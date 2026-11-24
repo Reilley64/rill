@@ -113,6 +113,45 @@ fn a_selected_clause_determines_open_output_before_checking_equality() {
     assert!(report.node(module, node).unwrap().is_none());
 }
 
+/// Ruling 23 (item 1) and C15 item 1: an ordinary call's `OutputAgreement::Disagrees`
+/// is a type mismatch (R-code) at the use. The exact run publishes it; no limited run does.
+#[test]
+fn a_limited_generics_report_publishes_no_output_disagreement() {
+    let fixture = Fixture::new(
+        "function inner<T,E>(value: T): E;
+         implement<U> inner(value: U): i32 { return 1i32; }
+         function outer<T,E>(value: T): E;
+         implement<U,E> outer(value: U): E where inner(U,E) { while (true) {} }
+         let pending: bool = outer(true);",
+    );
+    let graph = fixture.load();
+    let ordinary = analyze_ordinary(&graph, AnalysisLimits::default());
+    let exact = analyze_generics(&ordinary, AnalysisLimits::default());
+    assert!(
+        limit::conversion_use_flaws(&graph, &exact).contains(&"publishes an output disagreement"),
+        "the exact run publishes the disagreement"
+    );
+    let stats = exact.statistics();
+    let mut limited = 0;
+    for max_work in 0..stats.work {
+        let report = analyze_generics(
+            &ordinary,
+            AnalysisLimits {
+                max_work,
+                max_entries: stats.entries,
+                max_depth: stats.max_depth,
+            },
+        );
+        if report.completion() == compiler::analysis::scalars::ScalarFailureKind::ResourceLimit {
+            limited += 1;
+            let flaws = limit::conversion_use_flaws(&graph, &report);
+            assert!(flaws.is_empty(), "{flaws:?} at {:?}", report.statistics());
+            limit::assert_generics_limit(&report);
+        }
+    }
+    assert!(limited > 0);
+}
+
 #[test]
 fn a_free_source_output_resumes_a_dependency_without_setting_its_output() {
     use compiler::analysis::generics::OutputAgreement;

@@ -269,8 +269,18 @@ fn pair_queries_keep_destination_bound_variables_exact_and_filter_receivers() {
             },
         )
         .unwrap();
-    assert_eq!(low.completion, Completion::ResourceLimit);
-    assert!(low.outcome.is_none());
+    limit::assert_pair_limit(&low);
+    // Every work cap below the exact one: a limited pair report names no
+    // outcome and no disagreement, and the exact answer is unchanged.
+    let exact = report.query_pair(id, request, limits).unwrap();
+    for max_work in 0..exact.statistics.work {
+        let short = report
+            .query_pair(id, request, AnalysisLimits { max_work, ..limits })
+            .unwrap();
+        if short.completion == Completion::ResourceLimit {
+            limit::assert_pair_limit(&short);
+        }
+    }
 
     request.destination = &fields[2].ty;
     request.source = &fields[2].ty;
@@ -589,8 +599,7 @@ fn a_selected_nested_pair_determines_error_and_a_cycle_cannot_guess_it() {
             },
         )
         .unwrap();
-    assert_eq!(growing.completion, Completion::ResourceLimit);
-    assert!(growing.outcome.is_none() && growing.selected_error.is_none());
+    limit::assert_pair_limit(&growing);
     assert!(growing.goals().iter().all(|g| g.cycle.is_empty()));
 }
 

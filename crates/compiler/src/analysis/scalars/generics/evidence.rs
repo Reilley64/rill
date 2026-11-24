@@ -139,9 +139,98 @@ pub(in crate::analysis) struct Evidence<'g> {
     assumptions: Vec<GoalId>,
 }
 
+impl<'g> GoalFacts<'g> {
+    /// Whether the goal says a finding exists (metering rule 8). With no
+    /// premise: the `Registration` blocker (a rejected registration, R0310 to
+    /// R0312) on any goal; and, on the goal of a conversion use, `Disproved`
+    /// and a `NoMatch`, `NumericGap` or `Ambiguous` outcome, which
+    /// `conversion_failure` publishes as a finding. A `Disproved` goal that is
+    /// not a use's own is a candidate's eliminated requirement, not a finding.
+    fn discloses_finding(&self, conversion_use: bool) -> bool {
+        use crate::analysis::conversions::{PairBlocker, PairOutcome};
+        self.premise.is_none()
+            && (self.state
+                == GoalState::Unresolved(GoalBlocker::ConversionPair(PairBlocker::Registration))
+                || conversion_use
+                    && (self.state == GoalState::Disproved
+                        || matches!(
+                            self.conversion_outcome,
+                            Some(
+                                PairOutcome::NoMatch
+                                    | PairOutcome::NumericGap
+                                    | PairOutcome::Ambiguous
+                            )
+                        )))
+    }
+
+    /// No state `discloses_finding` names. Every field is named, so a new one
+    /// fails to compile until it is decided here (metering rule 8).
+    fn publishes_nothing_at_limit(&self, conversion_use: bool) -> bool {
+        let Self {
+            state: _state,
+            premise: _premise,
+            conversion_outcome: _conversion_outcome,
+            // Identity, facts, proof structure and the dependencies they name.
+            id: _id,
+            judgment: _judgment,
+            site: _site,
+            source: _source,
+            routes: _routes,
+            arrow_origin: _arrow_origin,
+            argument_pair: _argument_pair,
+            hypothetical: _hypothetical,
+            selection: _selection,
+            conversion_parameter: _conversion_parameter,
+            conversion_protection: _conversion_protection,
+            conversion_provider: _conversion_provider,
+            output: _output,
+            defaults: _defaults,
+            equalities: _equalities,
+            assumptions: _assumptions,
+            dependencies: _dependencies,
+            cycle: _cycle,
+        } = self;
+        !self.discloses_finding(conversion_use)
+    }
+
+    fn withhold_findings(&mut self, conversion_use: bool) {
+        if self.discloses_finding(conversion_use) {
+            self.state = GoalState::Unresolved(GoalBlocker::ResourceLimit);
+            if conversion_use {
+                self.conversion_outcome = None;
+            }
+        }
+    }
+}
+
 impl<'g> Evidence<'g> {
     pub(in crate::analysis) fn goals(&self) -> &[GoalFacts<'g>] {
         &self.goals
+    }
+
+    /// A `ResourceLimit` report publishes no goal state that discloses a
+    /// finding (metering rule 8). `conversion_uses` are the goals of the
+    /// conversion uses, whose verdict is a finding.
+    pub(in crate::analysis) fn withhold_findings(&mut self, conversion_uses: &[&GoalId]) {
+        for (index, goal) in self.goals.iter_mut().enumerate() {
+            goal.withhold_findings(conversion_uses.iter().any(|id| id.index == index));
+        }
+    }
+
+    pub(in crate::analysis) fn publishes_nothing_at_limit(
+        &self,
+        conversion_uses: &[&GoalId],
+    ) -> bool {
+        let Self {
+            goals,
+            // Identity, the proof's equations and assumptions: not findings.
+            report: _report,
+            output_equations: _output_equations,
+            assumptions: _assumptions,
+        } = self;
+        goals.iter().enumerate().all(|(index, goal)| {
+            goal.publishes_nothing_at_limit(conversion_uses.iter().any(|id| id.index == index))
+        })
     }
 
     pub(super) fn uses_current_assumptions(&self, goal: &GoalFacts<'g>) -> bool {

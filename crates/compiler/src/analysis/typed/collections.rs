@@ -31,7 +31,24 @@ impl CollectionCore<'_> {
         protection
             .iter()
             .flatten()
-            .all(|scope| scope.coverage != OwnershipCoverage::Overlap)
+            .all(CollectionProtection::publishes_nothing_at_limit)
+    }
+}
+
+impl CollectionProtection<'_> {
+    /// No `Overlap` verdict. Every field is named, so a new one fails to
+    /// compile until it is decided here (metering rule 8).
+    fn publishes_nothing_at_limit(&self) -> bool {
+        let Self {
+            coverage,
+            // The scope's identity, operation and provider: facts.
+            family: _family,
+            owner: _owner,
+            operation: _operation,
+            provider: _provider,
+            bridge: _bridge,
+        } = self;
+        *coverage != OwnershipCoverage::Overlap
     }
 }
 

@@ -15,7 +15,8 @@
 //! finding. Each `*_flaws` function calls it when the accessor list finds
 //! nothing, and reports a field the list does not name (metering rule 8,
 //! chief ruling 19). The body report, `GenericReport`, `OrdinaryAnalysis`,
-//! `TypedReport`, `GraphReport` and `ConversionReport` have one.
+//! `TypedReport`, `GraphReport`, `ConversionReport`, `SelectionReport` and
+//! `PairReport` have one.
 //!
 //! - graph report (`graph_limit_flaws`): `findings()`; `mir()` and
 //!   `ordinary_mir()` of every root and active disposer.
@@ -35,9 +36,35 @@
 //! - generics report and `ConversionReport::bodies` (`generics_limit_flaws`):
 //!   `findings()`, `conditional_findings()`, `declaration_issues()`,
 //!   `annotations().findings()`.
+//! - selection report (`selection_limit_flaws`): `outcome`.
+//! - pair report (`pair_limit_flaws`): `outcome`, `selected_signature`,
+//!   `selected_error`, `error_agreement` `Disagrees`, the `Registration`
+//!   blocker and a `Registration` goal state.
 //! - conversion report (`conversion_limit_flaws`): `type_facts()` findings,
 //!   declarations, uses and obligations; `header_metadata(..)`; `family(..)`
 //!   issues.
+//!
+//! Finding-disclosing variants (a verdict that cites a finding is a finding,
+//! ruling 19 (1)), by what the accessor returns. At `ResourceLimit` each reads
+//! as undecided; `conversion_use_flaws` and the goal check in
+//! `generics_limit_flaws` name them:
+//!
+//! - `GenericReport::conversion_use(..)` of a use with no premise:
+//!   `outcome` `NoMatch`, `NumericGap` or `Ambiguous` (R0311 to R0313 family
+//!   findings at the use); `error_agreement` `Disagrees` (R0313);
+//!   `result_agreement` and `descriptor_agreement` `Some(false)` (a type
+//!   mismatch); `blockers` carrying `PairBlocker::Registration` (a rejected
+//!   registration, R0310 to R0312).
+//! - `GenericReport::goals()` and `goal(..)`, with no premise: state
+//!   `Unresolved(ConversionPair(Registration))`; on the goal of a conversion
+//!   use, state `Disproved` and `conversion_outcome` `NoMatch`, `NumericGap` or
+//!   `Ambiguous`. (A `Disproved` goal that is not a use's own is a candidate's
+//!   eliminated requirement: not withheld.)
+//! - `GenericReport::ordinary_call(..)` and `ordinary_value(..)`:
+//!   `output_agreement` `Disagrees` (a type mismatch, conditional or not).
+//! - Not withheld, because they are facts and not findings: a family's
+//!   `duplicate_keys` (`ri-q9lj`), the partial facts of an ordinary or typed
+//!   report.
 //!
 //! Not finding-like, so not checked: `core_blockers()`, `result_use().pending()`
 //! (blockers), and the partial facts an ordinary or typed report keeps
@@ -45,9 +72,13 @@
 #![allow(dead_code)]
 
 use compiler::analysis::AnalysisLimits;
-use compiler::analysis::conversions::ConversionReport;
-use compiler::analysis::generics::GenericReport;
-use compiler::analysis::ordinary::{Completion as OrdinaryCompletion, OrdinaryAnalysis};
+use compiler::analysis::conversions::{
+    ConversionReport, ErrorAgreement, PairBlocker, PairOutcome, PairReport,
+};
+use compiler::analysis::generics::{GenericReport, GoalBlocker, GoalState, OutputAgreement};
+use compiler::analysis::ordinary::{
+    Completion as OrdinaryCompletion, OrdinaryAnalysis, SelectionReport,
+};
 use compiler::analysis::ownership::{Completion, GraphCompletion, GraphReport, Report};
 use compiler::analysis::scalars::ScalarFailureKind;
 use compiler::analysis::typed::{
@@ -123,6 +154,9 @@ pub(crate) fn typed_limit_flaws(report: &TypedReport<'_>) -> Vec<&'static str> {
     if !bodies.conditional_findings().is_empty() {
         flaws.push("publishes a conditional finding");
     }
+    if registration_goal(bodies) {
+        flaws.push("publishes a Registration goal state");
+    }
     if bodies.annotations().findings().next().is_some() {
         flaws.push("publishes an annotation finding");
     }
@@ -179,6 +213,77 @@ pub(crate) fn typed_limit_flaws(report: &TypedReport<'_>) -> Vec<&'static str> {
     if flaws.is_empty() && !report.publishes_nothing_at_limit() {
         flaws.push(UNNAMED);
     }
+    flaws
+}
+
+/// Whether a goal with no premise reads `Unresolved(ConversionPair(Registration))`.
+fn registration_goal(report: &GenericReport<'_>) -> bool {
+    report.goals().iter().any(|goal| {
+        goal.premise.is_none()
+            && goal.state
+                == GoalState::Unresolved(GoalBlocker::ConversionPair(PairBlocker::Registration))
+    })
+}
+
+/// The finding-disclosing states of every conversion use and ordinary call of a
+/// body report (see the list at the head of this file). The graph names the
+/// nodes. A report that publishes any is not a `ResourceLimit` report.
+pub(crate) fn conversion_use_flaws(graph: &Graph, report: &GenericReport<'_>) -> Vec<&'static str> {
+    let mut flaws = Vec::new();
+    for module in graph.modules() {
+        for node in 0..module.syntax.nodes.len() {
+            if let Some(use_) = report.conversion_use(module, node).unwrap()
+                && use_.premise.is_none()
+            {
+                if matches!(
+                    use_.outcome,
+                    Some(PairOutcome::NoMatch | PairOutcome::NumericGap | PairOutcome::Ambiguous)
+                ) {
+                    flaws.push("publishes a conversion use outcome that is a finding");
+                }
+                if matches!(use_.error_agreement, ErrorAgreement::Disagrees { .. }) {
+                    flaws.push("publishes a conversion use error disagreement");
+                }
+                if use_.result_agreement == Some(false) || use_.descriptor_agreement == Some(false)
+                {
+                    flaws.push("publishes a conversion use agreement that is a mismatch");
+                }
+                if use_.blockers.contains(&PairBlocker::Registration) {
+                    flaws.push("publishes a Registration blocker");
+                }
+                if let Some(goal) = &use_.goal {
+                    let goal = report.goal(goal).unwrap();
+                    if goal.state == GoalState::Disproved
+                        || matches!(
+                            goal.conversion_outcome,
+                            Some(
+                                PairOutcome::NoMatch
+                                    | PairOutcome::NumericGap
+                                    | PairOutcome::Ambiguous
+                            )
+                        )
+                    {
+                        flaws.push("publishes a conversion use goal verdict that is a finding");
+                    }
+                }
+            }
+            let disagrees = |agreement: &OutputAgreement<'_>| {
+                matches!(agreement, OutputAgreement::Disagrees { .. })
+            };
+            if report
+                .ordinary_call(module, node)
+                .unwrap()
+                .is_some_and(|call| disagrees(&call.output_agreement))
+                || report
+                    .ordinary_value(module, node)
+                    .unwrap()
+                    .is_some_and(|value| disagrees(&value.output_agreement))
+            {
+                flaws.push("publishes an output disagreement");
+            }
+        }
+    }
+    flaws.dedup();
     flaws
 }
 
@@ -240,6 +345,9 @@ pub(crate) fn generics_limit_flaws(report: &GenericReport<'_>) -> Vec<&'static s
     if report.annotations().findings().next().is_some() {
         flaws.push("publishes an annotation finding");
     }
+    if registration_goal(report) {
+        flaws.push("publishes a Registration goal state");
+    }
     if flaws.is_empty() && !report.publishes_nothing_at_limit() {
         flaws.push(UNNAMED);
     }
@@ -294,6 +402,53 @@ pub(crate) fn conversion_limit_flaws(
     flaws
 }
 
+/// A `query_pair` report: no outcome, selected signature or selected error, no
+/// disagreeing error, no `Registration` blocker and no goal that cites a finding.
+pub(crate) fn pair_limit_flaws(report: &PairReport<'_>) -> Vec<&'static str> {
+    let mut flaws = Vec::new();
+    if report.completion != OrdinaryCompletion::ResourceLimit {
+        flaws.push("completion is not ResourceLimit");
+    }
+    if report.outcome.is_some() {
+        flaws.push("publishes an outcome");
+    }
+    if report.selected_signature.is_some() || report.selected_error.is_some() {
+        flaws.push("publishes a selected signature or error");
+    }
+    if matches!(report.error_agreement, ErrorAgreement::Disagrees { .. }) {
+        flaws.push("publishes an error disagreement");
+    }
+    if report.blockers.contains(&PairBlocker::Registration) {
+        flaws.push("publishes a Registration blocker");
+    }
+    if report.goals().iter().any(|goal| {
+        goal.premise.is_none()
+            && goal.state
+                == GoalState::Unresolved(GoalBlocker::ConversionPair(PairBlocker::Registration))
+    }) {
+        flaws.push("publishes a Registration goal state");
+    }
+    if flaws.is_empty() && !report.publishes_nothing_at_limit() {
+        flaws.push(UNNAMED);
+    }
+    flaws
+}
+
+/// A `select_inputs` report: no outcome (a winner, `NoMatch` or `Ambiguous`).
+pub(crate) fn selection_limit_flaws(report: &SelectionReport<'_>) -> Vec<&'static str> {
+    let mut flaws = Vec::new();
+    if report.completion != OrdinaryCompletion::ResourceLimit {
+        flaws.push("completion is not ResourceLimit");
+    }
+    if report.outcome.is_some() {
+        flaws.push("publishes an outcome");
+    }
+    if flaws.is_empty() && !report.publishes_nothing_at_limit() {
+        flaws.push(UNNAMED);
+    }
+    flaws
+}
+
 /// How many declarations of the graph have a header through the conversion
 /// report's `header_metadata`. `Ok(None)` is both "no header" and, at
 /// `ResourceLimit`, "withheld".
@@ -341,22 +496,40 @@ pub(crate) fn assert_typed_limits_below(graph: &Graph, full: &TypedReport<'_>) {
         .map(|step| stats.work * step / 64)
         .chain(stats.work.saturating_sub(64)..stats.work);
     for max_work in work {
-        assert_typed_limit(&analyze_typed(graph, AnalysisLimits { max_work, ..exact }));
+        assert_typed_limit_uses(
+            graph,
+            &analyze_typed(graph, AnalysisLimits { max_work, ..exact }),
+        );
     }
-    assert_typed_limit(&analyze_typed(
+    assert_typed_limit_uses(
         graph,
-        AnalysisLimits {
-            max_entries: exact.max_entries - 1,
-            ..exact
-        },
-    ));
-    assert_typed_limit(&analyze_typed(
+        &analyze_typed(
+            graph,
+            AnalysisLimits {
+                max_entries: exact.max_entries - 1,
+                ..exact
+            },
+        ),
+    );
+    assert_typed_limit_uses(
         graph,
-        AnalysisLimits {
-            max_depth: exact.max_depth - 1,
-            ..exact
-        },
-    ));
+        &analyze_typed(
+            graph,
+            AnalysisLimits {
+                max_depth: exact.max_depth - 1,
+                ..exact
+            },
+        ),
+    );
+}
+
+/// `assert_typed_limit`, and no finding-disclosing conversion use or output
+/// verdict in the bodies (`conversion_use_flaws`).
+#[track_caller]
+pub(crate) fn assert_typed_limit_uses(graph: &Graph, report: &TypedReport<'_>) {
+    let flaws = conversion_use_flaws(graph, report.bodies());
+    assert!(flaws.is_empty(), "{flaws:?} at {:?}", report.statistics());
+    assert_typed_limit(report);
 }
 
 #[track_caller]
@@ -387,6 +560,18 @@ pub(crate) fn assert_ordinary_limit(graph: &Graph, report: &OrdinaryAnalysis<'_>
 pub(crate) fn assert_conversion_limit(graph: &Graph, report: &ConversionReport<'_, '_>) {
     let flaws = conversion_limit_flaws(graph, report);
     assert!(flaws.is_empty(), "{flaws:?} at {:?}", report.statistics());
+}
+
+#[track_caller]
+pub(crate) fn assert_pair_limit(report: &PairReport<'_>) {
+    let flaws = pair_limit_flaws(report);
+    assert!(flaws.is_empty(), "{flaws:?} at {:?}", report.statistics);
+}
+
+#[track_caller]
+pub(crate) fn assert_selection_limit(report: &SelectionReport<'_>) {
+    let flaws = selection_limit_flaws(report);
+    assert!(flaws.is_empty(), "{flaws:?} at {:?}", report.statistics);
 }
 
 #[track_caller]

@@ -31,6 +31,77 @@ pub struct ConversionUse<'g> {
 }
 
 impl<'g> ConversionUse<'g> {
+    /// The states that disclose a finding of a use with no premise (metering
+    /// rule 8; `conversion_failure` turns each into a finding): a missing,
+    /// protected-gap or ambiguous pair (`outcome`), a disagreeing error type
+    /// (R0313), a false result or descriptor agreement, and the `Registration`
+    /// blocker (a rejected registration, R0310 to R0312). A use under a premise
+    /// is hypothetical: it publishes no finding.
+    pub(in crate::analysis) fn discloses_finding(&self) -> bool {
+        self.premise.is_none()
+            && (matches!(
+                self.outcome,
+                Some(PairOutcome::NoMatch | PairOutcome::NumericGap | PairOutcome::Ambiguous)
+            ) || matches!(self.error_agreement, ErrorAgreement::Disagrees { .. })
+                || self.result_agreement == Some(false)
+                || self.descriptor_agreement == Some(false)
+                || self.blockers.contains(&PairBlocker::Registration))
+    }
+
+    /// A `ResourceLimit` report publishes none of `discloses_finding`'s states
+    /// (metering rule 8). Each reads as undecided: no outcome, an
+    /// undetermined error agreement, no agreement verdict, and no `Registration`
+    /// blocker. The report's own completion says the use is not complete.
+    pub(in crate::analysis) fn withhold_findings(&mut self) {
+        if self.premise.is_some() {
+            return;
+        }
+        if matches!(
+            self.outcome,
+            Some(PairOutcome::NoMatch | PairOutcome::NumericGap | PairOutcome::Ambiguous)
+        ) {
+            self.outcome = None;
+        }
+        if matches!(self.error_agreement, ErrorAgreement::Disagrees { .. }) {
+            self.error_agreement = ErrorAgreement::NotDetermined;
+        }
+        if self.result_agreement == Some(false) {
+            self.result_agreement = None;
+        }
+        if self.descriptor_agreement == Some(false) {
+            self.descriptor_agreement = None;
+        }
+        self.blockers.retain(|b| *b != PairBlocker::Registration);
+    }
+
+    /// No state `discloses_finding` names. Every field is named, so a new one
+    /// fails to compile until it is decided here (metering rule 8).
+    pub(in crate::analysis) fn publishes_nothing_at_limit(&self) -> bool {
+        let Self {
+            premise: _premise,
+            outcome: _outcome,
+            blockers: _blockers,
+            error_agreement: _error_agreement,
+            result_agreement: _result_agreement,
+            descriptor_agreement: _descriptor_agreement,
+            // Identity, facts and the evidence a goal id points at.
+            site: _site,
+            family: _family,
+            role: _role,
+            provider: _provider,
+            protection: _protection,
+            routes: _routes,
+            destination: _destination,
+            actual_source: _actual_source,
+            source_filter: _source_filter,
+            goal: _goal,
+            selected_parameter: _selected_parameter,
+            selected_result: _selected_result,
+            descriptor: _descriptor,
+        } = self;
+        !self.discloses_finding()
+    }
+
     fn record_operation(&self, inference: &mut Inference<'g>, node: NodeId) {
         use crate::analysis::typed::ConversionProvider;
         inference.slots.get_mut(&node).unwrap().installed_operation =

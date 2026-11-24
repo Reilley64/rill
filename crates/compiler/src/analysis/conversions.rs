@@ -86,6 +86,21 @@ pub struct ConversionFamily<'g> {
     pub issues: Vec<RegistrationIssue<'g>>,
 }
 
+impl ConversionFamily<'_> {
+    /// No registration issue (R0310 to R0312). Every field is named, so a new
+    /// one fails to compile until it is decided here (metering rule 8).
+    pub(in crate::analysis) fn publishes_nothing_at_limit(&self) -> bool {
+        let Self {
+            issues,
+            // The premise, routes and registrations: facts, not findings.
+            premise: _premise,
+            routes: _routes,
+            registrations: _registrations,
+        } = self;
+        issues.is_empty()
+    }
+}
+
 #[derive(Debug)]
 pub struct ConversionReport<'r, 'g> {
     input: &'r OrdinaryAnalysis<'g>,
@@ -125,10 +140,12 @@ impl<'g> ConversionReport<'_, 'g> {
             withheld: _withheld,
         } = self;
         let limited = *completion == ordinary::Completion::ResourceLimit;
-        self.type_facts().findings().next().is_none()
+        self.type_facts().publishes_nothing_at_limit()
             && (limited
                 || (self.input().publishes_nothing_at_limit()
-                    && families.values().all(|family| family.issues.is_empty())))
+                    && families
+                        .values()
+                        .all(ConversionFamily::publishes_nothing_at_limit)))
     }
 
     /// Inspect all supported captured bodies using this conversion inventory.

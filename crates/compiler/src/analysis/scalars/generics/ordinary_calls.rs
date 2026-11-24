@@ -57,6 +57,72 @@ pub struct OrdinaryCall<'g> {
     pub output_agreement: OutputAgreement<'g>,
 }
 
+impl OutputAgreement<'_> {
+    fn discloses_finding(&self) -> bool {
+        matches!(self, Self::Disagrees { .. })
+    }
+}
+
+impl<'g> OrdinaryCall<'g> {
+    /// A `ResourceLimit` report publishes no `Disagrees` verdict: it says the
+    /// output type mismatches, which is a finding (or a conditional one under
+    /// a premise) that the report withholds (metering rule 8). It reads
+    /// `NotDetermined`.
+    pub(in crate::analysis) fn withhold_findings(&mut self) {
+        if self.output_agreement.discloses_finding() {
+            self.output_agreement = OutputAgreement::NotDetermined;
+        }
+    }
+
+    /// No `Disagrees` verdict. Every field is named, so a new one fails to
+    /// compile until it is decided here (metering rule 8).
+    pub(in crate::analysis) fn publishes_nothing_at_limit(&self) -> bool {
+        let Self {
+            output_agreement,
+            // Identity, facts, the selection's blocker and outcome (an
+            // outcome is a verdict about candidates, not about the source) and
+            // the evidence the goal ids point at.
+            site: _site,
+            family: _family,
+            checked: _checked,
+            checked_local_disposer: _checked_local_disposer,
+            premise: _premise,
+            routes: _routes,
+            inputs: _inputs,
+            receiving: _receiving,
+            callbacks: _callbacks,
+            explicit: _explicit,
+            defaults: _defaults,
+            candidates: _candidates,
+            blocker: _blocker,
+            outcome: _outcome,
+            goal: _goal,
+            instantiation: _instantiation,
+            instantiated_requirements: _instantiated_requirements,
+            selected_result: _selected_result,
+        } = self;
+        !output_agreement.discloses_finding()
+    }
+}
+
+impl<'g> OrdinaryValue<'g> {
+    /// As `OrdinaryCall::withhold_findings`.
+    pub(in crate::analysis) fn withhold_findings(&mut self) {
+        if self.output_agreement.discloses_finding() {
+            self.output_agreement = OutputAgreement::NotDetermined;
+        }
+    }
+
+    pub(in crate::analysis) fn publishes_nothing_at_limit(&self) -> bool {
+        let Self {
+            output_agreement,
+            goal: _goal,
+            instantiation: _instantiation,
+        } = self;
+        !output_agreement.discloses_finding()
+    }
+}
+
 pub(in crate::analysis::scalars) struct SourceSelection<'g> {
     winner: GoalSelection<'g>,
     argument_pair: Option<evidence::ArgumentPair<'g>>,
