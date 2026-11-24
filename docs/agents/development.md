@@ -19,7 +19,7 @@
 
 6. Know these traps:
 
-   - `crates/compiler/build.rs` builds the ownership archive only for `aarch64-apple-darwin`. A test that uses `env!("RILL_OWNERSHIP_ARCHIVE")` needs `#[cfg(all(target_arch = "aarch64", target_os = "macos"))]`, or it passes locally and fails on the other hosted platforms. Read `gh pr checks <n>` after every push.
+   - `crates/compiler/build.rs` builds the ownership archive for `aarch64-apple-darwin` on every host, cross-compiled from the `targets` entry of `core:rust` in `mise.toml`. `tests/m5.rs` is not gated by platform, and `mise run check:m5` fails a platform whose M5 binary lists no tests. Tests that stay gated to aarch64 macOS (`native_ownership`, the `m4_8_*` archive tests) run nothing elsewhere. Read `gh pr checks <n>` after every push.
    - Workflows start on push to `main` and on pull requests only. A branch with no pull request needs `gh workflow run <file> --ref <branch>`; a dispatched `native.yml` also runs `verify:release`.
    - A cancelled hosted job is no result: rerun it.
    - `gc bd create --body-file` needs an absolute path.
