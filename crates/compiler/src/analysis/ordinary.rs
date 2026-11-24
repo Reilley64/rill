@@ -164,7 +164,12 @@ impl<'g> OrdinaryAnalysis<'g> {
                 .all(|header| header.type_metadata().findings().next().is_none())
     }
 
+    /// Empties what the analysis publishes and says so: a withheld inventory
+    /// reads `ResourceLimit`, so no consumer takes the emptied findings for a
+    /// complete, clean inventory (`select_inputs`, `analyze_generics`,
+    /// `analyze_conversions` check the completion).
     pub(super) fn withhold_findings(&mut self) {
+        self.completion = Completion::ResourceLimit;
         self.types.withhold_findings();
         self.withheld_issues = std::mem::take(&mut self.declaration_issues);
         for header in self.headers.values_mut() {

@@ -116,8 +116,11 @@ impl<'g> GenericReport<'g> {
             && declaration_issues.is_empty()
     }
 
-    /// A `ResourceLimit` report publishes no finding (metering rule 8).
+    /// A `ResourceLimit` report publishes no finding (metering rule 8), and a
+    /// report that withheld its findings reads `ResourceLimit` (the typed
+    /// report's bodies can have another completion until here).
     pub(in crate::analysis) fn withhold_findings(&mut self) {
+        self.completion = ScalarFailureKind::ResourceLimit;
         self.facts.findings.clear();
         self.facts.annotations.withhold_findings();
         self.conditional_findings.clear();
