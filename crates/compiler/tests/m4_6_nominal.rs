@@ -1,4 +1,7 @@
 //! M4.6 nominal application checks over actual M3 captures.
+#[path = "support/limit.rs"]
+mod limit;
+
 use compiler::analysis::generics::{GenericReport, analyze_generics};
 use compiler::analysis::ordinary::analyze_ordinary;
 use compiler::analysis::scalars::data::{ArgumentOrigin, DataExpression};
@@ -247,7 +250,7 @@ fn a_repeating_default_is_pending_but_a_growing_application_exhausts_depth() {
             ..AnalysisLimits::default()
         },
         |module, report| {
-            assert_eq!(report.completion(), ScalarFailureKind::ResourceLimit);
+            limit::assert_generics_limit(report);
             assert!(report.body(module, BodyOwner::Startup).unwrap().is_none());
             assert!(
                 !report

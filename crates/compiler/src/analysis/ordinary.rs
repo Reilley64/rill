@@ -125,6 +125,9 @@ pub struct OrdinaryAnalysis<'g> {
     families: BTreeMap<&'g DeclarationId, FamilyFacts<'g>>,
     types: PartialFacts<'g>,
     declaration_issues: Vec<DeclarationIssue<'g>>,
+    /// Issues a `ResourceLimit` report no longer publishes. `analyze_generics`
+    /// still meters them, so its statistics on this input do not move.
+    withheld_issues: Vec<DeclarationIssue<'g>>,
     unusable: BTreeSet<&'g DeclarationId>,
     headers: metadata::Headers<'g>,
     statistics: Statistics,
@@ -135,7 +138,15 @@ pub struct OrdinaryAnalysis<'g> {
 impl<'g> OrdinaryAnalysis<'g> {
     pub(super) fn withhold_findings(&mut self) {
         self.types.withhold_findings();
-        self.declaration_issues.clear();
+        self.withheld_issues = std::mem::take(&mut self.declaration_issues);
+        for header in self.headers.values_mut() {
+            header.withhold_findings();
+        }
+    }
+
+    /// Every issue the analysis found, published or withheld, for metering.
+    pub(super) fn metered_issues(&self) -> impl Iterator<Item = &DeclarationIssue<'g>> {
+        self.declaration_issues.iter().chain(&self.withheld_issues)
     }
 
     pub(super) fn graph(&self) -> &'g Graph {
@@ -711,8 +722,13 @@ impl<'g> OrdinaryAnalysis<'g> {
 
 /// Analyze an actual M3 capture. M3 does not carry core role/protection admission.
 /// Results remain partial, never a checked ordinary collection or source call.
+/// A `ResourceLimit` report publishes no finding (metering rule 8).
 pub fn analyze_ordinary(graph: &Graph, limits: AnalysisLimits) -> OrdinaryAnalysis<'_> {
-    analyze_ordinary_types(graph, limits, Statistics::default(), false, false)
+    let mut report = analyze_ordinary_types(graph, limits, Statistics::default(), false, false);
+    if report.completion == Completion::ResourceLimit {
+        report.withhold_findings();
+    }
+    report
 }
 
 pub(super) fn analyze_typed_inventory(
@@ -770,6 +786,7 @@ fn analyze_ordinary_types(
         lexical: analyzer.lexical,
         types: analyzer.facts,
         declaration_issues: Vec::new(),
+        withheld_issues: Vec::new(),
         unusable: BTreeSet::new(),
         headers,
         statistics: analyzer.statistics,

@@ -1,4 +1,7 @@
 //! Conditional conversion analysis over real M3 captures. Fixtures grant no core admission.
+#[path = "support/limit.rs"]
+mod limit;
+
 use compiler::analysis::conversions::{RegistrationIssueKind, RoleHypothesis, analyze_conversions};
 use compiler::analysis::ordinary::{Completion, analyze_ordinary};
 use compiler::analysis::{AnalysisLimits, QueryError};
@@ -1157,4 +1160,56 @@ fn aliases_collect_one_family_with_distinct_destination_keys() {
         .unwrap_err(),
         QueryError::InvalidRequest
     );
+}
+
+/// Metering rule 8 for `ConversionReport::bodies`, which returns the same
+/// report as `analyze_generics`: the exact cap publishes the body finding;
+/// every cap below it, on each axis, publishes none.
+#[test]
+fn conversion_bodies_publish_no_finding_at_resource_limit() {
+    let fixture = Fixture::new(
+        "import std::convert::into;
+         type Target = {};
+         implement into<Target>(value: i32): Target { return false; }",
+    );
+    let graph = fixture.load();
+    let limits = AnalysisLimits::default();
+    let ordinary = analyze_ordinary(&graph, limits);
+    let inventory = analyze_conversions(
+        &ordinary,
+        &[RoleHypothesis::Infallible(standard_export(&graph, "into"))],
+        limits,
+    )
+    .unwrap();
+    let report = inventory.bodies(limits);
+    let stats = report.statistics();
+    let exact = AnalysisLimits {
+        max_work: stats.work,
+        max_entries: stats.entries,
+        max_depth: stats.max_depth,
+    };
+    let replay = inventory.bodies(exact);
+    assert_eq!(replay.statistics(), stats);
+    assert!(!replay.findings().is_empty());
+    for work in 0..stats.work {
+        let limited = inventory.bodies(AnalysisLimits {
+            max_work: work,
+            ..exact
+        });
+        limit::assert_generics_limit(&limited);
+    }
+    for entries in 0..stats.entries {
+        let limited = inventory.bodies(AnalysisLimits {
+            max_entries: entries,
+            ..exact
+        });
+        limit::assert_generics_limit(&limited);
+    }
+    for depth in 0..stats.max_depth {
+        let limited = inventory.bodies(AnalysisLimits {
+            max_depth: depth,
+            ..exact
+        });
+        limit::assert_generics_limit(&limited);
+    }
 }

@@ -31,6 +31,10 @@ pub struct HeaderMetadata<'g> {
 }
 
 impl<'g> HeaderMetadata<'g> {
+    pub(in crate::analysis) fn withhold_findings(&mut self) {
+        self.type_metadata.withhold_findings();
+    }
+
     pub fn type_metadata(&self) -> &PartialFacts<'g> {
         &self.type_metadata
     }

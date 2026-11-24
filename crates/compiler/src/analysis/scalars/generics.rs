@@ -365,7 +365,11 @@ pub(in crate::analysis) fn analyze_with_conversions<'g>(
         limits,
         statistics: Statistics::default(),
     };
-    analyze_bodies(input, conversions, budget, None)
+    let mut report = analyze_bodies(input, conversions, budget, None);
+    if report.completion == ScalarFailureKind::ResourceLimit {
+        report.withhold_findings();
+    }
+    report
 }
 
 #[derive(Default)]
@@ -450,7 +454,7 @@ fn analyze_bodies<'g>(
     let mut declaration_issues = Vec::new();
     let exhausted = (|| -> Work<()> {
         use ordinary::DeclarationIssue;
-        for issue in input.declaration_issues() {
+        for issue in input.metered_issues() {
             let extra = match issue {
                 DeclarationIssue::DuplicateMembers { members, .. } => members.len(),
                 DeclarationIssue::InlineCycle { steps } => steps.len(),
