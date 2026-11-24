@@ -89,7 +89,7 @@ Noted while measuring (not pinned): `while (true) { retain(dst, &owned); }` with
 
 ## ST-7: the O1 sibling caps are the typed admission on the parent
 
-`o01_exclusive_i32_write_siblings_keep_their_screens` pins its `Incomplete` roots at caps measured "with only the typed admission applied". No revision holds that (the ticket landed as one commit, `9547ef70`), and the parent `7002855e` alone stops this module in the typed pass (typed `Incomplete`, 334,460 / 48,395 / 12, no receipt), so no parent ownership cap exists for these roots. Measured here: a detached worktree of `7002855e` with only the typed-admission part of `9547ef70` applied (`o01-typed-admission-only.patch`, `result_use.rs`, in the log directory) gives typed 335,273 / 48,561 / 12 (`Checked`, equal to the pinned value) and exactly the pinned `Incomplete` roots: `groupedTarget`, `groupedOperand`, `groupedDescriptor` 1,998 / 92 / 2, `computed` 2,004 / 96 / 2, `viaLocal` 2,008 / 101 / 2; `dead` 2,055 / 118 / 2. So the ownership lowering adds nothing to a sibling that it does not admit: the property rule 2 asks for holds, measured on the hybrid base, not on a commit. Committed: the sibling constant's doc now says so, and `o01_exclusive_write_siblings_typed_parent_cap_now_gives_resource_limit` asserts that the parent's typed cap (334,460 / 48,395 / 12) now gives `ResourceLimit` with no receipt. Open for the chief: accept the hybrid base as the rule-2 witness for this row, or ask for a patch-built revision to be kept.
+`o01_exclusive_i32_write_siblings_keep_their_screens` pins its `Incomplete` roots at caps measured "with only the typed admission applied". No revision holds that (the ticket landed as one commit, `9547ef70`), and the parent `7002855e` alone stops this module in the typed pass (typed `Incomplete`, 334,460 / 48,395 / 12, no receipt), so no parent ownership cap exists for these roots. Measured here: a detached worktree of `7002855e` with only the typed-admission part of `9547ef70` applied (`o01-typed-admission-only.patch`, `result_use.rs`, in the log directory) gives typed 335,273 / 48,561 / 12 (`Checked`, equal to the pinned value) and exactly the pinned `Incomplete` roots: `groupedTarget`, `groupedOperand`, `groupedDescriptor` 1,998 / 92 / 2, `computed` 2,004 / 96 / 2, `viaLocal` 2,008 / 101 / 2; `dead` 2,055 / 118 / 2. So the ownership lowering adds nothing to a sibling that it does not admit: the property rule 2 asks for holds, measured on the hybrid base, not on a commit. Committed: the sibling constant's doc now says so, and `o01_exclusive_write_siblings_typed_parent_cap_now_gives_resource_limit` asserts that the parent's typed cap (334,460 / 48,395 / 12) now gives `ResourceLimit` with no receipt. Accepted by the chief of staff (ruling of 2026-11-24 15:28 AEDT) as the rule-2 witness for this row, on condition that the patch is kept in the repository and the rule-2 note says so: the patch is [`ri-px1.11.5-hybrid.patch`](ri-px1.11.5-hybrid.patch) (the same file as `o01-typed-admission-only.patch`; it applies cleanly to the parent `7002855e`), and the note is in `docs/agents/compiler-metering.md` under rule 2. To rebuild the base: `git worktree add --detach <dir> 7002855e && git -C <dir> apply <patch>`.
 
 ## ST-16 / R-4: the counter's +58
 
@@ -114,7 +114,7 @@ Measured by a throwaway probe over 165 one-function modules (5 record shapes; 17
 - Piped calls pay. `dst |> touchTwo(s)` costs what `touchTwo(dst, s)` does (+144 work for a `string` field behind a list), and `dst |> touchF(s)` (family) pays the parameter's lookup only (+72).
 - A bare `&mut view` borrow of `&R` pays one lookup (`f` +72 for a `string` record).
 - Lists (against `b6c93f30`): every body that declares a `&mut List<&R>` parameter for an unsupported `R` pays one lookup (+72 `string` or nested, +70 enum), `Checked` or not; a root that also passes it on pays two (+144, up to +148 work and +3 entries). All stay inside bound (c). Under the standing ruling, listed in `docs/agents/compiler-metering.md` and pinned by `rfc_cases::list_contents::list_parameter_siblings_pay_their_lookup_and_keep_their_outcomes` (`string` field; seven module forms; old caps give `ResourceLimit`). A nested record and an enum were measured and not pinned: nested +72/+144/+148 as `string`, enum +70/+140/+144.
-- `&mut &R` (against `bc9bfdd5`): the same, except a root that declares a `&mut &R` parameter and passes it to a function that also takes a `&R` pays **three** lookups: +216 work for `string` and nested records, +210 for an enum, over bound (c). Reported, not listed: found bead `ri-zee8` (needs-triage).
+- `&mut &R` (against `bc9bfdd5`): the same, except a root that declares a `&mut &R` parameter and passes it to a function that also takes a `&R` pays **three** lookups: +216 work for `string` and nested records, +210 for an enum, over bound (c). Granted as a named exception (chief of staff, 2026-11-24 15:28 AEDT) at the measured costs and pinned (part C6b, below); found bead `ri-zee8`.
 - Typed work also moves, by one lookup (+72 for a `string` record, +70 for an enum), in some modules whose body passes the value to a call (`compare-bc9bfdd5.txt` lists them); it is not pinned here.
 
 Old (parent) caps for the list modules were measured in a detached worktree of `b6c93f30` with the same module text; only roots whose cap moved assert `ResourceLimit` for the old value.
@@ -125,11 +125,27 @@ No published cap moved: every existing expectation passes unedited. Caps added a
 
 ## Standing-ruling uses
 
-`grouped` (ST-1, fifth sibling of the ri-ema exception, in `compiler-metering.md`); the list-parameter siblings above (listed under the standing ruling, in `compiler-metering.md`). Over bound and reported: the `&mut &R` forwarding forms (`ri-zee8`).
+`grouped` (ST-1, fifth sibling of the ri-ema exception, in `compiler-metering.md`); the list-parameter siblings above (listed under the standing ruling, in `compiler-metering.md`). Over bound, then granted as a named exception: the `&mut &R` forwarding forms (`ri-zee8`, below).
 
 ## Not established
 
 - `retained_contents` sites were not traced one by one; the lookup counts are inferred from whole multiples of one lookup's work.
-- ST-7's hybrid base is a measurement, not a revision.
+- ST-7's hybrid base is a measurement, not a revision; its patch and parent (`7002855e`) are kept beside this file.
 - Unlisted rows of `pre_equality_graph` that are derived by subtraction keep their values.
 - The review's `o07`, ST-2 to ST-5, ST-8, ST-9 and SP-3, SP-4, SP-7 belong to other children of `ri-px1.11` and are not touched here.
+
+## C6b: the chief's conditions (2026-11-24, city bead ci-em6d)
+
+Ruling of 2026-11-24 15:28 AEDT (`notes/m5-ownership-cleanup/review/chief-rulings-16.md`). Branch `m5-ownership-cleanup/r2f-c6b-ri-px1.11.5`.
+
+- **ST-7:** the hybrid base is accepted. The patch is [`ri-px1.11.5-hybrid.patch`](ri-px1.11.5-hybrid.patch), the parent commit `7002855e`; the rule-2 note is in `docs/agents/compiler-metering.md`.
+- **ri-zee8:** granted as a named exception outside the standing ruling. Pinned exact and one short by `rfc_cases::record_contents::forwarded_record_slot_roots_pay_three_lookups_and_keep_their_outcomes` (current caps; parent `bc9bfdd5` caps each give `ResourceLimit` through `crate::limit`). Probe sources: `probe-shapes/` in the C6 log directory; the numbers match the measurements above on the merged base.
+
+| Root (`f`) | Parent work / entries / depth | Now | Delta | Blocker |
+|---|---|---|---|---|
+| `FORWARD_NAMED`: `touchTwo(slot, s)`, `string` field | 1,955 / 66 / 3 | 2,171 / 66 / 3 | +216 | `slot` |
+| `FORWARD_NAMED_PIPE`: `slot \|> touchTwo(s)` | 1,955 / 63 / 3 | 2,171 / 63 / 3 | +216 | `slot \|> touchTwo(s)` |
+| `FORWARD_NESTED`: nested record | 1,957 / 67 / 3 | 2,173 / 67 / 3 | +216 | `slot` |
+| `FORWARD_ENUM`: enum | 1,951 / 64 / 3 | 2,161 / 64 / 3 | +210 | `slot` |
+
+Parent graph caps: 191,040 / 4,267 / 5 (named), 191,040 / 4,264 / 5 (piped), 191,106 / 4,268 / 5 (nested), 190,916 / 4,265 / 5 (enum). The helper roots `touch` and `touchTwo` of each module are pinned too, with their parent caps.

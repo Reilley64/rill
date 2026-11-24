@@ -3,6 +3,7 @@
 //! scalar field read through a `&Record` is lowered. The O2 and O8 rows above
 //! pin the RFC's own modules; these tests pin the forms around them, the
 //! operation sequence, the old caps (metering rule 11) and the siblings.
+use super::list_contents::old_root_caps;
 use super::o12::{Case, check_cases};
 use super::*;
 use compiler::analysis::ownership::RetainedPlace;
@@ -612,6 +613,159 @@ fn unsupported_record_contents_parent_caps_now_give_resource_limit() {
                 .map(|&(i, old)| (UNSUPPORTED[i].text, old))
                 .collect();
             old_caps(&request, &olds);
+        },
+    );
+}
+
+const FORWARD_NAMED: &str = r####"type T = { name: string; id: i32 };
+function touch(slot: &mut &T): void { }
+function touchTwo(slot: &mut &T, source: &T): void { }
+function touchF<D, S>(dst: D, source: S): void;
+implement touchF(dst: &mut &T, source: &T): void { while (true) {} }
+function touchOne<D>(dst: D): void;
+implement touchOne(dst: &mut &T): void { while (true) {} }
+function f(slot: &mut &T, s: &T): void { touchTwo(slot, s); }
+"####;
+
+const FORWARD_NAMED_PIPE: &str = r####"type T = { name: string; id: i32 };
+function touch(slot: &mut &T): void { }
+function touchTwo(slot: &mut &T, source: &T): void { }
+function touchF<D, S>(dst: D, source: S): void;
+implement touchF(dst: &mut &T, source: &T): void { while (true) {} }
+function touchOne<D>(dst: D): void;
+implement touchOne(dst: &mut &T): void { while (true) {} }
+function f(slot: &mut &T, s: &T): void { slot |> touchTwo(s); }
+"####;
+
+const FORWARD_NESTED: &str = r####"type Inner = { id: i32 };
+type T = { inner: Inner; id: i32 };
+function touch(slot: &mut &T): void { }
+function touchTwo(slot: &mut &T, source: &T): void { }
+function touchF<D, S>(dst: D, source: S): void;
+implement touchF(dst: &mut &T, source: &T): void { while (true) {} }
+function touchOne<D>(dst: D): void;
+implement touchOne(dst: &mut &T): void { while (true) {} }
+function f(slot: &mut &T, s: &T): void { touchTwo(slot, s); }
+"####;
+
+const FORWARD_ENUM: &str = r####"enum T { A, B }
+function touch(slot: &mut &T): void { }
+function touchTwo(slot: &mut &T, source: &T): void { }
+function touchF<D, S>(dst: D, source: S): void;
+implement touchF(dst: &mut &T, source: &T): void { while (true) {} }
+function touchOne<D>(dst: D): void;
+implement touchOne(dst: &mut &T): void { while (true) {} }
+function f(slot: &mut &T, s: &T): void { touchTwo(slot, s); }
+"####;
+
+/// ri-zee8 (named exception, chief of staff, 2026-11-24 15:28 AEDT, outside the
+/// standing rule-1 ruling): a root that declares a `&mut &T` parameter for an
+/// unsupported `T` and passes it to a function that also takes a `&T` pays
+/// three charged declaration lookups, over bound (c): +216 work for a `string`
+/// field (direct and piped) and a nested record, +210 for an enum. Each stays
+/// `Incomplete` at the same blocker. The helper roots pay one (`touch`, +72) and
+/// two (`touchTwo`, +144). Pinned exact and one short by `check_cases`; each
+/// parent cap (`bc9bfdd5`, before ri-1up) gives `ResourceLimit` with no MIR and
+/// no finding. The real fix is the M4 field-list fact (ri-qlh.4).
+#[test]
+fn forwarded_record_slot_roots_pay_three_lookups_and_keep_their_outcomes() {
+    installed(
+        "rfc_cases::record_contents::forwarded_record_slot_roots_pay_three_lookups_and_keep_their_outcomes",
+        |request| {
+            check_cases(
+                &request,
+                &[
+                    const {
+                        Case {
+                            text: FORWARD_NAMED,
+                            typed_stats: (330759, 48229, 12),
+                            graph: (GraphCompletion::Incomplete, (191472, 4267, 5)),
+                            roots: &[
+                                checked("touch", (2055, 83, 1)),
+                                checked("touchTwo", (2170, 101, 1)),
+                                incomplete("f", "slot", (2171, 66, 3)),
+                            ],
+                        }
+                    },
+                    const {
+                        Case {
+                            text: FORWARD_NAMED_PIPE,
+                            typed_stats: (330769, 48233, 12),
+                            graph: (GraphCompletion::Incomplete, (191472, 4264, 5)),
+                            roots: &[
+                                checked("touch", (2055, 83, 1)),
+                                checked("touchTwo", (2170, 101, 1)),
+                                incomplete("f", "slot |> touchTwo(s)", (2171, 63, 3)),
+                            ],
+                        }
+                    },
+                    const {
+                        Case {
+                            text: FORWARD_NESTED,
+                            typed_stats: (331771, 48275, 12),
+                            graph: (GraphCompletion::Incomplete, (191538, 4268, 5)),
+                            roots: &[
+                                checked("touch", (2057, 84, 1)),
+                                checked("touchTwo", (2172, 102, 1)),
+                                incomplete("f", "slot", (2173, 67, 3)),
+                            ],
+                        }
+                    },
+                    const {
+                        Case {
+                            text: FORWARD_ENUM,
+                            typed_stats: (330339, 48226, 12),
+                            graph: (GraphCompletion::Incomplete, (191336, 4265, 5)),
+                            roots: &[
+                                checked("touch", (2049, 81, 1)),
+                                checked("touchTwo", (2162, 99, 1)),
+                                incomplete("f", "slot", (2161, 64, 3)),
+                            ],
+                        }
+                    },
+                ],
+            );
+            old_root_caps(
+                &request,
+                &[
+                    (
+                        FORWARD_NAMED,
+                        &[
+                            ("touch", (1983, 83, 1)),
+                            ("touchTwo", (2026, 101, 1)),
+                            ("f", (1955, 66, 3)),
+                        ],
+                        (191040, 4267, 5),
+                    ),
+                    (
+                        FORWARD_NAMED_PIPE,
+                        &[
+                            ("touch", (1983, 83, 1)),
+                            ("touchTwo", (2026, 101, 1)),
+                            ("f", (1955, 63, 3)),
+                        ],
+                        (191040, 4264, 5),
+                    ),
+                    (
+                        FORWARD_NESTED,
+                        &[
+                            ("touch", (1985, 84, 1)),
+                            ("touchTwo", (2028, 102, 1)),
+                            ("f", (1957, 67, 3)),
+                        ],
+                        (191106, 4268, 5),
+                    ),
+                    (
+                        FORWARD_ENUM,
+                        &[
+                            ("touch", (1979, 81, 1)),
+                            ("touchTwo", (2022, 99, 1)),
+                            ("f", (1951, 64, 3)),
+                        ],
+                        (190916, 4265, 5),
+                    ),
+                ],
+            );
         },
     );
 }
