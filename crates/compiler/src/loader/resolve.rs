@@ -170,6 +170,30 @@ impl Engine {
             }
             prelude_keys.push(key);
         }
+        if let Some(profile) = self.installed {
+            let root = self.roots[&Origin::Standard].clone();
+            let mut baseline = Vec::new();
+            for &(key, _) in profile.sources() {
+                self.host.charge(1 + profile.metadata().len())?;
+                let path = root.join(key);
+                let Some(probe) = self.host.probe(&path, Some(&root))? else {
+                    baseline.clear();
+                    break;
+                };
+                if probe.kind != Kind::File || probe.path != path {
+                    return Err(failure(
+                        FailureKind::InvalidRequest,
+                        "installed source does not have its pinned module key",
+                    ));
+                }
+                if !profile.metadata().iter().any(|edge| edge.path == key) {
+                    baseline.push(probe.path);
+                }
+            }
+            for path in baseline {
+                self.add_module(Origin::Standard, path)?;
+            }
+        }
         while let Some(key) = self.pending.pop_front() {
             self.host.charge(1)?;
             let mut imports =
@@ -672,46 +696,7 @@ impl Engine {
         };
         let root = self.roots[&Origin::Standard].clone();
         let edges = profile.metadata();
-        let mut requested = BTreeSet::new();
-        for module in self.modules.values() {
-            for node in &module.syntax.nodes {
-                self.host.charge(edges.len())?;
-                for edge in edges {
-                    if (edge.triggered_by)(node.kind) {
-                        requested.insert(edge.path);
-                    }
-                }
-            }
-        }
-        let conversion = profile.conversion_metadata();
-        for import in &self.imports {
-            self.host
-                .charge(1 + conversion.len() + import.starts.len())?;
-            // Provider modules bind their own registrations with explicit source imports.
-            // Those imports are not an application request for the rest of the closure.
-            if import.module.origin == Origin::Standard
-                && conversion.contains(&import.module.path.as_str())
-            {
-                continue;
-            }
-            if import
-                .starts
-                .iter()
-                .any(|(key, _)| key.origin == Origin::Standard && key.path == "convert.rill")
-            {
-                requested.extend(conversion.iter().copied());
-                break;
-            }
-        }
-        // The table lists dependencies before dependents. Walk it backwards
-        // to request the closure, then forwards to capture it.
-        for edge in edges.iter().rev() {
-            self.host.charge(1 + edge.dependencies.len())?;
-            if requested.contains(edge.path) {
-                requested.extend(edge.dependencies.iter().map(|(_, path)| *path));
-            }
-        }
-        for edge in edges.iter().filter(|edge| requested.contains(edge.path)) {
+        for edge in edges {
             let key = ModuleKey {
                 origin: Origin::Standard,
                 path: edge.path.into(),

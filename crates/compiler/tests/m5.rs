@@ -63,6 +63,8 @@ mod scoped_join;
 mod support;
 #[path = "m5/tuples.rs"]
 mod tuples;
+#[path = "m5/typed_receipt.rs"]
+mod typed_receipt;
 
 #[test]
 fn ownership_from_installed_source() {
