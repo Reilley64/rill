@@ -62,11 +62,20 @@ impl InstalledProfile {
             Self::DarwinArm64 => &[
                 MetadataEdge {
                     path: "option.rill",
+                    triggered_by: |kind| {
+                        matches!(
+                            kind,
+                            NodeKind::Propagate
+                                | NodeKind::Wrap
+                                | NodeKind::PipeStep { propagate: true }
+                        )
+                    },
                     dependencies: &[],
                     registrations: &[],
                 },
                 MetadataEdge {
                     path: "collection.rill",
+                    triggered_by: |kind| matches!(kind, NodeKind::Bracket | NodeKind::Index),
                     dependencies: &[("option", "option.rill")],
                     registrations: &[
                         ("collection.rill", &["get", "first"]),
@@ -75,6 +84,7 @@ impl InstalledProfile {
                 },
                 MetadataEdge {
                     path: "iter.rill",
+                    triggered_by: |kind| kind == NodeKind::For,
                     dependencies: &[("option", "option.rill"), ("collection", "collection.rill")],
                     registrations: &[
                         ("iter.rill", &["iterate", "next"]),
@@ -83,16 +93,19 @@ impl InstalledProfile {
                 },
                 MetadataEdge {
                     path: "format.rill",
+                    triggered_by: |kind| kind == NodeKind::TemplateHole,
                     dependencies: &[],
                     registrations: &[("format.rill", &["show"])],
                 },
                 MetadataEdge {
                     path: "string.rill",
+                    triggered_by: |_| false,
                     dependencies: &[("option", "option.rill"), ("error", "error.rill")],
                     registrations: &[("error.rill", &["display"])],
                 },
                 MetadataEdge {
                     path: "bytes.rill",
+                    triggered_by: |_| false,
                     dependencies: &[
                         ("collection", "collection.rill"),
                         ("convert", "convert.rill"),
@@ -102,6 +115,12 @@ impl InstalledProfile {
                     registrations: &[("convert.rill", &["into", "tryInto"])],
                 },
             ],
+        }
+    }
+
+    pub(super) fn conversion_metadata(self) -> &'static [&'static str] {
+        match self {
+            Self::DarwinArm64 => &["bytes.rill"],
         }
     }
 
@@ -157,6 +176,7 @@ impl InstalledProfile {
 
 pub(super) struct MetadataEdge {
     pub path: &'static str,
+    pub triggered_by: fn(NodeKind) -> bool,
     pub dependencies: &'static [(&'static str, &'static str)],
     pub registrations: &'static [(&'static str, &'static [&'static str])],
 }

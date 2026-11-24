@@ -170,6 +170,7 @@ impl Engine {
             }
             prelude_keys.push(key);
         }
+        let mut complete = false;
         if let Some(profile) = self.installed {
             let root = self.roots[&Origin::Standard].clone();
             let mut baseline = Vec::new();
@@ -190,6 +191,7 @@ impl Engine {
                     baseline.push(probe.path);
                 }
             }
+            complete = !baseline.is_empty();
             for path in baseline {
                 self.add_module(Origin::Standard, path)?;
             }
@@ -203,7 +205,7 @@ impl Engine {
             }
             self.imports.extend(imports);
         }
-        let metadata = self.capture_installed_metadata()?;
+        let metadata = self.capture_installed_metadata(complete)?;
         self.imports
             .sort_by(|a, b| (&a.module, a.span.start()).cmp(&(&b.module, b.span.start())));
         let (facts, names, public_names) = self.seeds()?;
@@ -689,14 +691,56 @@ impl Engine {
         Ok(privacy)
     }
 
-    fn capture_installed_metadata(&mut self) -> Result<BTreeSet<&'static str>> {
+    fn capture_installed_metadata(&mut self, complete: bool) -> Result<BTreeSet<&'static str>> {
         let mut captured = BTreeSet::new();
         let Some(profile) = self.installed else {
             return Ok(captured);
         };
         let root = self.roots[&Origin::Standard].clone();
         let edges = profile.metadata();
-        for edge in edges {
+        let mut requested = BTreeSet::new();
+        if complete {
+            requested.extend(edges.iter().map(|edge| edge.path));
+        }
+        for module in self.modules.values() {
+            for node in &module.syntax.nodes {
+                self.host.charge(edges.len())?;
+                for edge in edges {
+                    if (edge.triggered_by)(node.kind) {
+                        requested.insert(edge.path);
+                    }
+                }
+            }
+        }
+        let conversion = profile.conversion_metadata();
+        for import in &self.imports {
+            self.host
+                .charge(1 + conversion.len() + import.starts.len())?;
+            // Provider modules bind their own registrations with explicit source imports.
+            // Those imports are not an application request for the rest of the closure.
+            if import.module.origin == Origin::Standard
+                && conversion.contains(&import.module.path.as_str())
+            {
+                continue;
+            }
+            if import
+                .starts
+                .iter()
+                .any(|(key, _)| key.origin == Origin::Standard && key.path == "convert.rill")
+            {
+                requested.extend(conversion.iter().copied());
+                break;
+            }
+        }
+        // The table lists dependencies before dependents. Walk it backwards
+        // to request the closure, then forwards to capture it.
+        for edge in edges.iter().rev() {
+            self.host.charge(1 + edge.dependencies.len())?;
+            if requested.contains(edge.path) {
+                requested.extend(edge.dependencies.iter().map(|(_, path)| *path));
+            }
+        }
+        for edge in edges.iter().filter(|edge| requested.contains(edge.path)) {
             let key = ModuleKey {
                 origin: Origin::Standard,
                 path: edge.path.into(),
