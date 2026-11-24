@@ -1381,8 +1381,26 @@ fn checked_graph<'g>(
             let is_disposer = match edge.contract {
                 DependencyContract::OrdinaryCall => false,
                 DependencyContract::ActiveDisposer => true,
-                // Preserve the targeted query's narrower dependency contract.
-                _ => return Ok(()),
+                DependencyContract::CallableTransfer(_)
+                | DependencyContract::SynchronousListArrows { .. }
+                | DependencyContract::DeclaredOnceInvocation { .. }
+                | DependencyContract::DeclaredSharedInvocation { .. }
+                | DependencyContract::ScopedJoin { .. }
+                | DependencyContract::DeclaredSignature
+                | DependencyContract::BuiltinDispose
+                | DependencyContract::ProtectedRelease { .. }
+                | DependencyContract::ListI32Disposal { .. }
+                | DependencyContract::ListI32Iteration { .. }
+                | DependencyContract::ListTextCollection { .. }
+                | DependencyContract::ListTextElementDisposal { .. }
+                | DependencyContract::ListOptionTextCollection { .. }
+                | DependencyContract::OptionTextElementDisposal { .. }
+                | DependencyContract::ListRecordTextCollection { .. }
+                | DependencyContract::RecordTextElementDisposal { .. }
+                | DependencyContract::ResultConstructor
+                | DependencyContract::FreshResultConstructor { .. }
+                | DependencyContract::FreshResultErrorDisposal { .. }
+                | DependencyContract::RetainedErrorDisplay => return Ok(()),
             };
             let callee = edge.declaration;
             if seen.contains_key(callee) {
