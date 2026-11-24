@@ -59,11 +59,11 @@ Not audited: consumers outside `crates/compiler` (the CLI and the loader read no
 
 A `ConversionUse` with no premise (`premise.is_none()`) discloses a finding through `outcome` `NoMatch`, `NumericGap` or `Ambiguous`, `error_agreement` `Disagrees` (R0313), `result_agreement` or `descriptor_agreement` `Some(false)`, and `blockers` carrying `Registration` (a rejected registration). At a limit each reads as undecided: `outcome` `None`, `error_agreement` `NotDetermined`, the agreement `None`, and no `Registration` in `blockers`. Why these: they are the states `conversion_failure` turns into a finding, so a reader who sees them has the finding. Why not another state: `None`, `NotDetermined` and "no blocker" are what the same use reads before the checker decides; the report's completion (`ResourceLimit`) says it is not complete.
 
-Goals: a goal with no premise whose state is `Unresolved(ConversionPair(Registration))` reads `Unresolved(ResourceLimit)`; the goal of a conversion use with no premise whose state is `Disproved`, or whose `conversion_outcome` is one of the three above, reads `Unresolved(ResourceLimit)` and no outcome. `OutputAgreement::Disagrees` on `OrdinaryCall` and `OrdinaryValue` reads `NotDetermined`: a disagreement is a type mismatch, conditional under a premise, and both finding lists are withheld.
+Goals: a goal with no premise whose state is `Unresolved(ConversionPair(Registration))` reads `Unresolved(ResourceLimit)`; the goal of a conversion use with no premise whose state is `Disproved`, or whose `conversion_outcome` is one of the three above, reads `Unresolved(ResourceLimit)` and no outcome. `OutputAgreement::Disagrees` on `OrdinaryCall` and `OrdinaryValue` reads `NotDetermined`: a disagreement is a type mismatch at the use (R-code, conditional under a premise), and both finding lists are withheld. `R4F-C15.md` item 1 names `OutputAgreement::Disagrees` for the sweep. Red: `red-item1-output-agreement.log`. **Open for the chief:** this is the one withholding here that ruling 23 does not list by name; it discloses a finding, so I built it under the C15 brief, and it moves no outcome at an exact cap. Revert `OrdinaryCall::withhold_findings` and `OrdinaryValue::withhold_findings` (and their calls in `GenericReport::withhold_findings`) if ruling 23 (4) should have stopped it.
 
 Red: `red-item1-conversions.log` (the withholding disabled): `["publishes a conversion use error disagreement", "publishes a conversion use agreement that is a mismatch", "publishes a conversion use outcome that is a finding", "publishes a conversion use goal verdict that is a finding", ..]` at the `numeric` source, and the Registration goal state at `rejected_registrations`. Green: `green-item1-conversions.log`.
 
-Tests (`m4_8_installed_conversions.rs`): `rejected_registrations` (`Registration` blocker and goal state, exact and one short, `assert_typed_limits_below`), `numeric` (`NumericGap` and `Disagrees`), `user_dispatch` (`Disagrees`), new `limited_uses` (`NoMatch`, `Ambiguous` and a false `result_agreement`, each pinned at the exact cap and swept). Helper: `limit::conversion_use_flaws` and `assert_typed_limit_uses`; the variants are listed at the head of `tests/support/limit.rs`.
+Tests (`m4_8_installed_conversions.rs`): `rejected_registrations` (`Registration` blocker and goal state, exact and one short, `assert_typed_limits_below`), `numeric` (`NumericGap` and `Disagrees`), `user_dispatch` (`Disagrees`), new `limited_uses` (`NoMatch`, `Ambiguous` and a false `result_agreement`, each pinned at the exact cap and swept). `m4_6_evidence.rs::a_limited_generics_report_publishes_no_output_disagreement` sweeps every work cap of `analyze_generics` over the source where the exact run publishes an ordinary call's `Disagrees`. Helper: `limit::conversion_use_flaws` and `assert_typed_limit_uses`; the variants are listed at the head of `tests/support/limit.rs`.
 
 **Swept and not withheld, with the reason:**
 
@@ -92,7 +92,7 @@ Every type whose completion can be `ResourceLimit`, its guard and its helper:
 | `SelectionReport` (new) | `publishes_nothing_at_limit` | `assert_selection_limit` |
 | `PairReport` (new) | `publishes_nothing_at_limit` | `assert_pair_limit` |
 
-The hand-written sites `m4_5.rs` (the exhausted-inventory selection), `m4_7.rs` (`low` and `growing`) call the helpers. `SelectionReport` is consistent with `PairReport`: `SelectionReport::outcome` is assigned only at the two returns of `query`, after its last metered step, so a limited selection never has one. `a_limited_selection_names_no_outcome` sweeps every work cap on a winner and a no-match source and the helper holds at each; it was green before the guard, so the guard pins the state and changes no code path. `PairReport` clears `outcome`, `selected_signature` and `selected_error` at a limit already; the pair sweep (every work cap below the exact one) holds for `error_agreement` and the `Registration` blocker as well, so no clearing of those was added.
+The hand-written sites `m4_5.rs` (the exhausted-inventory selection), `m4_7.rs` (`low` and `growing`) call the helpers. `SelectionReport` is consistent with `PairReport`: `SelectionReport::outcome` is assigned only at the two returns of `query`, after its last metered step, so a limited selection never has one. `a_limited_selection_names_no_outcome` sweeps every work cap on a winner and a no-match source and the helper holds at each; it was green before the guard, so the guard pins the state and changes no code path. `PairReport` clears `outcome`, `selected_signature` and `selected_error` at a limit already. The pair sweep in `m4_7.rs` (every work cap below the exact one, on the one source of `pair_queries_keep_destination_bound_variables_exact_and_filter_receivers`) found no limited pair report with a disagreeing error, a `Registration` blocker or a Registration goal state, so I added no clearing of those; the guard names them and a source that reaches them would fail it. No red exists for them: **not established**.
 
 ### Item 5: primitive coverage
 
@@ -100,7 +100,23 @@ The hand-written sites `m4_5.rs` (the exhausted-inventory selection), `m4_7.rs` 
 
 ## Checks
 
-Logs in `~/.t3/evidence/rill/m5-build-2026-11-22/ci-5n7s/`. See the report for the list and results.
+Merged base: `origin/implementation/m5-ownership-cleanup` at `0a8e2caf` (clean merge). Local targeted checks only; logs in `~/.t3/evidence/rill/m5-build-2026-11-22/ci-5n7s/`.
+
+| Check | Result | Log |
+|---|---|---|
+| `cargo test -p compiler --test m4_5 --test m4_6 --test m4_6_evidence --test m4_7 --test m4_8 --test m4_8_installed_conversions --test m4_8_primitives --test m4_8_ownership --test m4_8_list --test m4_8_scoped_join_caps --test m4_8_match_boolean_snapshots --test m4_8_callable_once --test m4_8_limit_readers` | 13 binaries pass: 18, 26, 27, 18, 20 tests, then eight single-test binaries (`installed_*`, the snapshot and cap tests) and `m4_8_limit_readers` (6 tests); none failed | `c4-m4.log` |
+| `--test m5 -- rfc_cases retained legacy_caps graph::inventory` | 156 passed, 0 failed (382 filtered) | `c4-m5.log` |
+| `cargo fmt --all -- --check` | clean | `fmt.log` |
+| `cargo clippy --locked --no-default-features -p compiler --tests -- -D warnings` | clean | `clippy.log` |
+| `mise run check:docs` | 2240 destinations, 0 errors | `check-docs.log` |
+| `git diff --check origin/implementation/m5-ownership-cleanup..HEAD` | clean | |
+| `git status --short \| grep target/` | empty | |
+
+The installed tests (`m4_8_installed_conversions`, `m4_8_primitives`, `m4_8_ownership`, `m4_8_list`) rerun themselves in a child by exact name; each parent reports one test passed, and the child's pass is asserted by the parent. The `m5` filters run `installed()` children the same way; the count of 156 includes them.
+
+Red logs: `red-c15b-wrong-acceptance.log` (the wrong acceptance), `red-item1-conversions.log`, `red-item1-output-agreement.log`, `red-item2-new-field-fails-to-compile.log`, `red-item5-primitive-coverage.log`. `a_limited_selection_names_no_outcome` was green before its guard (no red; see item 3).
+
+**Published caps and outcomes: none moved.** The pinned binaries above (the M4 caps in `m4_8_scoped_join_caps`, `m4_8_match_boolean_snapshots`, the `legacy_caps` and `graph::inventory` filters, every `Incomplete` and `ResourceLimit` outcome of the M4 and M5 tests it ran) pass with no edited expectation. The meter does not read what this ticket changes: each `withhold_findings` runs after `statistics` is final.
 
 ## What it did not establish
 
