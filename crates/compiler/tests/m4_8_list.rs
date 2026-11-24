@@ -567,6 +567,22 @@ fn installed_list() {
             assert_eq!(overlap.implementation.id.module, app.key);
             assert_eq!(*overlap.family, region.family.id);
             limit::assert_typed_limits_below(&graph, &report);
+            // Ruling 19 (1): `Overlap` at the exact cap, `Pending` one work short.
+            let exact = report.statistics();
+            let short = analyze_typed(
+                &graph,
+                AnalysisLimits {
+                    max_work: exact.work - 1,
+                    max_entries: exact.entries,
+                    max_depth: exact.max_depth,
+                },
+            );
+            limit::assert_typed_limit(&short);
+            let pending = short
+                .collection_protection()
+                .find(|p| p.operation == CollectionOperation::Iterate(ListTraversal::Owned))
+                .expect("the owned iteration's protection at one work short");
+            assert_eq!(pending.coverage, OwnershipCoverage::Pending);
             let loops: Vec<_> = app
                 .syntax
                 .nodes

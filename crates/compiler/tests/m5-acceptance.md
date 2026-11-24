@@ -1936,6 +1936,7 @@ All are written in [`compiler-metering.md`](../../../docs/agents/compiler-meteri
 - **Rule 11, third case (a ticket's mandated flip or charge).** Rule 11 names the three moves the owner ratified on 2026-11-23 (A2's O15 `counter`, B6's O15 expectation, C1's `callerExclusive`). Its cheaper-flip note covers a mandated flip that lowers the cost: the test asserts the new exact triple and that one unit less gives `ResourceLimit`, because the old cap still holds (C12 `pre` and `computed`, `ri-2s0.4`). The chief of staff or the owner decides any other cap movement.
 - **Rule 1 exception list.** Nine siblings in four tests (`ri-2s0.10`): `captures::declared_shared::declared_shared_siblings_keep_their_parent_caps` (`ignored`, `ignoredOther`), `iteration::record::record_yield_cleans_the_partial_item_then_the_suffix` (`mixed`, `custom`), `m4_8_callable_once::private_once_checks_the_actual_shared_pair` (`shared-formal-actual`, `shared-result-capture`, `shared-unclosed`) and `m4_8_match_boolean_snapshots::installed_boolean_matches` (`pre: mutable binder`, `pre: copy of another parameter`). Two more for O12 (`ri-2s0.8`): `(&named()).x` and `let view = &named();` in `rfc_cases::o12::text_record_results_stay_incomplete`. Three for the `&mut &Record` contents screen (`ri-1up`): a record with a `string` field, a nested record and an enum, in `rfc_cases::record_contents::unsupported_record_contents_stay_incomplete`. Each stays at its outcome and blocker site, pinned exact and one short, with its parent cap asserted to give `ResourceLimit`. Restructuring is `ri-qlh.4`.
 - **The chief's standing rule-1 exception** (rulings of 2026-11-24 07:19 AEDT, amended 11:35). When a new screen needs a record or enum declaration's field or variant list and no paid fact carries it, the exception is granted without asking, provided (a) the lookup comes after every screen the paid facts allow, (b) each sibling keeps its outcome and blocker site, (c) each sibling pays at most two charged declaration lookups and under 150 work in total, (d) the evidence file lists old and new per sibling, and (e) each use is listed in the handoff. Outcome flips and typed admissions outside a ticket's done-when still go to the chief. Uses: `ri-1up` (the three siblings above, +140 and +144 typed work) and `ri-ema` (four siblings of the `&mut List<&Record>` destination screen: a `string` field record +148, a nested record +148, an enum +144, an extra `bool` +74; `rfc_cases::list_contents::list_destination_siblings_keep_their_outcomes_and_blockers`).
+  - *Superseded 2026-11-24 (re-review `ci-b4b2` C-5, `ri-px1.11.11`).* Bound (c) above is the 11:35 AEDT figure. The ruling of 13:46 AEDT (review `ci-0mdr` Q5) amended it again: at most two charged declaration lookups per sibling module, under 150 work per sibling plus the entries of those lookups. The full text is in the rule-1 notes of [`compiler-metering.md`](../../../docs/agents/compiler-metering.md). The line above is not edited.
 - **Rule 3 note.** The existing path-keyed probes are known non-conforming and deferred to `ri-qlh.3`; a new or touched probe must conform.
 
 ### Stated limits recorded by tickets
@@ -1977,6 +1978,8 @@ Merge commits are from `git log --merges --first-parent` of the integration bran
 | C9 | `ri-q9lj` (`ci-jr0z`) | `analyze_ordinary`, `analyze_generics` and `ConversionReport::bodies` withhold findings at `ResourceLimit` | [`ri-q9lj.md`](m5-acceptance/ri-q9lj.md) | `61f22ae3` |
 
 C1's evidence file is `ri-px1.11-c1.md`; no `ri-grwx.md` exists.
+
+*Corrected 2026-11-24 (re-review `ci-b4b2` C-1 and A-F3, `ri-px1.11.11`).* C7's merge is `4ab0a82c`, not "this branch" (`git log --merges --first-parent`). The table omits C10, `ri-px1.11.7` (`ci-1lo8`), merge `d87e5dd2`: the rule-8 "no facts" sentence, the `ConversionReport` limit pin and the `header_metadata` `Ok(None)` note, under chief ruling 17 (below). "Rulings 11 to 16" below and above is now rulings 11 to 20. The re-review and its four fix children are in the next section. The lines above are not edited.
 
 ### Exceptions granted by rulings 11 to 16
 
@@ -2022,3 +2025,81 @@ Gate and probe logs of every build bead are outside the repository, in `~/.t3/ev
 ### For the re-review of the fix range
 
 The chief's condition (b): re-run probe 2 (O7's `&mut i32` member forms) on the replacement forms in both load modes, and check that Q1 moved no published cap (every existing expectation passed unedited in C1's filtered runs). The forms C2 touched are listed in [`ri-px1.11.1.md`](m5-acceptance/ri-px1.11.1.md), "Probe note". Hosted CI on the integration head has not run on this pass. Do not merge this increment or begin M6.
+
+## Final record after the re-review fix pass (2026-11-24, ri-px1.11.11, C14)
+
+This section answers the focused re-review `ci-b4b2` of `d87e5dd2` (range `81d317b3..d87e5dd2`, Standards and Spec axes, no Comments axis) and the single fix pass that followed, four children C11 to C14 (`ri-px1.11.8` to `ri-px1.11.11`) of `ri-px1.11`, under the chief of staff's rulings 11 to 20 of 2026-11-24 (`review/chief-rulings-11.md` to `chief-rulings-20.md` in the city notes; the report is `review/re-review-2.md`, the triage `review/re-review-2-triage.md`). It supersedes the lines of "Final record after the review-2 fix pass" where they differ (the merge commits, the ruling range, the rule-8 entry points, the open found beads, the stated limits). The re-review's summary: check 4 (rule 8) failed on two lists that still published at `ResourceLimit` (B-F1 `analyze_typed`, B-F2 `ConversionReport::family()`), D-F1 (member replacement through a reborrow of a sibling member was `Checked`, against ruling 11 Q3) and A-F1 (C3's gate charged three unsupported siblings before rejecting) were the medium findings, and the other findings were records and pins (C-1 to C-6, A-F2 to A-F4, B-F3, B-F4, D-F2). It found no wrong acceptance against RFC 0007 in 74 probes of O7 member replacement, both load modes. Bead states were checked with `gc bd show <id> --rig rill` on 2026-11-24. No Rill program ran. The hosted checks on the final head and the second re-review are not part of this record.
+
+**Base.** Review base `d87e5dd2`. C14 merged the integration tip `49834ef0` (C11, C12 and C13 merged). The final head's hosted checks have not run.
+
+### Children and merge commits
+
+Merge commits are from `git log --merges --first-parent` of the integration branch. The earlier record omitted C10 and named C7's merge as "this branch"; both are corrected here and by dated lines at that record.
+
+| Child | Bead (city bead) | Scope | Evidence | Merge |
+| --- | --- | --- | --- | --- |
+| C7 | `ri-px1.11.6` (`ci-ru4p`) | Records, the ST-4 and ST-9 pins, the conversion report probe (corrected: the merge is not "this branch") | [`ri-px1.11.6.md`](m5-acceptance/ri-px1.11.6.md) | `4ab0a82c` |
+| C10 | `ri-px1.11.7` (`ci-1lo8`) | Chief ruling 17: the rule-8 "no facts" sentence, the `ConversionReport` limit pin, the `header_metadata` `Ok(None)` note | [`ri-px1.11.7.md`](m5-acceptance/ri-px1.11.7.md) | `d87e5dd2` |
+| C11 | `ri-px1.11.8` (`ci-8j91`) | B-F1, B-F2, B-F4, A-F2: rule 8 at `ResourceLimit` for typed discards, registration issues, overlaps, coverage verdicts and `ConversionReport::family()`; helpers cover every finding accessor; hand-written sites use the helpers | [`ri-px1.11.8.md`](m5-acceptance/ri-px1.11.8.md) | `d27c86f5` |
+| C12 | `ri-px1.11.9` (`ci-x01v`) | A-F1: C3's gate reads a free `last_written` screen before charging; three siblings at their parent caps | [`ri-px1.11.9.md`](m5-acceptance/ri-px1.11.9.md) | `5fbe8f94` |
+| C13 | `ri-px1.11.10` (`ci-51qr`) | D-F1, D-F2, C-4: member replacement through a reborrow of a sibling member rejects R0201 at the replacement | [`ri-px1.11.10.md`](m5-acceptance/ri-px1.11.10.md) | `49834ef0` |
+| C14 | `ri-px1.11.11` (`ci-3254`) | This record, the SP-6 rename and limit, the amended bound (c), the C-6 pins, the A-F4 renames, ruling 19 and ruling 20 | [`ri-px1.11.11.md`](m5-acceptance/ri-px1.11.11.md) | the merger's merge of `m5-ownership-cleanup/r3f-ri-px1.11.11` (`git log --merges --first-parent --grep r3f-ri-px1.11.11`) |
+
+### Rulings 11 to 20
+
+Rulings 11 to 16 are listed in the record above (Q1 to Q5, the standing ruling on `ResourceLimit` entry points, the named exceptions of rulings 13 and 16, ruling 14's C3 admission, ruling 15's failure-partial note). The later ones:
+
+- **Ruling 17 (16:02 AEDT, C10).** A conversion `ResourceLimit` publishes no facts and `header_metadata()` gives `Ok(None)`; accepted with three conditions: the rule-8 sentence, a pinning test (empty facts at the limit, facts at the exact cap), and a note that `Ok(None)` also means "no header" (callers check `completion()` first). Done by C10.
+- **Ruling 18 (16:33 AEDT, B-F3).** Rule 8 is scoped, option (a); the code is not changed. A `ResourceLimit` report publishes no finding, no MIR and no receipt; a `ConversionReport` also publishes no facts; the partial facts an ordinary or typed limit report keeps (declarations, headers, family facts) are pinned M4 behaviour, not diagnostics, and no caller may treat them as complete (`m4_5::exhausted_products_keep_known_headers_but_cannot_supply_negative_input_evidence` pins them on purpose). `ri-qlh.9` owns the question of what a `ResourceLimit` value may carry and is widened to cover these facts (listed below). The limit helpers check every finding-like accessor (done by C11, enumerated in `tests/support/limit.rs`). Ruling 15's failure-partial note covers `check_scalars` and `check_data` as well as `analyze_declaration_types` and `check_declarations` (the same `Err` partial shape). C11, C12 (to the chief if no free screen exists) and C13 (R0201 per Q3, the reborrow form pinned, a valid twin `Checked`) were right as briefed.
+- **Ruling 19 (16:52 AEDT, C11).** (1) The coverage verdicts `Overlap` to `Pending` at `ResourceLimit` are accepted (a verdict that discloses an `R0500` finding is a finding for rule 8; in-crate readers accept only `Clear`, so no outcome or cap moved); the rule-8 table names them and a test pins `Overlap` at the exact cap and `Pending` one work short (`m4_8_ownership::installed_ownership_requires_the_built_archive`, `m4_8_list::installed_list`). (2) The accessor list as a comment and a table is a record, not the condition: each report kind that has a limit helper gets an in-crate function that destructures the report exhaustively, so a new field fails to compile; the helpers call it (`publishes_nothing_at_limit`, six report kinds, in C14; none needed a redesign).
+- **Ruling 20 (16:53 AEDT, C12 and C13).** `ri-j6fm` (row X2: the source written, then a different local written or lent before the match; +86 work, same `SourceRejected` `R0103`) is granted as a named rule-1 exception on the `ri-zee8` terms (pinned exact and one short, parent cap asserted `ResourceLimit` through the shared helper, named in the rule-1 notes, linked from `ri-qlh.4`, listed below), with the lend variant if its cost differs; C13's +1 per reaching store and the `MEMBER_REPLACEMENT` graph +5 are the mandated charge of Q3 (rule 11, third case); its two stricter, unpinned neighbours that moved R0203 to R0201 (D-F2 and the `take(holder)` variant) are pinned by C14. C12 accepted.
+
+### Rule-8 entry points fixed (adds to the list above)
+
+- `analyze_typed` also withholds `result_use().discards()` (R0103), `into_registration_issues()` and `try_into_registration_issues()` (R0310 to R0312), `ownership_overlaps()`, `collection_overlaps()`, `primitive_protection()` overlaps, and reads the `Overlap` coverage verdict of `primitive_protection()`, `ownership_protection()` and `collection_protection()` as `Pending` (C11; helper `assert_typed_limit`).
+- `ConversionReport::family()` returns `Ok(None)` at `ResourceLimit` (C11), as `header_metadata` does since C10; the stored families keep their issues for `bodies`.
+- Each report kind that has a limit helper has `publishes_nothing_at_limit` (C14): `GraphReport`, the body `Report`, `TypedReport`, `OrdinaryAnalysis`, `GenericReport` and `ConversionReport`, each destructuring the struct without `..`. The helpers call it and report anything the accessor list does not name.
+- Outside rule 8 (ruling 15, confirmed by ruling 18): `analyze_declaration_types`, `check_declarations`, `check_scalars` and `check_data`, each an `Err` value with a partial.
+
+### Rule-11 ledger: old and new numbers (re-review A-F3)
+
+The earlier record's children table carries no numbers for C5 and C3. They are here, in summary; every row with its test and its old-cap assertion is in the child's evidence file.
+
+| Child | Charge or flip | Moved | Old to new (examples) | Evidence |
+| --- | --- | --- | --- | --- |
+| C5 (`ri-px1.11.4`) | `charge_key` at the two path-keyed probes (ST-3), rule 11 third case | root work by `10 x probes - 1` for a field read (+9, +19, +29), `+10` per list-parameter insert; whole graphs by the sum of the roots | `field_through_reference_charges_its_local_probe`: `viaParam` 1,995 to 2,004, `afterLocals` 2,278 to 2,307, graph 187,294 to 187,332; `list_reference_parameter_charges_its_insert`: `keep` 1,912 to 1,922, `keepThree` 1,985 to 2,025, graph 186,623 to 186,673; `o10_lookup_siblings`: `computed` 2,009 to 2,019 (graph 191,091 to 191,141); `record_contents` `unsupported_record_reads` `id` 1,983 to 1,992 (graph 186,564 to 186,573) | [`ri-px1.11.4.md`](m5-acceptance/ri-px1.11.4.md), "Caps that moved in existing tests" |
+| C5 | scratch `Vec` reserved (ST-8) | +1 or +2 work and entries | `same` 7,894 / 754 / 4 to 7,896 / 756 / 4; `one` 4,972 / 437 / 4 to 4,973 / 438 / 4; graph 191,477 / 5,125 / 5 to 191,480 / 5,128 / 5; `o01_call_field_equality` `bare` 5,192 to 5,193 | same |
+| C3 (`ri-px1.11.2`) | Q4 flip, `SourceRejected` `R0103` to `Checked` (ruling 14 admits the third row) | the three flipped rows | `pre: mutable binder` 324,709 / 48,123 / 12 to 324,714 / 48,105 / 12 (old cap gives `ResourceLimit`, +5); `pre: mutable source` 324,529 / 48,133 / 12 to 324,568 / 48,115 / 12 (+39); `pre: immutable local source` 324,529 / 48,133 / 12 (measured at `a4e56651`) to 324,518 / 48,115 / 12 (the parent cap still holds) | [`ri-px1.11.2.md`](m5-acceptance/ri-px1.11.2.md) |
+| C12 (`ri-px1.11.9`) | none: C3's three paying siblings return to their parents | the pins C3 set for three new rows | `pre: mutable source reassigned after the copy` 325,489 to 325,403 / 48,455 / 12 (= parent `81d317b3`); `...lent mutably after the copy` 325,746 to 325,702 / 48,188 / 12; `pre: mutable binder lent mutably before the match` 325,898 to 325,886 / 48,178 / 12. No published cap moved; no exception | [`ri-px1.11.9.md`](m5-acceptance/ri-px1.11.9.md) |
+| C13 (`ri-px1.11.10`) | the sibling check of Q3 (+1 work per member store that reaches it), rule 11 third case | `MEMBER_REPLACEMENT` graph and its five stores | graph 204,371 to 204,376 / 7,771 / 6; `replaceMember` 3,834 to 3,835; `replaceNoUse` 3,283 to 3,284; `sameOwnerAgain` 3,691 to 3,692; `sharedReplace` 3,906 to 3,907; `localReferent` 3,491 to 3,492; `MEMBER_REPLACEMENT_SIBLINGS` pins new | [`ri-px1.11.10.md`](m5-acceptance/ri-px1.11.10.md), "Caps moved" |
+| C14 (`ri-px1.11.11`) | none: new pins only (list-parameter siblings, `ri-j6fm`, `take(holder)`) | no cap moved | see [`ri-px1.11.11.md`](m5-acceptance/ri-px1.11.11.md) | |
+
+### Exceptions in force (adds)
+
+- **The standing rule-1 exception, bound (c) in full** (re-review C-5): at most two charged declaration lookups per sibling module, under 150 work per sibling plus the entries of those lookups (ruling of 13:46 AEDT, Q5, amending 11:35 and 07:19). The text is in the rule-1 notes of [`compiler-metering.md`](../../../docs/agents/compiler-metering.md). The nested-record and enum list-parameter siblings are pinned (C-6): `rfc_cases::list_contents::list_parameter_siblings_of_nested_records_and_enums_pay_their_lookup`.
+- **Named exception, `ri-j6fm`** (ruling 20): X2, X3 and X4 in `m4_8_match_boolean_snapshots::installed_boolean_matches`, +86, +90 and +90 work over `81d317b3`, same outcome and blocker.
+- **Rule 11, third case:** C13's sibling check (+1 per reaching store) and the `MEMBER_REPLACEMENT` graph +5 (ruling 20).
+
+### Open found beads (additions and changes)
+
+State checked 2026-11-24. These add to the lists in the two records above.
+
+| Bead | State | Gap |
+| --- | --- | --- |
+| `ri-qlh.9` | needs triage | Widened by ruling 18: also decide what a `ResourceLimit` value may carry beyond findings, the partial facts an ordinary or typed limit report keeps (declarations, headers, family facts), and whether a `ConversionReport` may publish facts there. Covers `check_scalars` and `check_data` partials (ruling 15). |
+| `ri-j6fm` | needs triage | Boolean copy screen pays the `never_written` scan when a later write or lend names another local (X2, X3, X4); named exception, the fix is an M4 per-local written fact (`ri-qlh.4`). |
+| `ri-i0kj` | needs triage | SP-6: report R0202 at the storing call that makes the body-local source flow (parent `ri-qlh`, relates to `ri-2s0`). |
+
+### Stated limits recorded by this pass
+
+- **SP-6 (`ri-i0kj`).** RFC 0007 line 218 says the callee's exit check rejects the body-local source that flows to `dst`, which places the blocker at the storing call. The compiler reports R0202 at the last call that retains into `dst` before the exit: for `localThenParam` that is `retain(dst, a)`, the valid call, not `retain(dst, &user)`. Pinned as current behaviour by `rfc_cases::list_contents::r1_blocker_site_is_the_last_retention_not_the_storing_call`, renamed from `r1_local_then_parameter_reports_the_storing_call` (which said the opposite; the earlier lines in `ri-px1.11.5.md` and `ri-px1.11.md` that quote the old name are not edited).
+- **No existing sweep reaches a rejected delivery at a limit.** Removing the `unreject` of `replacement` in `withhold_judgments` was caught by no test; removing all four unrejects and the `SourceRejected` downgrade was caught by 64 tests through `publishes_nothing_at_limit` only (`~/.t3/evidence/rill/m5-build-2026-11-22/ci-3254/red-unreject-*.log`). The `replacement` field is guarded by the destructuring function, not by a sweep.
+- **Renames (A-F4).** `o10_lookup_siblings_keep_their_parent_caps` is `o10_lookup_siblings_stay_incomplete_at_their_pinned_caps` and `record_contents::unsupported_record_reads_keep_their_parent_caps` is `unsupported_record_reads_pin_current_caps_and_blockers`; their caps moved under C5's charge (above). No number changed. The earlier records that quote the old names are not edited.
+
+### Where the evidence logs live
+
+`~/.t3/evidence/rill/m5-build-2026-11-22/ci-3254/` (C14), `ci-8j91/` (C11), `ci-x01v/` (C12), `ci-51qr/` (C13), `ci-1lo8/` (C10).
+
+### For the second re-review
+
+Re-run probe 2 (O7 member replacement) on the reborrow forms and on `take(holder)` in both load modes; probe `ri-j6fm`'s three forms against `81d317b3`; check that `publishes_nothing_at_limit` of each report kind names every field a finding can reach. Hosted CI on the integration head has not run on this pass. Do not merge this increment or begin M6.

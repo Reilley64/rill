@@ -9,6 +9,13 @@
 //! Every finding-like accessor of each report kind, in one place. Each must be
 //! checked by that kind's `*_flaws` function; a new accessor that can carry a
 //! finding or a verdict about one goes in both lists in the same change.
+//! Backing the list, each report kind has a `publishes_nothing_at_limit`
+//! method in the crate that destructures the report struct without `..`, so a
+//! new field fails to compile until its author decides whether it can carry a
+//! finding. Each `*_flaws` function calls it when the accessor list finds
+//! nothing, and reports a field the list does not name (metering rule 8,
+//! chief ruling 19). The body report, `GenericReport`, `OrdinaryAnalysis`,
+//! `TypedReport`, `GraphReport` and `ConversionReport` have one.
 //!
 //! - graph report (`graph_limit_flaws`): `findings()`; `mir()` and
 //!   `ordinary_mir()` of every root and active disposer.
@@ -48,6 +55,13 @@ use compiler::analysis::typed::{
 };
 use compiler::loader::{DeclarationKind, Graph};
 
+/// What a limit helper reports when its accessor list names nothing wrong but the
+/// report's `publishes_nothing_at_limit` says it publishes a finding, a verdict
+/// that cites one or MIR: a field the list does not cover. Fix the list and the
+/// function together.
+const UNNAMED: &str =
+    "publishes something its accessor list does not name (publishes_nothing_at_limit)";
+
 /// A whole-graph report: no finding, and no ordinary MIR in any root or active disposer.
 pub(crate) fn graph_limit_flaws(report: &GraphReport<'_>) -> Vec<&'static str> {
     let mut flaws = Vec::new();
@@ -65,6 +79,9 @@ pub(crate) fn graph_limit_flaws(report: &GraphReport<'_>) -> Vec<&'static str> {
     {
         flaws.push("publishes MIR");
     }
+    if flaws.is_empty() && !report.publishes_nothing_at_limit() {
+        flaws.push(UNNAMED);
+    }
     flaws
 }
 
@@ -79,6 +96,9 @@ pub(crate) fn body_limit_flaws(report: &Report<'_>) -> Vec<&'static str> {
     }
     if report.mir().is_some() {
         flaws.push("publishes MIR");
+    }
+    if flaws.is_empty() && !report.publishes_nothing_at_limit() {
+        flaws.push(UNNAMED);
     }
     flaws
 }
@@ -156,6 +176,9 @@ pub(crate) fn typed_limit_flaws(report: &TypedReport<'_>) -> Vec<&'static str> {
     {
         flaws.push("publishes an overlap verdict");
     }
+    if flaws.is_empty() && !report.publishes_nothing_at_limit() {
+        flaws.push(UNNAMED);
+    }
     flaws
 }
 
@@ -177,6 +200,9 @@ pub(crate) fn ordinary_limit_flaws(
     }
     if header_finding(graph, report) {
         flaws.push("publishes a header metadata finding");
+    }
+    if flaws.is_empty() && !report.publishes_nothing_at_limit() {
+        flaws.push(UNNAMED);
     }
     flaws
 }
@@ -213,6 +239,9 @@ pub(crate) fn generics_limit_flaws(report: &GenericReport<'_>) -> Vec<&'static s
     }
     if report.annotations().findings().next().is_some() {
         flaws.push("publishes an annotation finding");
+    }
+    if flaws.is_empty() && !report.publishes_nothing_at_limit() {
+        flaws.push(UNNAMED);
     }
     flaws
 }
@@ -258,6 +287,9 @@ pub(crate) fn conversion_limit_flaws(
         })
     {
         flaws.push("publishes a registration issue");
+    }
+    if flaws.is_empty() && !report.publishes_nothing_at_limit() {
+        flaws.push(UNNAMED);
     }
     flaws
 }

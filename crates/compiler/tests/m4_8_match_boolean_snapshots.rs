@@ -740,7 +740,11 @@ function probe(flag: bool, gate: bool): void { let debt = Err<bool,i32>(61i32); 
     // parent cap (7002855e) gives `ResourceLimit`. The write twins pay nothing before
     // their rejection that the parents did not: their parent numbers are the ones measured
     // at 81d317b3, before the widened gate (review ci-b4b2 A-F1, ri-px1.11.9), and each
-    // parent cap still holds.
+    // parent cap still holds. Named rule-1 exception (chief of staff, 2026-11-24 16:53
+    // AEDT, ri-j6fm; `compiler-metering.md` rule 1): the two `ri-j6fm` rows write or lend a
+    // different local after the source, so the free `last_written` screen no longer names
+    // the source and it pays its scan before the same `R0103` (+86 and +90 work over the
+    // parents measured at 81d317b3); each parent cap gives `ResourceLimit`.
     for (name, source, parent, exact) in [
         (
             "pre: copy of another parameter",
@@ -762,6 +766,24 @@ function probe(flag: bool, gate: bool): void { let debt = Err<bool,i32>(61i32); 
             ),
             Some((325403, 48455, 12)),
             (325403, 48455, 12),
+        ),
+        (
+            "pre: mutable source written, then another local written (ri-j6fm, X2)",
+            MUTABLE_SOURCE.replace(
+                "let before = current;",
+                "let before = current; current = !flag; let mut z = flag; z = !flag;",
+            ),
+            Some((326097, 48707, 12)),
+            (326183, 48707, 12),
+        ),
+        (
+            "pre: mutable source written, then another local lent mutably (ri-j6fm, X3)",
+            MUTABLE_SOURCE.replace(
+                "let before = current;",
+                "let before = current; current = !flag; let mut z = flag; let w = &mut z;",
+            ),
+            Some((326044, 48695, 12)),
+            (326134, 48695, 12),
         ),
         (
             "computed: alias selects another place",
@@ -819,8 +841,10 @@ function probe(flag: bool, gate: bool): void { let debt = Err<bool,i32>(61i32); 
     // `*value = !*value;` write inside `flip`, with the unpaid `R0103` still published,
     // whatever the match does, so neither can reach `Checked`. Parent numbers measured at
     // 81d317b3 (review ci-b4b2 A-F1, ri-px1.11.9): same outcome and blocker, and the
-    // rejection costs no more than it did there.
-    for (name, source, exact) in [
+    // rejection costs no more than it did there. The last row is the third `ri-j6fm` form
+    // (the named exception of the rejections above): the same outcome and blocker as its
+    // parent, `flip(&mut z)` of another local after the source was written, +90 work.
+    for (name, source, exact, over_parent) in [
         (
             "pre: mutable binder lent mutably before the match",
             format!(
@@ -828,6 +852,7 @@ function probe(flag: bool, gate: bool): void { let debt = Err<bool,i32>(61i32); 
                 pre("let mut before = flag; flip(&mut before);", "before")
             ),
             (325886, 48178, 12),
+            None,
         ),
         (
             "pre: mutable source lent mutably after the copy",
@@ -839,9 +864,22 @@ function probe(flag: bool, gate: bool): void { let debt = Err<bool,i32>(61i32); 
                 )
             ),
             (325702, 48188, 12),
+            None,
+        ),
+        (
+            "pre: mutable source written, then another local lent by a call (ri-j6fm, X4)",
+            format!(
+                "{FLIP}{}",
+                MUTABLE_SOURCE.replace(
+                    "let before = current;",
+                    "let before = current; current = !flag; let mut z = flag; flip(&mut z);",
+                )
+            ),
+            (326912, 48582, 12),
+            Some((326822, 48582, 12)),
         ),
     ] {
-        installed(&probe, name, &source, Some(exact), |report| {
+        installed_over_parent(&probe, name, &source, Some(exact), over_parent, |report| {
             assert_eq!(report.completion(), TypedCompletion::Incomplete, "{name}");
             assert!(report.receipt().is_none());
             let uses = report.result_use().unwrap();

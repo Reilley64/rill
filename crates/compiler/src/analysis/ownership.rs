@@ -86,6 +86,26 @@ impl<'g> Report<'g> {
     pub fn findings(&self) -> &[Finding<'g>] {
         &self.findings
     }
+    /// Whether the report publishes no finding, no verdict that cites one and
+    /// no MIR (metering rule 8). Every field is named, so adding one fails to
+    /// compile until it is decided here. Test support for
+    /// `tests/support/limit.rs`.
+    #[doc(hidden)]
+    pub fn publishes_nothing_at_limit(&self) -> bool {
+        let Self {
+            completion,
+            findings,
+            rejected_forwarding_calls,
+            mir,
+            // A known blocker and a counter: not findings.
+            blocked_at: _blocked_at,
+            statistics: _statistics,
+        } = self;
+        *completion != Completion::SourceRejected
+            && findings.is_empty()
+            && rejected_forwarding_calls.is_none()
+            && mir.is_none()
+    }
     /// For a rejected forwarding context, the outer call and the retaining
     /// call, in that order. The finding identifies the actual leaf checkpoint.
     pub fn rejected_forwarding_calls(&self) -> Option<[Site<'g>; 2]> {

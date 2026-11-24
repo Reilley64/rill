@@ -120,6 +120,21 @@ pub(super) struct Report<'g> {
 }
 
 impl Report<'_> {
+    /// No overlap and no `Overlap` verdict (metering rule 8).
+    pub(super) fn publishes_nothing_at_limit(&self) -> bool {
+        let Self {
+            protection,
+            overlaps,
+            // The storage contract and a validation count: facts, not findings.
+            representations: _representations,
+            validated_owners: _validated_owners,
+        } = self;
+        overlaps.is_empty()
+            && protection
+                .iter()
+                .all(|scope| scope.coverage != OwnershipCoverage::Overlap)
+    }
+
     pub(super) fn roles_complete(&self) -> bool {
         self.validated_owners == OWNERS.len()
     }

@@ -78,15 +78,16 @@ function id(view: &Named): i32 { return view.id; }
 "####;
 
 /// Rule 2: the nearest unsupported reads keep the caps `bc9bfdd5` measured
-/// (typed 328,492 / 48,011 / 12 and whole graph 188,245 / 4,241 / 5): an
+/// (the `READ_SIBLINGS` roots; `NAMED_READS` `id` moved +9 under C5's charged
+/// probe, `ri-px1.11.4.md`, so the test pins current caps) (typed 328,492 / 48,011 / 12 and whole graph 188,245 / 4,241 / 5): an
 /// exclusive view, arithmetic and comparison on the read, and a whole copy.
 /// A `string` field stays R0501 at the caps it had (1,914 / 55 / 3; graph
 /// 186,447 / 4,165 / 5 at the parent, 186,564 / 4,221 / 5 now, because `id`
 /// in the same module is admitted).
 #[test]
-fn unsupported_record_reads_keep_their_parent_caps() {
+fn unsupported_record_reads_pin_current_caps_and_blockers() {
     installed(
-        "rfc_cases::record_contents::unsupported_record_reads_keep_their_parent_caps",
+        "rfc_cases::record_contents::unsupported_record_reads_pin_current_caps_and_blockers",
         |request| {
             check_cases(
                 &request,

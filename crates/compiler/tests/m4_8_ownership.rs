@@ -72,6 +72,24 @@ fn installed_ownership_requires_the_built_archive() {
             };
             assert_eq!(overlap.code(), "R0500");
             limit::assert_typed_limits_below(&graph, &report);
+            // Ruling 19 (1): the overlap verdict discloses an R0500 finding, so it
+            // is `Overlap` at the exact cap and `Pending` one work short.
+            let exact = report.statistics();
+            let short = analyze_typed(
+                &graph,
+                AnalysisLimits {
+                    max_work: exact.work - 1,
+                    max_entries: exact.entries,
+                    max_depth: exact.max_depth,
+                },
+            );
+            limit::assert_typed_limit(&short);
+            let pending = short
+                .ownership_protection()
+                .iter()
+                .find(|p| p.rule == copy.rule)
+                .expect("the Shared copy's protection at one work short");
+            assert_eq!(pending.coverage, OwnershipCoverage::Pending);
             assert_eq!(overlap.rule, copy.rule);
             assert_eq!(overlap.implementation.id.module.origin, Origin::Application);
             let app = graph
