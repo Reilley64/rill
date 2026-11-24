@@ -17,6 +17,10 @@ Before writing or reviewing RFCs, follow [docs/rfcs/README.md](docs/rfcs/README.
 Before changing production source, tooling or CI, follow [docs/agents/development.md](docs/agents/development.md).
 For GitHub workflow names and YAML layout, also follow [.github/AGENTS.md](.github/AGENTS.md).
 
+### Owner policies
+
+Before branching, merging, waiting, sending mail or deciding scope, follow [docs/agents/owner-policies.md](docs/agents/owner-policies.md).
+
 ### Repository maintenance
 
 Before moving examples, experiments or evidence, follow [docs/agents/repository.md](docs/agents/repository.md).

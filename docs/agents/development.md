@@ -15,4 +15,13 @@
 
 4. Report each check's actual scope and result. Write gate logs to `~/.t3/evidence/rill/<bead-id>/`, not `/tmp`. A source that reproduces a review finding is a committed test, not evidence. Keep unavailable product checks nonzero until real implementations and suites replace them. Scaffold compilation, Python/model checks and an LLVM C-API smoke do not establish Rill execution or complete client acceptance.
 
+5. Know these traps:
+
+   - `crates/compiler/build.rs` builds the ownership archive only for `aarch64-apple-darwin`. A test that uses `env!("RILL_OWNERSHIP_ARCHIVE")` needs `#[cfg(all(target_arch = "aarch64", target_os = "macos"))]`, or it passes locally and fails on the other hosted platforms. Read `gh pr checks <n>` after every push.
+   - Workflows start on push to `main` and on pull requests only. A branch with no pull request needs `gh workflow run <file> --ref <branch>`; a dispatched `native.yml` also runs `verify:release`.
+   - A cancelled hosted job is no result: rerun it.
+   - `gc bd create --body-file` needs an absolute path.
+   - `gc bd ready` hides the children of a blocked parent.
+   - A worker's summary is not evidence: check the source and the logs.
+
 Completion requires passing applicable implemented checks and an explicit list of unavailable or unrun acceptance gates. Release/support claims require every supported profile, not a successful skip or a configured CI matrix. Preserve prototype sources and recorded experiment evidence unless the task expressly changes them.
