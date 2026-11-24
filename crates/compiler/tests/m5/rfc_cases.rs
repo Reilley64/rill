@@ -269,7 +269,7 @@ fn check_typed(
     assert_eq!(replay.statistics(), typed.statistics(), "{context}");
     for short in short {
         let limited = analyze_typed(graph, short);
-        crate::limit::assert_typed_limit_keeping_body_findings(&limited);
+        crate::limit::assert_typed_limit(&limited);
         assert!(limited.receipt().is_none(), "{context}");
     }
 }

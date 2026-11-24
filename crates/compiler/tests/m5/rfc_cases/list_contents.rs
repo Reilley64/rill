@@ -1040,7 +1040,7 @@ fn r1_caller_provided_exclusive_source_stops_typed() {
                     assert_eq!(replay.statistics(), typed.statistics());
                     for short in short {
                         let limited = analyze_typed(&graph, short);
-                        crate::limit::assert_typed_limit_keeping_body_findings(&limited);
+                        crate::limit::assert_typed_limit(&limited);
                     }
                 }
             }

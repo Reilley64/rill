@@ -377,7 +377,10 @@ function shadow(value: &bool): bool {{ return copy(value); }}
             let exact = analyze_ownership(receipt, budget);
             assert_eq!(exact.statistics(), report.statistics());
             assert_eq!(exact.completion(), GraphCompletion::SourceRejected);
-            assert_eq!(exact.findings()[0].code(), "R0201");
+            let [finding] = exact.findings() else {
+                panic!("{:?}", exact.findings())
+            };
+            assert_eq!(finding.code(), "R0201");
             assert!(root(&exact, b"function twice").ordinary_mir().is_some());
             for short in one_short(budget) {
                 let result = analyze_ownership(receipt, short);
@@ -536,6 +539,18 @@ function text(value: string): void {{ release(value); }}
             let exact = analyze_ownership(receipt, budget);
             assert_eq!(exact.statistics(), report.statistics());
             assert_eq!(exact.completion(), GraphCompletion::SourceRejected);
+            assert_eq!(
+                exact
+                    .findings()
+                    .iter()
+                    .map(|f| f.code())
+                    .collect::<Vec<_>>(),
+                report
+                    .findings()
+                    .iter()
+                    .map(|f| f.code())
+                    .collect::<Vec<_>>()
+            );
             assert!(root(&exact, b"function widths").ordinary_mir().is_some());
             for short in one_short(budget) {
                 let result = analyze_ownership(receipt, short);

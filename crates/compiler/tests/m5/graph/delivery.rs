@@ -1155,6 +1155,22 @@ fn check_limits(test_mode: bool, receipt: &TypedReceipt<'_, '_>, report: &GraphR
     assert_eq!(at.completion(), report.completion());
     assert_eq!(at.statistics(), stats);
     assert_eq!(at.findings().len(), report.findings().len());
+    if !report.findings().is_empty() {
+        assert!(matches!(
+            root(&at, b"function nestedCaller(").forwarded_call(),
+            Delivery::Rejected {
+                finding_id: 0,
+                via_call: Some(_)
+            }
+        ));
+        assert!(matches!(
+            root(&at, b"function bad(").selected_call(),
+            Delivery::Rejected {
+                finding_id: 0,
+                via_call: Some(_)
+            }
+        ));
+    }
     assert!(matches!(
         root(&at, b"function goodWithOwner(").selected_call(),
         Delivery::Proved(_)
@@ -1191,6 +1207,9 @@ fn check_limits(test_mode: bool, receipt: &TypedReceipt<'_, '_>, report: &GraphR
                         && !matches!(root.enabled_frame(), Delivery::Proved(_))
                         && !matches!(root.selected_call(), Delivery::Proved(_))
                         && !matches!(root.forwarded_call(), Delivery::Proved(_))
+                        && !matches!(root.enabled_frame(), Delivery::Rejected { .. })
+                        && !matches!(root.selected_call(), Delivery::Rejected { .. })
+                        && !matches!(root.forwarded_call(), Delivery::Rejected { .. })
                 })
         );
     }
