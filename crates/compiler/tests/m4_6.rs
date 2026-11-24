@@ -1,4 +1,7 @@
 //! M4.6 public queries over real M3 captures, not Rill execution.
+#[path = "support/limit.rs"]
+mod limit;
+
 use compiler::analysis::generics::analyze_generics;
 use compiler::analysis::ordinary::analyze_ordinary;
 use compiler::analysis::scalars::{BodyOwner, NodeFactKind, ScalarFindingKind, ScalarUnsupported};
@@ -1120,4 +1123,58 @@ fn an_unadmitted_family_cannot_supply_a_checked_call() {
             .iter()
             .any(|o| o.site.node == node && o.reason == ScalarUnsupported::FamilySelection)
     );
+}
+
+/// Metering rule 8 for the conditional finding list: the exact cap publishes
+/// the `Arity` finding; every cap below it, on each axis, publishes none.
+#[test]
+fn resource_limit_publishes_no_conditional_finding() {
+    let fixture = Fixture::new(
+        "function visit<C>(value: C): bool;
+         implement visit(value: [[i32,(i32) => bool]]): bool { return true; }
+         let wrong = visit([[true]]);",
+    );
+    let graph = fixture.load();
+    let ordinary = analyze_ordinary(&graph, AnalysisLimits::default());
+    let report = analyze_generics(&ordinary, AnalysisLimits::default());
+    let stats = report.statistics();
+    let exact = AnalysisLimits {
+        max_work: stats.work,
+        max_entries: stats.entries,
+        max_depth: stats.max_depth,
+    };
+    let replay = analyze_generics(&ordinary, exact);
+    assert_eq!(replay.statistics(), stats);
+    assert!(!replay.conditional_findings().is_empty());
+
+    for work in 0..stats.work {
+        let limited = analyze_generics(
+            &ordinary,
+            AnalysisLimits {
+                max_work: work,
+                ..exact
+            },
+        );
+        limit::assert_generics_limit(&limited);
+    }
+    for entries in 0..stats.entries {
+        let limited = analyze_generics(
+            &ordinary,
+            AnalysisLimits {
+                max_entries: entries,
+                ..exact
+            },
+        );
+        limit::assert_generics_limit(&limited);
+    }
+    for depth in 0..stats.max_depth {
+        let limited = analyze_generics(
+            &ordinary,
+            AnalysisLimits {
+                max_depth: depth,
+                ..exact
+            },
+        );
+        limit::assert_generics_limit(&limited);
+    }
 }

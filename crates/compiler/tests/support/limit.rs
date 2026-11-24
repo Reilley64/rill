@@ -1,13 +1,18 @@
 //! The one place that says what `ResourceLimit` publishes (metering rule 8):
 //! no MIR and no finding (a typed report: no receipt and no finding in any list
-//! it publishes).
+//! it publishes; an ordinary or generics report: no finding in any list it
+//! publishes).
 //! Every `ResourceLimit` assertion calls one of these, so a site cannot omit
 //! part of it. The `*_flaws` forms list what is wrong, for tests that collect
 //! failures instead of panicking.
 #![allow(dead_code)]
 
+use compiler::analysis::generics::GenericReport;
+use compiler::analysis::ordinary::{Completion as OrdinaryCompletion, OrdinaryAnalysis};
 use compiler::analysis::ownership::{Completion, GraphCompletion, GraphReport, Report};
+use compiler::analysis::scalars::ScalarFailureKind;
 use compiler::analysis::typed::{TypedCompletion, TypedReport};
+use compiler::loader::Graph;
 
 /// A whole-graph report: no finding, and no ordinary MIR in any root or active disposer.
 pub(crate) fn graph_limit_flaws(report: &GraphReport<'_>) -> Vec<&'static str> {
@@ -81,6 +86,64 @@ pub(crate) fn typed_limit_flaws(report: &TypedReport<'_>) -> Vec<&'static str> {
     flaws
 }
 
+/// An `analyze_ordinary` report: no finding in the type facts, the declaration
+/// issues or any declaration header's metadata. The graph names the headers.
+pub(crate) fn ordinary_limit_flaws(
+    graph: &Graph,
+    report: &OrdinaryAnalysis<'_>,
+) -> Vec<&'static str> {
+    let mut flaws = Vec::new();
+    if report.completion() != OrdinaryCompletion::ResourceLimit {
+        flaws.push("completion is not ResourceLimit");
+    }
+    if report.type_facts().findings().next().is_some() {
+        flaws.push("publishes a type finding");
+    }
+    if !report.declaration_issues().is_empty() {
+        flaws.push("publishes a declaration issue");
+    }
+    if header_finding(graph, report) {
+        flaws.push("publishes a header metadata finding");
+    }
+    flaws
+}
+
+/// Whether any declaration header of the report publishes a metadata finding.
+pub(crate) fn header_finding(graph: &Graph, report: &OrdinaryAnalysis<'_>) -> bool {
+    graph
+        .modules()
+        .iter()
+        .flat_map(|module| &module.declarations)
+        .any(|declaration| {
+            report
+                .header_metadata(&declaration.id)
+                .unwrap()
+                .is_some_and(|header| header.type_metadata().findings().next().is_some())
+        })
+}
+
+/// An `analyze_generics` report (or `ConversionReport::bodies`): no finding in
+/// any list it publishes: body, conditional, declaration issue and annotation.
+pub(crate) fn generics_limit_flaws(report: &GenericReport<'_>) -> Vec<&'static str> {
+    let mut flaws = Vec::new();
+    if report.completion() != ScalarFailureKind::ResourceLimit {
+        flaws.push("completion is not ResourceLimit");
+    }
+    if !report.findings().is_empty() {
+        flaws.push("publishes a body finding");
+    }
+    if !report.conditional_findings().is_empty() {
+        flaws.push("publishes a conditional finding");
+    }
+    if !report.declaration_issues().is_empty() {
+        flaws.push("publishes a declaration issue");
+    }
+    if report.annotations().findings().next().is_some() {
+        flaws.push("publishes an annotation finding");
+    }
+    flaws
+}
+
 #[track_caller]
 pub(crate) fn assert_graph_limit(report: &GraphReport<'_>) {
     let flaws = graph_limit_flaws(report);
@@ -96,5 +159,17 @@ pub(crate) fn assert_body_limit(report: &Report<'_>) {
 #[track_caller]
 pub(crate) fn assert_typed_limit(report: &TypedReport<'_>) {
     let flaws = typed_limit_flaws(report);
+    assert!(flaws.is_empty(), "{flaws:?} at {:?}", report.statistics());
+}
+
+#[track_caller]
+pub(crate) fn assert_ordinary_limit(graph: &Graph, report: &OrdinaryAnalysis<'_>) {
+    let flaws = ordinary_limit_flaws(graph, report);
+    assert!(flaws.is_empty(), "{flaws:?} at {:?}", report.statistics());
+}
+
+#[track_caller]
+pub(crate) fn assert_generics_limit(report: &GenericReport<'_>) {
+    let flaws = generics_limit_flaws(report);
     assert!(flaws.is_empty(), "{flaws:?} at {:?}", report.statistics());
 }
