@@ -684,54 +684,85 @@ function probe(flag: bool, gate: bool): void { let debt = Err<bool,i32>(61i32); 
         });
     }
 
-    // Genuine rejections stay R0103. Exact numbers at 7002855e, then here. Each of the
-    // two `pre` rows pays a few steps to read the written binding before it rejects, so
-    // its parent cap no longer holds. The `computed` row and the mutable source cost no more.
-    // Rule 1 exception (chief of staff, 2026-11-23, ri-2s0.10): `pre: mutable binder`
-    // (+11 work) and `pre: copy of another parameter` (+14 work) pay before `R0103`, and
-    // each parent cap (7002855e) gives `ResourceLimit`.
+    // Review ci-0mdr Q4 (SP-7, ri-px1.11.2). A mutable local that is never written is as
+    // good a copy as an immutable one, so the first two rows check with a receipt. Their
+    // parent numbers are the rejections measured at da5bec50 (both paid before their
+    // `R0103`, rule 1 exception ri-2s0.10). The third row is the same source with an
+    // immutable local: it shares the screen, so it checks too, and it has no parent pin.
     for (name, source, parent, exact) in [
         (
             "pre: mutable binder",
             pre("let mut before = flag;", "before"),
-            (324698, 48123, 12),
-            (324709, 48123, 12),
-        ),
-        (
-            "pre: copy of another parameter",
-            pre("let before = other;", "before"),
-            (324698, 48123, 12),
-            (324712, 48123, 12),
+            Some((324709, 48123, 12)),
+            (324714, 48105, 12),
         ),
         (
             "pre: mutable source",
-            "
-function probe(flag: bool): void {
-  let debt = Err<bool,i32>(61i32);
-  let mut current = flag;
-  let before = current;
-  let copy = match (current) { _ => before };
-  if (current) { if (copy) { let _ = debt; } } else { if (!copy) { let _ = debt; } }
-}
-"
-            .to_owned(),
-            (324529, 48133, 12),
-            (324529, 48133, 12),
+            MUTABLE_SOURCE.to_owned(),
+            Some((324529, 48133, 12)),
+            (324568, 48115, 12),
+        ),
+        (
+            "pre: immutable local source",
+            MUTABLE_SOURCE.replace("let mut current", "let current"),
+            None,
+            (324518, 48115, 12),
+        ),
+    ] {
+        installed_over_parent(&probe, name, &source, None, parent, |report| {
+            checked(report);
+            let stats = report.statistics();
+            assert_eq!(
+                (stats.work, stats.entries, stats.max_depth),
+                exact,
+                "{name}"
+            );
+        });
+    }
+
+    // Genuine rejections stay R0103: the written value is not the matched source. Exact
+    // numbers at 7002855e, then here. `pre: copy of another parameter` pays a few steps to
+    // read the written binding before it rejects, so its parent cap no longer holds. The
+    // `computed` row costs no more. Rule 1 exception (chief of staff, 2026-11-23,
+    // ri-2s0.10): `pre: copy of another parameter` (+14 work) pays before `R0103`, and its
+    // parent cap (7002855e) gives `ResourceLimit`. The write twins pay nothing before
+    // their rejection that the parents did not, so they have no parent.
+    for (name, source, parent, exact) in [
+        (
+            "pre: copy of another parameter",
+            pre("let before = other;", "before"),
+            Some((324698, 48123, 12)),
+            (324712, 48123, 12),
+        ),
+        (
+            "pre: mutable binder reassigned before the match",
+            pre("let mut before = flag; before = !flag;", "before"),
+            None,
+            (325493, 48441, 12),
+        ),
+        (
+            "pre: mutable source reassigned after the copy",
+            MUTABLE_SOURCE.replace(
+                "let before = current;",
+                "let before = current; current = !flag;",
+            ),
+            None,
+            (325489, 48455, 12),
         ),
         (
             "computed: alias selects another place",
             COMPUTED.replace("&flag else &flag", "&flag else &other"),
-            (325928, 48413, 12),
+            Some((325928, 48413, 12)),
             (325886, 48394, 12),
         ),
     ] {
-        let holds = exact.0 <= parent.0 && exact.1 <= parent.1;
-        let over_parent = (!holds).then_some(parent);
+        let holds = parent.is_some_and(|parent| exact.0 <= parent.0 && exact.1 <= parent.1);
+        let over_parent = parent.filter(|_| !holds);
         installed_over_parent(
             &probe,
             name,
             &source,
-            holds.then_some(parent),
+            parent.filter(|_| holds),
             over_parent,
             |report| {
                 unpaid(report);
@@ -744,7 +775,61 @@ function probe(flag: bool): void {
             },
         );
     }
+
+    // A mutable borrow of the copy or the source stays `Incomplete` at the borrow
+    // (Storage), whatever the match does, so neither can reach `Checked`.
+    for (name, source, exact) in [
+        (
+            "pre: mutable binder lent mutably before the match",
+            format!(
+                "{FLIP}{}",
+                pre("let mut before = flag; flip(&mut before);", "before")
+            ),
+            (325898, 48178, 12),
+        ),
+        (
+            "pre: mutable source lent mutably after the copy",
+            format!(
+                "{FLIP}{}",
+                MUTABLE_SOURCE.replace(
+                    "let before = current;",
+                    "let before = current; flip(&mut current);",
+                )
+            ),
+            (325746, 48188, 12),
+        ),
+    ] {
+        installed(&probe, name, &source, None, |report| {
+            assert_eq!(report.completion(), TypedCompletion::Incomplete, "{name}");
+            assert!(report.receipt().is_none());
+            let uses = report.result_use().unwrap();
+            let [pending] = uses.pending() else {
+                panic!("{:?}", uses.pending())
+            };
+            assert_eq!(pending.blocker, ResultUseBlocker::Storage);
+            let stats = report.statistics();
+            assert_eq!(
+                (stats.work, stats.entries, stats.max_depth),
+                exact,
+                "{name}"
+            );
+        });
+    }
 }
+
+const MUTABLE_SOURCE: &str = "
+function probe(flag: bool): void {
+  let debt = Err<bool,i32>(61i32);
+  let mut current = flag;
+  let before = current;
+  let copy = match (current) { _ => before };
+  if (current) { if (copy) { let _ = debt; } } else { if (!copy) { let _ = debt; } }
+}
+";
+
+const FLIP: &str = "
+function flip(value: &mut bool): void { *value = !*value; }
+";
 
 const PRE: &str = "
 function probe(flag: bool): void { let debt = Err<bool,i32>(61i32); let before = flag; let copy = match (flag) { _ => before }; if (flag) { if (copy) { let _ = debt; } } else { if (!copy) { let _ = debt; } } }
