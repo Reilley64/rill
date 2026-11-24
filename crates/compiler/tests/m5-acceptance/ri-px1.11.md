@@ -97,3 +97,14 @@ The three A7 old numbers reproduce at `d95ae9e`, in both modes, in a scratch wor
 
 - The full M5 binary, `mise run check` and the native workflow run in hosted CI only.
 - The `ri-785.7 #1`, `ri-vgz.7 #1` and `ri-785.5 #1` siblings above still pay before they reject. They are reported to the planner, not given an exception.
+
+## Final record after the owner override (2026-11-24, R-D6b)
+
+Records only: no compiler source, test or cap changed. Base `c6b2cc98` of `implementation/m5-ownership-cleanup`, which holds the last build merge (K3 on a propagation exit, `ri-2s0.13`). Branch `m5-ownership-cleanup/r-d6b-ri-px1.11`. The review-fix section above answers review `ci-uaa1`; this one rewrites the record for what merged after it, under the owner's override of 2026-11-23 19:18 AEDT (the deferred Required rows are built in M5).
+
+- [`m5-acceptance.md`](../m5-acceptance.md): the section "Final record: deferred obligations (2026-11-23, ri-px1.11)" is replaced by "Final record (2026-11-24, ri-px1.11, R-D6b)". It lists every row built since the first record with its bead and evidence file (so no deferral row remains for a built row), the deferrals that still hold with the state of each bead, the ten open found beads, the rule exceptions in force and the stated limits recorded by tickets. The first record's `ri-qlh.3` row moved to the open found beads, and `ri-30q` is listed as closed (superseded).
+- [`m5-status.md`](../m5-status.md): every owner cell names an open bead, or "none: <ticket>" where the row is built. O1, O10, O14, O15 and O16 changed. O10 names `ri-can9` for the receivers it does not cover and states the untested `LookupListElement` MIR form. Notes 1 and 2 carry a dated update, because they described the state of 2026-11-22.
+- [`compiler-metering.md`](../../../../docs/agents/compiler-metering.md): a short paragraph states two M5 rules from the retired wiki that no file held (the chief of staff's note of 2026-11-24 12:36 AEDT on `ri-2s0`): evidence covers both installed load modes, and MIR tests are not Rill execution.
+- Pointers use `docs/agents/` paths. No `.wiki/` link is added.
+
+The second review is next, at the fixed point `origin/main`. `ri-px1.11` stays open until it is clean and hosted CI is green on the final head. The hosted checks on this head did not run. No Rill program ran.
