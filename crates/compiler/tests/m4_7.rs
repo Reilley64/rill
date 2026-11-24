@@ -1218,7 +1218,9 @@ fn conversion_bodies_publish_no_finding_at_resource_limit() {
 /// which read the ordinary input: at a conversion `ResourceLimit` they publish
 /// no finding, though the input (the caller's own complete report) holds some.
 /// The exact cap publishes them; every cap below it, on each axis, publishes
-/// none. The second source has no generic default, so its report reads the
+/// none. Rule 8 also covers the facts and the headers (2026-11-24 ruling): the
+/// exact cap publishes declarations, uses and some headers, and every cap below
+/// it publishes no fact and no header (`assert_conversion_limit`). The second source has no generic default, so its report reads the
 /// caller's input; the first extends the nominal types and reads that.
 #[test]
 fn conversion_report_publishes_no_finding_list_at_resource_limit() {
@@ -1265,6 +1267,30 @@ fn conversion_report_publishes_no_finding_list_at_resource_limit() {
         assert_eq!(
             limit::conversion_header_finding(&graph, &replay),
             header_finding,
+            "source {n}"
+        );
+        assert!(
+            replay.type_facts().declarations().next().is_some(),
+            "source {n}"
+        );
+        assert!(
+            replay.type_facts().type_uses().next().is_some(),
+            "source {n}"
+        );
+        let headers = limit::conversion_headers(&graph, &replay);
+        assert!(headers > 0, "source {n}");
+        assert!(
+            headers
+                < graph
+                    .modules()
+                    .iter()
+                    .map(|module| module.declarations.len())
+                    .sum::<usize>(),
+            "source {n}: `Ok(None)` also means no header"
+        );
+        let implementation = &graph.implementations()[0].declaration;
+        assert!(
+            replay.header_metadata(implementation).unwrap().is_some(),
             "source {n}"
         );
         for work in 0..stats.work {

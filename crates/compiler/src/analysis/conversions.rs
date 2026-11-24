@@ -125,6 +125,7 @@ impl<'g> ConversionReport<'_, 'g> {
     }
 
     /// A `ResourceLimit` report publishes no header, as it publishes no finding.
+    /// `Ok(None)` also means the declaration has no header: check `completion()` first.
     pub fn header_metadata(
         &self,
         id: &DeclarationId,

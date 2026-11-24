@@ -91,6 +91,8 @@ A determination reused across revisits is valid only while every premise it used
 
 **Note (2026-11-24, chief of staff, ruling of 15:12 AEDT, review `ci-0mdr`, `ri-qlh.9`).** Rule 8 covers report completions. An `Err` failure value with `FailureKind::ResourceLimit` may carry a partial; its findings are not diagnostics and no caller may publish them. This covers `analyze_declaration_types` and `check_declarations` (`m4_1.rs` and `m4_2.rs` pin their partials on purpose) and, as `ri-q9lj` found, `check_scalars` and `check_data`. No production code outside the loader reads `.partial`. Bead `ri-qlh.9` decides after M5 whether such partials should carry findings at all.
 
+**Note (2026-11-24, chief of staff, ruling of 16:02 AEDT, `chief-rulings-17.md`, `ri-px1.11.7`).** A ResourceLimit report publishes no finding, no MIR, no receipt and no facts. `ConversionReport::header_metadata` returns `Ok(None)` both for a header that does not exist and at ResourceLimit; check `completion()` first. `conversion_report_publishes_no_finding_list_at_resource_limit` (`m4_7.rs`) pins both sides: the exact cap publishes facts and headers, every cap below it publishes none.
+
 ## 9. Tests assert the whole sequence
 
 "A drop exists" or "at least one" establishes neither order nor exactly-once. Assert the full ordered list of actions, with each action and its place in one list.
