@@ -124,7 +124,7 @@ class CommentCheckSourceTests(unittest.TestCase):
             "license comment after code": "fn f() {}\n// License: MIT\n",
             "bead link with prose": "// see ri-qlh.18.6 for why\nfn f() {}\n",
             "RFC link with prose": "// docs/rfcs/0007-ownership.md says so\nfn f() {}\n",
-            "word that looks like a bead": "// ri-before\nfn f() {}\n",
+            "bead id followed by prose": "// ri-qlh is why\nfn f() {}\n",
         }
         for name, source in cases.items():
             with self.subTest(case=name):
