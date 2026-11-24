@@ -69,6 +69,17 @@ jobs:
             exit 1
           fi
 
-      - name: "Build and test: Verify release acceptance"
+      # The release task runs the repository checks and then the product build,
+      # which is a stub that exits 2. The stub message appears only after the
+      # checks passed, so a failing check still fails this step. Replace this
+      # step with `mise run verify:release` when the product build exists.
+      - name: "Build and test: Verify release acceptance stops at the unavailable build"
         if: github.event_name == 'workflow_dispatch'
-        run: mise run verify:release
+        run: |
+          status=0
+          output=$(mise run verify:release 2>&1) || status=$?
+          printf '%s\n' "$output"
+          if [ "$status" -ne 2 ] || ! printf '%s\n' "$output" | grep -qF 'build is not implemented in this scaffold'; then
+            echo "::error::verify:release no longer stops at the build stub (exit $status). Replace this assertion with the real release run if the build exists or its message changed. Otherwise a check before the build failed."
+            exit 1
+          fi
