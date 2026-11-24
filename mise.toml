@@ -59,6 +59,12 @@ description = "Fail when the M5 ownership test binary lists no tests on this pla
 depends = ["doctor"]
 run = "cargo test --locked --no-default-features -p compiler --test m5 -- --list | grep -c ': test$'"
 
+[tasks."status:prototypes"]
+description = "Regenerate the committed prototype status table (crates/compiler/tests/m5/prototype-status.tsv) through the public pipeline"
+depends = ["doctor"]
+env = { RILL_PROTOTYPE_STATUS_WRITE = "1" }
+run = "cargo test --locked --no-default-features -p compiler --test m5 -- prototype_status --test-threads=2"
+
 [tasks."check:docs"]
 depends = ["doctor"]
 run = ["python tools/check_docs.py", "python tools/row_tests.py check", "git diff --check"]

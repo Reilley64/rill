@@ -12,6 +12,7 @@
    - One Rust file's formatting: `mise exec -- rustfmt --check --edition 2024 <file>`.
    - One Python test class or case: from `tools/`, `mise exec -- uv run --project python --locked --no-sync python -m unittest test_infrastructure -k <name>`.
    - Documentation: `mise run check:docs` takes about a second and has no narrower scope. Run it for any change to Markdown, and on each branch you rewrite. The tracked pre-push hook runs it before every push once `mise run setup` has run.
+   - Prototype status table: `mise run status:prototypes` regenerates `crates/compiler/tests/m5/prototype-status.tsv` through the public pipeline; commit it with the change that moved it, because `prototype_status::committed_table_matches_the_pipeline` fails when it differs.
 
    Run `mise run check:ci` when you change workflows, and select other product checks by the changed component; for compiler analysis that spends work, entries or depth, follow the [compiler metering standard](compiler-metering.md). Run heavy provisioning or experiments only through their explicit profiles after reviewing the prerequisites. After you push, read the hosted result for the branch. A pull request that conflicts with its base gets no hosted run: start one with `gh workflow run check.yml --ref <branch>`. A missing run is not a passing run.
 

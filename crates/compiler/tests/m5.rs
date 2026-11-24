@@ -42,8 +42,12 @@ mod o15_arithmetic;
 mod o16_join_order;
 #[path = "m5/patterns.rs"]
 mod patterns;
+#[path = "support/pipeline.rs"]
+mod pipeline;
 #[path = "m5/propagation.rs"]
 mod propagation;
+#[path = "m5/prototype_status.rs"]
+mod prototype_status;
 #[path = "m5/records.rs"]
 mod records;
 #[path = "m5/retained.rs"]
