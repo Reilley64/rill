@@ -439,6 +439,53 @@ fn member_replacement_through_a_sibling_reborrow_rejects_r0201() {
     );
 }
 
+/// Chief ruling 20 (re-review ci-b4b2, C13's stricter neighbour): a record
+/// holding a reborrow of its own sibling member, passed whole to a call. It was
+/// R0203 at `holder` (the move of a record whose member a loan still covers);
+/// the replacement is now the first rejection, R0201 at the replacement,
+/// related the reborrow, as for every other neighbour in `REBORROW`.
+const REBORROW_TAKE: Case = Case {
+    text: r#"
+type Pair = { x: &mut i32; y: &mut i32 };
+function take(h: Pair): i32 { return 0i32; }
+function takeAfterReborrow(): i32 {
+  let mut a = 1i32;
+  let mut b = 2i32;
+  let mut holder = Pair { x: &mut a, y: &mut b };
+  holder.y = &mut *holder.x;
+  return take(holder);
+}
+"#,
+    typed_stats: (326089, 48005, 12),
+    graph: (GraphCompletion::SourceRejected, (189238, 4708, 5)),
+    roots: &[
+        Root {
+            name: "take",
+            want: Want::Checked,
+            graph: None,
+            stats: (2388, 168, 3),
+        },
+        Root {
+            name: "takeAfterReborrow",
+            want: Want::Rejected {
+                code: "R0201",
+                site: r####"holder.y = &mut *holder.x;"####,
+                related: r####"&mut *holder.x"####,
+            },
+            graph: None,
+            stats: (3255, 472, 5),
+        },
+    ],
+};
+
+#[test]
+fn a_record_holding_a_sibling_reborrow_rejects_at_the_replacement_before_it_is_taken() {
+    check(
+        "rfc_cases::o07::a_record_holding_a_sibling_reborrow_rejects_at_the_replacement_before_it_is_taken",
+        &REBORROW_TAKE,
+    );
+}
+
 /// What a root or graph does at the caps the parent revision measured.
 pub(super) enum Parent {
     /// The check now costs more: the old caps give `ResourceLimit`.
