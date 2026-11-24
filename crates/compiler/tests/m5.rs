@@ -30,6 +30,8 @@ mod iteration;
 mod iteration_result_use;
 #[path = "m5/legacy_caps.rs"]
 mod legacy_caps;
+#[path = "m5/legacy_mir.rs"]
+mod legacy_mir;
 #[path = "support/limit.rs"]
 mod limit;
 #[path = "m5/o05_field_arithmetic.rs"]

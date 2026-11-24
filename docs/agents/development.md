@@ -7,6 +7,7 @@
    - One test by name: `mise exec -- cargo test --locked --no-default-features -p compiler <test_name>`.
    - One test file: `mise exec -- cargo test --locked --no-default-features -p compiler --test m1`. Add `-- <test_name>` to select a test in it.
    - One M5 test or module: `mise run test:m5 -- <filter>`, for example `mise run test:m5 -- scoped_jobs`; it runs the M5 binary without LLVM at two test threads, and a filter after `--` selects tests by name. The same run by hand: `mise exec -- cargo test --locked --no-default-features -p compiler --test m5 -- <filter> --test-threads=2`. `mise run test:m5:caps` replays the published fixed caps (the `legacy_caps` filter).
+   - The MIR digest guard: `mise run test:m5 -- legacy_mir` compares the ownership output over the `legacy-caps` fixtures with `crates/compiler/tests/m5/legacy-mir.tsv` and names the fixture, mode and root that changed. A refactor ticket passes it unedited; a ticket that means to change the emitted MIR regenerates the file with `RILL_BLESS_MIR=1 mise run test:m5 -- legacy_mir` and commits it.
    - One crate: `-p <crate>` on `cargo test`, `cargo clippy` and `cargo fmt`, for example `mise exec -- cargo clippy --locked --no-default-features -p compiler --all-targets -- -D warnings` and `mise exec -- cargo fmt -p compiler -- --check`.
    - One Rust file's formatting: `mise exec -- rustfmt --check --edition 2024 <file>`.
    - One Python test class or case: from `tools/`, `mise exec -- uv run --project python --locked --no-sync python -m unittest test_infrastructure -k <name>`.
