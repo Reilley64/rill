@@ -2,7 +2,9 @@
 
 Apply this page to every diff under `crates/compiler/src/analysis/` and every test that pins work, entries or depth. Authors follow it while writing; Standards reviewers walk the eleven rules against the diff and cite the rule number. A rule is met when its **Check** can be answered from the diff alone.
 
-Vocabulary: a **cap** is one `(work, entries, depth)` limit in `AnalysisLimits`. **Exact** is the cap equal to the measured statistics; **one short** lowers one axis by one. A **targeted** query is one function (`lower_body`); a **graph** query is the whole receipt (`analyze_ownership`). The **ledger** is [`m5-acceptance.md`](../../crates/compiler/tests/m5-acceptance.md). Each rule cites one commit that shows the fix.
+Vocabulary: a **cap** is one `(work, entries, depth)` limit in `AnalysisLimits`. **Exact** is the cap equal to the measured statistics; **one short** lowers one axis by one. A **targeted** query is one function (`lower_body`); a **graph** query is the whole receipt (`analyze_ownership`). The **ledger** is [`m5-acceptance.md`](../../crates/compiler/tests/m5-acceptance.md), closed with M5: its notes stay as written and no later milestone adds to it.
+
+**From M6 on (`ri-0w2p`), the tests are the evidence.** A cap's new numbers live in the test that pins it; its old numbers and the reason live in the commit message. No ticket writes a ledger note, an evidence file or a prose list of tests or caps. What a test cannot hold goes in a `Not established` comment on the ticket's bead ([development guide](development.md) item 4). Where a rule below asks for a ledger note or an evidence file, read it as that. Each rule cites one commit that shows the fix.
 
 M5 evidence covers both installed load modes. MIR tests are not Rill execution.
 
@@ -12,6 +14,8 @@ A new proof path decides eligibility from facts already paid for, before its fir
 
 - **Check:** in every new path, no `step`, `reserve`, `charge_key` or allocation precedes the last early return that rejects an unsupported shape.
 - **Example:** `335da9f` preflights both child shapes, environments and premises before allocating isolated Result-use checks.
+
+**From M6 on (`ri-0w2p`), an exception note names the tests and the reason only.** The pinning test holds each sibling's exact and one-short caps and asserts that the parent cap gives `ResourceLimit`; the commit message holds the old and new numbers. Condition (d) of the standing ruling below is met by that test and that commit message, not by an evidence file. The M5 notes below keep their numbers as written.
 
 **Exceptions (2026-11-23, chief of staff, under rule 11's authority line).** Eight unsupported siblings in four tests pay before they reject, because no paid fact can reject them earlier; an earlier screen needs new M4 facts. Each keeps its current cap, pinned exact and one short, and each parent cap is asserted to give `ResourceLimit`. They stay `Incomplete` (or `SourceRejected`) at default limits. The evidence is [`ri-2s0.10.md`](../../crates/compiler/tests/m5-acceptance/ri-2s0.10.md); the restructuring is one open bead. No other sibling has an exception, except as added below.
 
@@ -137,7 +141,7 @@ A determination reused across revisits is valid only while every premise it used
 
 A reviewer's finding is closed only by a test in the repository that fails without the fix. A probe in `/tmp` or a worker's summary does not close it. The test source lives in `crates/compiler/tests/`.
 
-- **Check:** each fix commit for a finding adds or edits a test. Reverting only the source change fails that test, and the finding or its bead is named in the commit message or the ledger.
+- **Check:** each fix commit for a finding adds or edits a test. Reverting only the source change fails that test, and the finding or its bead is named in the commit message.
 - **Example:** `343ff586` pins `dispose<Bag>((value))`, a grouped disposer operand, in `tests/m5/disposers.rs` together with the source fix that keeps it independently typed.
 
 ## 11. Cap changes
@@ -147,7 +151,7 @@ A published cap (in a test, or in the fixed-cap manifest once H1, `ri-px1.1`, ad
 Every case requires, in one diff:
 
 - the cap change as a single line in the fixed-cap manifest (`crates/compiler/tests/m5/legacy-caps.tsv`, once H1 has landed; before then, in the test that pins the cap);
-- a dated ledger note that states the old numbers, the new numbers and the reason;
+- the old numbers, the new numbers and the reason, in the commit message (no dated ledger note from M6);
 - an assertion that the **old** cap now reports `ResourceLimit`.
 
 **Note (2026-11-24, chief of staff, ruling of 13:46 AEDT, review `ci-0mdr` ST-14, Q2).** A cap whose source is a fixture written inside a test is pinned in that test, with its old-cap `ResourceLimit` assertion beside it. `legacy-caps.tsv` holds the caps of the fixture files under `legacy-caps/`. One cap has one place, next to its source; copying an in-test cap into the manifest would give two places to disagree.
@@ -159,14 +163,14 @@ A new proved root may re-pin whole-graph expectations, and only those.
 - **Check:** a new root is added to the graph and proved with its own test.
 - **Check:** only `analyze_ownership` totals change. Every targeted cap in the diff is unchanged.
 - **Check:** the diff attributes the difference per root (work and entries each root adds) and names the root that sets the new depth, since depth is a maximum and not a sum. The per-root figures add up to the change in the totals.
-- **Check:** the historical totals stay in the ledger.
+- **Check:** the historical totals stay in the commit message (in the ledger, for M5's).
 - **Example:** the ledger section "Canonical disposal of named scalar operands" (`d647a5a8`) adds 14 scalar `dispose` roots. The negative replacement graph moves to 203,358 / 8,126 / 3 and its two targeted budgets stay.
 
 ### An unsupported targeted route (owner decision D3 (b), narrowly, 2026-11-22)
 
 A correctness fix may move the cap of an unsupported targeted route when the blocker site moves for a stated reason: the old number measured a path that skipped a check that the fix adds.
 
-- **Check:** the commit message or ledger note names the skipped check and the old and new blocker sites.
+- **Check:** the commit message names the skipped check and the old and new blocker sites.
 - **Check:** the new route reports `Incomplete` at the new cap, with the new blocker site asserted (rule 8). The old cap gives `ResourceLimit`.
 - **Check:** the cost is not avoidable. If rule 1 could place a screen earlier so the old cap still holds, the exception does not apply and the diff is refused.
 - **Example:** `003c4147` checks both captures before the parent exit, as Standards required. The old live-`Err` cap stopped at the unlowered pair binding. `e022c80d` re-pins it under this case: `live_parent_error_reaches_the_join_at_its_repinned_cap` (`tests/m5/scoped_join/fresh_result.rs`) asserts that the old cap now gives `ResourceLimit`. Reproducing the old blocker would need an earlier proof that keeps the capture diagnostics.
@@ -176,8 +180,8 @@ A correctness fix may move the cap of an unsupported targeted route when the blo
 A ticket whose body mandates flipping a targeted outcome (for example `Incomplete` to `Checked`), or charging a lookup that a rule requires, may move the targeted caps that the flip or charge moves. Whole-graph moves in the same diff still follow D2 (b).
 
 - **Check:** the ticket body or a recorded ruling names the flip or charge before the diff.
-- **Check:** the ticket's evidence file states the old numbers, the new numbers and the reason.
+- **Check:** the commit message states the old numbers, the new numbers and the reason.
 - **Check:** the old cap asserts `ResourceLimit`.
 - **Check:** the cost is not avoidable by a rule-1 screen.
-- **Note (2026-11-23, chief of staff):** when a mandated flip lowers the cost, the old cap cannot give `ResourceLimit`: it still holds. The test then asserts the new exact triple and that one unit less than the new cap on each axis gives `ResourceLimit`, and the evidence file states old, new and the reason. Example: C12 (`ri-2s0.4`), rows `pre` and `computed` in `m4_8_match_boolean_snapshots::installed_boolean_matches` (426,921/48,910/12 to 426,895/48,892/12, and 428,253/49,198/12 to 427,988/49,104/12).
+- **Note (2026-11-23, chief of staff):** when a mandated flip lowers the cost, the old cap cannot give `ResourceLimit`: it still holds. The test then asserts the new exact triple and that one unit less than the new cap on each axis gives `ResourceLimit`, and the commit message states old, new and the reason. Example: C12 (`ri-2s0.4`), rows `pre` and `computed` in `m4_8_match_boolean_snapshots::installed_boolean_matches` (426,921/48,910/12 to 426,895/48,892/12, and 428,253/49,198/12 to 427,988/49,104/12).
 - **Example:** the owner ratified three such moves on 2026-11-23 (review `ci-uaa1`). A2 (`ri-785.1`) charges the O15 `counter` reads with `charge_key`: 2,504/329/6 to 2,562/329/6, graph 187,485 to 187,543 (`rfc_cases::o15_pre_charge_counter_caps_now_give_resource_limit`). B6 (`ri-785.9`) lowers i32 equality, so the O15 expectation flips from `Incomplete` at 1,893/32/1 to `Checked` at 4,577/425/6, and O3 and O5 move with it (`rfc_cases::equality_expectations_exceed_their_incomplete_caps`). C1 (`ri-vgz.3`) admits `callerExclusive`: `Incomplete` at 3,089/284/4 to `Checked` at 9,466/1,677/4 (`propagation::option_caller::exclusive_relay_caller_exceeds_its_parent_caps`).

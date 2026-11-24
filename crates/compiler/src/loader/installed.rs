@@ -6,11 +6,8 @@ mod collection;
 pub use collection::CollectionArtifact;
 pub(super) use collection::CollectionLinks;
 
-#[cfg(all(target_arch = "aarch64", target_os = "macos"))]
 pub(super) const OWNERSHIP_ARCHIVE: Option<&[u8]> =
     Some(include_bytes!(env!("RILL_OWNERSHIP_ARCHIVE")));
-#[cfg(not(all(target_arch = "aarch64", target_os = "macos")))]
-pub(super) const OWNERSHIP_ARCHIVE: Option<&[u8]> = None;
 
 pub(super) fn is_ownership_source(path: &str) -> bool {
     matches!(path, "shared.rill" | "mutex.rill" | "channel.rill")
