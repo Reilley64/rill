@@ -76,3 +76,7 @@ None added. One use removed: `pre: mutable binder` left the rule-1 exception not
 - A copy or source written by any means that is not an `Assignment` or `&mut` in its scope (none exists in RFC 0007's mutation rules as read here); a pattern-bound mutable local with a tuple or record pattern; a field of a record, or a whole non-`bool` local. All keep the old `R0103`.
 - A write after the read: the scan covers the whole scope after the binding, so by construction `let mut before = flag; match (flag) { _ => before }; before = !flag;` keeps the old `R0103`, the conservative direction. No test runs it.
 - Nothing here proves ownership cleanup or runs Rill.
+
+## Correction (2026-11-24, review `ci-b4b2` A-F1, `ri-px1.11.9`)
+
+The sentence "the write twins pay nothing before their rejection that the parents did not" and the numbers of three rows above are wrong. `pre: mutable source reassigned after the copy` paid +86 work (325,403 at `81d317b3`, not 325,489), `pre: mutable source lent mutably after the copy` +44 (325,702, not 325,746) and `pre: mutable binder lent mutably before the match` +12 (325,886, not 325,898). A free screen on the latest written or lent local now returns them at their parent numbers, with the same outcome and blocker; see [`ri-px1.11.9.md`](ri-px1.11.9.md). `pre: mutable binder reassigned before the match` equals its parent (325,493).
