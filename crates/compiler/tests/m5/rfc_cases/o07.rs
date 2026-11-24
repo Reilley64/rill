@@ -486,6 +486,212 @@ fn a_record_holding_a_sibling_reborrow_rejects_at_the_replacement_before_it_is_t
     );
 }
 
+/// Re-review ci-9qga 2C-F1, pinned as a conservative stated limit (chief
+/// ruling 21 (3)): a value read from a
+/// member of another record carries the loans of that whole record
+/// (`Action::Reborrow` builds them through `carried_loan_root`), so when
+/// `other` also holds a reborrow of `holder.x` the store into `holder.y`
+/// rejects R0201 although `holder.x` and `holder.y` end up pointing at
+/// different places (`a` and `c`). Each source below is sound and was
+/// `Checked` at `d87e5dd2`; the member-replacement check over-rejects it.
+/// Narrowing needs a member-only loan set per record member, which is the
+/// per-member loan tracking ruling 21 excludes from M5; ri-qlh holds the
+/// follow-up. The pins are exact and one short on each axis in both load
+/// modes. A change that makes any of them `Checked` is the fix landing: edit
+/// the pin then, with that bead.
+const OVER_REJECTION: Case = Case {
+    text: r#"
+type Pair = { x: &mut i32; y: &mut i32 };
+type Holder = { first: &mut i32; second: &i32 };
+function storeFromBuilt(): i32 {
+  let mut a = 1i32;
+  let mut b = 2i32;
+  let mut c = 3i32;
+  let mut holder = Pair { x: &mut a, y: &mut b };
+  let other = Pair { x: &mut c, y: &mut *holder.x };
+  holder.y = other.x;
+  return 0i32;
+}
+function storeFromBuiltThenWrite(): i32 {
+  let mut a = 1i32;
+  let mut b = 2i32;
+  let mut c = 3i32;
+  let mut holder = Pair { x: &mut a, y: &mut b };
+  let other = Pair { x: &mut c, y: &mut *holder.x };
+  holder.y = other.x;
+  *holder.y += 1i32;
+  return 0i32;
+}
+function storeFromSetMember(): i32 {
+  let mut a = 1i32;
+  let mut b = 2i32;
+  let mut c = 3i32;
+  let mut d = 4i32;
+  let mut holder = Pair { x: &mut a, y: &mut b };
+  let mut other = Pair { x: &mut c, y: &mut d };
+  other.y = &mut *holder.x;
+  holder.y = other.x;
+  return 0i32;
+}
+function storeReborrowOfRead(): i32 {
+  let mut a = 1i32;
+  let mut b = 2i32;
+  let mut c = 3i32;
+  let mut d = 4i32;
+  let mut holder = Pair { x: &mut a, y: &mut b };
+  let mut other = Pair { x: &mut c, y: &mut d };
+  other.y = &mut *holder.x;
+  holder.y = &mut *other.x;
+  return 0i32;
+}
+function storeReborrowViaLocal(): i32 {
+  let mut a = 1i32;
+  let mut b = 2i32;
+  let mut c = 3i32;
+  let mut d = 4i32;
+  let mut holder = Pair { x: &mut a, y: &mut b };
+  let mut other = Pair { x: &mut c, y: &mut d };
+  other.y = &mut *holder.x;
+  let r = &mut *other.x;
+  holder.y = r;
+  return 0i32;
+}
+function storeSharedFromShared(): i32 {
+  let mut a = 1i32;
+  let e = 5i32;
+  let f = 6i32;
+  let mut c = 3i32;
+  let mut h = Holder { first: &mut a, second: &e };
+  let mut o = Holder { first: &mut c, second: &f };
+  o.second = &*h.first;
+  let k = &*o.first;
+  h.second = k;
+  return 0i32;
+}
+"#,
+    typed_stats: (346577, 51865, 12),
+    graph: (GraphCompletion::SourceRejected, (212632, 9075, 5)),
+    roots: &[
+        Root {
+            name: "storeFromBuilt",
+            want: Want::Rejected {
+                code: "R0201",
+                site: r####"holder.y = other.x;"####,
+                related: r####"&mut *holder.x"####,
+            },
+            graph: None,
+            stats: (3990, 820, 5),
+        },
+        Root {
+            name: "storeFromBuiltThenWrite",
+            want: Want::Rejected {
+                code: "R0201",
+                site: r####"holder.y = other.x;"####,
+                related: r####"&mut *holder.x"####,
+            },
+            graph: None,
+            stats: (4252, 953, 5),
+        },
+        Root {
+            name: "storeFromSetMember",
+            want: Want::Rejected {
+                code: "R0201",
+                site: r####"holder.y = other.x;"####,
+                related: r####"&mut *holder.x"####,
+            },
+            graph: None,
+            stats: (4443, 1037, 5),
+        },
+        Root {
+            name: "storeReborrowOfRead",
+            want: Want::Rejected {
+                code: "R0201",
+                site: r####"holder.y = &mut *other.x;"####,
+                related: r####"&mut *holder.x"####,
+            },
+            graph: None,
+            stats: (4430, 1039, 5),
+        },
+        Root {
+            name: "storeReborrowViaLocal",
+            want: Want::Rejected {
+                code: "R0201",
+                site: r####"holder.y = r;"####,
+                related: r####"&mut *holder.x"####,
+            },
+            graph: None,
+            stats: (4605, 1115, 5),
+        },
+        Root {
+            name: "storeSharedFromShared",
+            want: Want::Rejected {
+                code: "R0201",
+                site: r####"h.second = k;"####,
+                related: r####"&*h.first"####,
+            },
+            graph: None,
+            stats: (4596, 1115, 5),
+        },
+    ],
+};
+
+#[test]
+fn member_replacement_pins_an_over_rejection_of_sound_stores_from_another_record() {
+    check(
+        "rfc_cases::o07::member_replacement_pins_an_over_rejection_of_sound_stores_from_another_record",
+        &OVER_REJECTION,
+    );
+}
+
+/// Re-review ci-9qga 2C-F3: a call result carries the loan of every
+/// argument (RFC 0007:28), so `pickFirst(&mut c, &mut *holder.x)` carries the
+/// reborrow of `holder.x` although it returns its first argument, `&mut c`.
+/// Storing it into `holder.y` rejects R0201: conservative, and
+/// the same limit as `OVER_REJECTION` (the call does not say which argument
+/// the result keeps). `pickFirst` itself checks.
+const CALL_RESULT_CARRIES_EVERY_LOAN: Case = Case {
+    text: r#"
+type Pair = { x: &mut i32; y: &mut i32 };
+function pickFirst(a: &mut i32, b: &mut i32): &mut i32 { return a; }
+function storePickedFirst(): i32 {
+  let mut a = 1i32;
+  let mut b = 2i32;
+  let mut c = 3i32;
+  let mut holder = Pair { x: &mut a, y: &mut b };
+  holder.y = pickFirst(&mut c, &mut *holder.x);
+  return 0i32;
+}
+"#,
+    typed_stats: (326878, 48110, 12),
+    graph: (GraphCompletion::SourceRejected, (189249, 4707, 6)),
+    roots: &[
+        Root {
+            name: "pickFirst",
+            want: Want::Checked,
+            graph: None,
+            stats: (2080, 128, 3),
+        },
+        Root {
+            name: "storePickedFirst",
+            want: Want::Rejected {
+                code: "R0201",
+                site: r####"holder.y = pickFirst(&mut c, &mut *holder.x);"####,
+                related: r####"&mut *holder.x"####,
+            },
+            graph: None,
+            stats: (3105, 519, 6),
+        },
+    ],
+};
+
+#[test]
+fn member_replacement_pins_a_call_result_that_carries_every_argument_loan() {
+    check(
+        "rfc_cases::o07::member_replacement_pins_a_call_result_that_carries_every_argument_loan",
+        &CALL_RESULT_CARRIES_EVERY_LOAN,
+    );
+}
+
 /// What a root or graph does at the caps the parent revision measured.
 pub(super) enum Parent {
     /// The check now costs more: the old caps give `ResourceLimit`.
