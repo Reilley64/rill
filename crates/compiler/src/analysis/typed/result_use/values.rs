@@ -65,7 +65,7 @@ impl<'a, 'g> Check<'a, 'g> {
                     self.install_boolean(state, root, BooleanValue::Copy(copy))?;
                 } else if !self.wildcard_sources.is_empty() && !self.discarded_value(usage)? {
                     let mut copied = false;
-                    for (source, path) in self.wildcard_sources.iter().rev() {
+                    for ((source, path), _) in self.wildcard_sources.iter().rev() {
                         self.budget.step(1 + component.len())?;
                         if from == *source && component == *path {
                             let copy = state.new_boolean_copy(from, &component, self.budget)?;
@@ -74,7 +74,9 @@ impl<'a, 'g> Check<'a, 'g> {
                             break;
                         }
                     }
-                    if !copied && let Some(source) = self.parameter_copy_source(from, &component)? {
+                    if !copied
+                        && let Some(source) = self.parameter_copy_source(value, from, &component)?
+                    {
                         match state.boolean_value(source.0, &source.1, self.budget)? {
                             Some(value) => self.install_boolean(state, root, value)?,
                             None => {
@@ -94,42 +96,31 @@ impl<'a, 'g> Check<'a, 'g> {
         Ok(())
     }
 
-    /// The wildcard source that the immutable local `from` copies, found on demand.
-    /// `let name = parameter;` binds an immutable name to an immutable parameter, so the
-    /// two hold one value wherever the name is in scope. Reading the written binding costs
-    /// nothing until a copy of an unknown Boolean is read inside a wildcard match whose
-    /// source is a parameter, and no eager tracking moves the other programs' caps.
     fn parameter_copy_source(
         &mut self,
+        value: &ExpressionFacts<'g>,
         from: Root<'g>,
         component: &[ResultComponent<'g>],
     ) -> Work<Option<Address<'g>>> {
         let Root::Local(id) = from else {
             return Ok(None);
         };
-        // A local source that the body already wrote or lent is no copy source, and the scan
-        // below would find that write; deciding it here costs nothing (metering rule 1).
-        let written = self.last_written;
+        let read = value
+            .binding
+            .is_some_and(|binding| std::ptr::eq(binding, id));
         if !component.is_empty()
             || id.kind != DeclarationKind::Binding
-            || !self.wildcard_sources.iter().any(|(root, path)| {
+            || (read && (value.written_before || matches!(value.copy_of, CopySource::Not)))
+            || !self.wildcard_sources.iter().any(|((root, path), written)| {
                 path.is_empty()
                     && matches!(root, Root::Local(p) if match p.kind {
                         DeclarationKind::Parameter => true,
-                        DeclarationKind::Binding => !written.is_some_and(|w| std::ptr::eq(w, *p)),
+                        DeclarationKind::Binding => !written,
                         _ => false,
+                    } && match value.copy_of {
+                        CopySource::Of(copy) if read => std::ptr::eq(copy, *p),
+                        _ => true,
                     })
-            })
-        {
-            return Ok(None);
-        }
-        // A copy of a local source that was written or lent already is rejected by the scan
-        // below, and the parent rejected it here for free, so no lookup is paid first. A
-        // parameter source keeps the check after the lookup, so its pins do not move.
-        if written.is_some_and(|w| std::ptr::eq(w, id))
-            && !self.wildcard_sources.iter().any(|(root, path)| {
-                path.is_empty()
-                    && matches!(root, Root::Local(p) if p.kind == DeclarationKind::Parameter)
             })
         {
             return Ok(None);
@@ -142,10 +133,6 @@ impl<'a, 'g> Check<'a, 'g> {
         let NodeKind::Binding { mutable } = nodes[parent].kind else {
             return Ok(None);
         };
-        // A mutable copy that was written or lent already: the scan below would say so.
-        if mutable && written.is_some_and(|w| std::ptr::eq(w, id)) {
-            return Ok(None);
-        }
         let (pattern, init) = (
             nodes[parent].children[0],
             *nodes[parent].children.last().unwrap(),
@@ -180,7 +167,7 @@ impl<'a, 'g> Check<'a, 'g> {
             return Ok(None);
         }
         let mut found = None;
-        for (source, path_at) in &self.wildcard_sources {
+        for ((source, path_at), _) in &self.wildcard_sources {
             self.budget.step(1)?;
             if path_at.is_empty() && matches!(source, Root::Local(p) if std::ptr::eq(*p, path.root))
             {
@@ -191,7 +178,6 @@ impl<'a, 'g> Check<'a, 'g> {
         let Some(Root::Local(source)) = found else {
             return Ok(None);
         };
-        // A mutable copy or source still holds one value when nothing ever writes it.
         if mutable && !self.never_written(id, parent)? {
             return Ok(None);
         }
