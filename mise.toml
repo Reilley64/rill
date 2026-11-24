@@ -56,7 +56,7 @@ run = "cargo test --locked --no-default-features -p compiler --test m5 -- legacy
 
 [tasks."check:docs"]
 depends = ["doctor"]
-run = ["python tools/check_docs.py", "git diff --check"]
+run = ["python tools/check_docs.py", "python tools/row_tests.py check", "git diff --check"]
 
 [tasks."check:fixtures"]
 depends = ["setup"]
