@@ -2388,10 +2388,13 @@ function bump(value: &mut Pair): void { value.x += 1i32; }
 ];
 
 /// Siblings of the admitted `*parameter += literal`. Each `Incomplete` root
-/// keeps the caps measured with only the typed admission applied, in a
-/// `git worktree add` at the parent, before the ownership lowering existed:
-/// the lowering screens from written shape and paid-for facts before any charge.
-/// The supported wrapped forms (`scoped`, `looped`, `dead`) are Checked controls.
+/// keeps the caps measured with only the typed admission applied to the parent
+/// `7002855e` (`result_use.rs`; the parent alone stops in the typed pass, so no
+/// parent ownership cap exists for these roots, and no revision holds the typed
+/// admission without the lowering): the lowering screens from written shape and
+/// paid-for facts before any charge. `ri-px1.11.5.md` records the measurement and
+/// the patch (review ci-0mdr ST-7). The supported wrapped forms (`scoped`,
+/// `looped`, `dead`) are Checked controls.
 const EXCLUSIVE_WRITE_SIBLINGS: &[Source] = &[Source {
     text: r#"
 function control(value: &mut i32): void { *value += 1i32; }
@@ -2607,6 +2610,18 @@ fn o01_old_typed_caps_give_resource_limit() {
         "rfc_cases::o01_old_typed_caps_give_resource_limit",
         O1,
         (325375, 47829, 12),
+    );
+}
+
+/// The parent `7002855e` stops the sibling module in the typed pass at
+/// 334,460 / 48,395 / 12 (review ci-0mdr ST-7); the typed admission needs more,
+/// so that cap now gives `ResourceLimit` with no receipt.
+#[test]
+fn o01_exclusive_write_siblings_typed_parent_cap_now_gives_resource_limit() {
+    old_typed_caps(
+        "rfc_cases::o01_exclusive_write_siblings_typed_parent_cap_now_gives_resource_limit",
+        EXCLUSIVE_WRITE_SIBLINGS,
+        (334460, 48395, 12),
     );
 }
 
