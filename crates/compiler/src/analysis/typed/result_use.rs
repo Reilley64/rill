@@ -4,7 +4,7 @@ use crate::analysis::scalars::data::{
     Access, Constructor, DataExpression, PathProjection, PlacePath,
 };
 use crate::analysis::scalars::{
-    BodyOwner, ExpressionFacts, NodeFactKind, NodeFacts, Propagation, Site,
+    BodyOwner, CopySource, ExpressionFacts, NodeFactKind, NodeFacts, Propagation, Site,
 };
 use crate::analysis::{
     Binder, DeclarationFacts, DeclarationId, DeclarationShape, MemberType, Payload, Substitution,
@@ -366,10 +366,7 @@ struct Check<'a, 'g> {
     report: &'a mut ResultUseReport<'g>,
     loops: Vec<LoopExits<'g>>,
     match_views: Vec<(Address<'g>, Root<'g>)>,
-    wildcard_sources: Vec<Address<'g>>,
-    // The root of the latest assignment or `&mut` evaluated, from the place facts those
-    // already read. `parameter_copy_source` rejects a local it names without a scan.
-    last_written: Option<&'g DeclarationId>,
+    wildcard_sources: Vec<(Address<'g>, bool)>,
     checked_arrows: BTreeSet<NodeId>,
     dead_depth: usize,
     dead_start: Option<usize>,
@@ -420,7 +417,6 @@ impl<'a, 'g> Check<'a, 'g> {
             loops: Vec::new(),
             match_views: Vec::new(),
             wildcard_sources: Vec::new(),
-            last_written: None,
             checked_arrows: BTreeSet::new(),
             dead_depth: 0,
             dead_start: None,
@@ -775,10 +771,6 @@ impl<'a, 'g> Check<'a, 'g> {
                 let target = self.expression_facts(left)?;
                 let path = target.and_then(|expression| expression.path.as_ref());
                 let checked = self.facts(node)?.is_some();
-                // A write the source language forbids has no facts: it names no mutable local.
-                if checked {
-                    self.last_written = path.map(|path| path.root).or(self.last_written);
-                }
                 let plain_dereference = path.filter(|path| {
                     checked
                         && syntax.kind == NodeKind::Assignment("=")
@@ -1180,9 +1172,6 @@ impl<'a, 'g> Check<'a, 'g> {
                 let operand = syntax.children[0];
                 let operand_facts = self.expression_facts(operand)?;
                 let path = operand_facts.and_then(|e| e.path.as_ref());
-                if syntax.kind == NodeKind::Prefix("&mut") {
-                    self.last_written = path.map(|path| path.root).or(self.last_written);
-                }
                 let place = self.place_storage(&state, path)?;
                 if state.has_option_lists()
                     && let Some(path) = path

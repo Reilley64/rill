@@ -212,6 +212,8 @@ impl<'a, 'g> Check<'a, 'g> {
             .and_then(|fact| fact.path.as_ref());
         let source = self.address(&state, original)?;
         if boolean {
+            let written = scrutinee.is_some_and(|fact| fact.written_before);
+            let source = source.map(|source| (source, written));
             return self.boolean_match(node, matched, state, source, unused_bool, depth);
         }
         let remaining = self.expression(matched.scrutinee, state, depth + 1)?;
@@ -245,10 +247,12 @@ impl<'a, 'g> Check<'a, 'g> {
         node: NodeId,
         matched: &Match<'g>,
         state: Residence<'g>,
-        source: Option<Address<'g>>,
+        source: Option<(Address<'g>, bool)>,
         unused: bool,
         depth: usize,
     ) -> Work<Alternatives<'g>> {
+        let written = source.as_ref().is_some_and(|(_, written)| *written);
+        let source = source.map(|(source, _)| source);
         let mut unobserved = false;
         if let [arm] = matched.arms.as_slice()
             && arm.guard.is_none()
@@ -270,7 +274,7 @@ impl<'a, 'g> Check<'a, 'g> {
             // tracking equality only if a later read copies the source.
             if let Some(source) = source {
                 self.budget.reserve(1)?;
-                self.wildcard_sources.push(source);
+                self.wildcard_sources.push((source, written));
                 let result = self.match_arms(node, matched, remaining, snapshot, unused, depth);
                 self.wildcard_sources.pop();
                 return result;

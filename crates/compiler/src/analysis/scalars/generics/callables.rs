@@ -572,6 +572,8 @@ impl<'r, 'g> Checker<'r, 'g> {
                             ty: Some(ty.clone()),
                             mutable: false,
                             boolean: None,
+                            copy_of: CopySource::Unknown,
+                            written: None,
                         },
                     )
                     .is_some()

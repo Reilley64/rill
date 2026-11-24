@@ -813,7 +813,7 @@ fn boolean_copy_cells() -> Vec<Cell<Outcome>> {
             at: &["other parameter", "immutable", "none", "none"],
             source: pre("let before = other;", "before"),
             parent: Some((324698, 48123, 12)),
-            exact: (324712, 48123, 12),
+            exact: (324698, 48123, 12),
             outcome: Outcome::Unpaid,
         },
         Cell {
@@ -854,7 +854,7 @@ fn boolean_copy_cells() -> Vec<Cell<Outcome>> {
                 "let before = current; current = !flag; let mut z = flag; z = !flag;",
             ),
             parent: Some((326097, 48707, 12)),
-            exact: (326183, 48707, 12),
+            exact: (326097, 48707, 12),
             outcome: Outcome::Unpaid,
         },
         Cell {
@@ -865,7 +865,7 @@ fn boolean_copy_cells() -> Vec<Cell<Outcome>> {
                 "let before = current; current = !flag; let mut z = flag; let w = &mut z;",
             ),
             parent: Some((326044, 48695, 12)),
-            exact: (326134, 48695, 12),
+            exact: (326044, 48695, 12),
             outcome: Outcome::Unpaid,
         },
         Cell {
@@ -876,7 +876,7 @@ fn boolean_copy_cells() -> Vec<Cell<Outcome>> {
                 "let before = current; let r = &mut current; let mut z = flag; z = !flag;",
             ),
             parent: Some((326063, 48685, 12)),
-            exact: (326153, 48685, 12),
+            exact: (326063, 48685, 12),
             outcome: Outcome::Unpaid,
         },
         Cell {
@@ -887,7 +887,7 @@ fn boolean_copy_cells() -> Vec<Cell<Outcome>> {
                 "let mut before = current; let r = &mut before; let mut z = flag; z = !flag;",
             ),
             parent: Some((326063, 48685, 12)),
-            exact: (326113, 48685, 12),
+            exact: (326063, 48685, 12),
             outcome: Outcome::Unpaid,
         },
         Cell {
@@ -906,7 +906,7 @@ fn boolean_copy_cells() -> Vec<Cell<Outcome>> {
                 pre("let mut before = flag; flip(&mut before);", "before")
             ),
             parent: None,
-            exact: (325886, 48178, 12),
+            exact: (325874, 48178, 12),
             outcome: Outcome::Storage,
         },
         Cell {
@@ -934,7 +934,7 @@ fn boolean_copy_cells() -> Vec<Cell<Outcome>> {
                 )
             ),
             parent: Some((326822, 48582, 12)),
-            exact: (326912, 48582, 12),
+            exact: (326822, 48582, 12),
             outcome: Outcome::Storage,
         },
     ]
