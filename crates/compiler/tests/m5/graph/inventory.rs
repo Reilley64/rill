@@ -379,7 +379,7 @@ fn installed_captures_state_the_graph_root_inventory() {
                         },
                     ]) {
                         let limited = analyze_ownership(&receipt, short);
-                        assert_eq!(limited.completion(), GraphCompletion::ResourceLimit);
+                        crate::limit::assert_graph_limit(&limited);
                         assert!(limited.inventory_complete());
                         assert!(limited.findings().is_empty());
                         assert!(limited.roots().iter().all(|root| root.mir().is_none()));

@@ -93,8 +93,7 @@ fn callable_transfer_specialization_is_not_an_open_source_root_proof() {
                 },
             )
             .unwrap();
-            assert_eq!(short.completion(), Completion::ResourceLimit);
-            assert!(short.mir().is_none() && short.findings().is_empty());
+            crate::limit::assert_body_limit(&short);
         },
     );
 }
@@ -224,8 +223,7 @@ fn targeted_callable_transfer_dependencies_share_the_module_scan() {
                     },
                 ] {
                     let limited = run(short);
-                    assert_eq!(limited.completion(), Completion::ResourceLimit);
-                    assert!(limited.mir().is_none());
+                    crate::limit::assert_body_limit(&limited);
                 }
                 used
             });
@@ -870,11 +868,7 @@ fn one_budget_leaves_unfinished_work_unproved() {
                 },
             ] {
                 let exhausted = analyze_ownership(receipt, short);
-                assert_eq!(
-                    exhausted.completion(),
-                    GraphCompletion::ResourceLimit,
-                    "{short:?}"
-                );
+                crate::limit::assert_graph_limit(&exhausted);
                 assert!(exhausted.inventory_complete());
                 assert_eq!(exhausted.roots().len(), 173);
                 assert!(
@@ -884,13 +878,6 @@ fn one_budget_leaves_unfinished_work_unproved() {
                         .any(|root| root.completion() == Completion::ResourceLimit)
                 );
                 assert!(exhausted.roots().iter().all(|root| root.mir().is_none()));
-                if short.max_depth == limits.max_depth {
-                    assert_eq!(
-                        exhausted.findings().len(),
-                        1,
-                        "late exhaustion must retain local findings"
-                    );
-                }
             }
             let prefix = analyze_ownership(
                 receipt,
@@ -899,7 +886,7 @@ fn one_budget_leaves_unfinished_work_unproved() {
                     ..limits
                 },
             );
-            assert_eq!(prefix.completion(), GraphCompletion::ResourceLimit);
+            crate::limit::assert_graph_limit(&prefix);
             assert!(!prefix.inventory_complete());
             assert!(!prefix.roots().is_empty() && prefix.roots().len() < 8);
             assert!(
@@ -917,7 +904,7 @@ fn one_budget_leaves_unfinished_work_unproved() {
                     max_depth: 0,
                 },
             );
-            assert_eq!(zero.completion(), GraphCompletion::ResourceLimit);
+            crate::limit::assert_graph_limit(&zero);
             assert!(!zero.inventory_complete());
             assert!(zero.roots().is_empty());
         },
@@ -982,12 +969,7 @@ fn installed_work_accounts_for_shared_module_path_prefixes() {
                         assert_eq!(stats.entries, short[mode].max_entries);
                         assert_eq!(stats.max_depth, short[mode].max_depth);
                         let same_work = analyze_ownership(&receipt, short[mode]);
-                        assert_eq!(
-                            same_work.completion(),
-                            GraphCompletion::ResourceLimit,
-                            "the short path budget ({}) also covered the long shared prefix ({stats:?})",
-                            short[mode].max_work,
-                        );
+                        crate::limit::assert_graph_limit(&same_work);
                         assert!(same_work.inventory_complete());
                         assert!(same_work.roots().iter().all(|root| root.mir().is_none()));
                     }
@@ -1169,7 +1151,7 @@ function closed(other: string): void {{ dispose(other); }}
                     ..Default::default()
                 },
             );
-            assert_eq!(short.completion(), GraphCompletion::ResourceLimit);
+            crate::limit::assert_graph_limit(&short);
             let pending = root(&short, b"function combined(");
             assert_eq!(pending.completion(), Completion::ResourceLimit);
             assert_eq!(
@@ -1177,18 +1159,6 @@ function closed(other: string): void {{ dispose(other); }}
                 b"dispose(other.text)"
             );
             assert!(pending.mir().is_none());
-            let [finding] = short.findings() else {
-                panic!("expected reached helper's finding")
-            };
-            assert_eq!(finding.code(), "R0200");
-            assert_eq!(
-                finding.site.span.start(),
-                source.find("again = v").unwrap() + "again = ".len()
-            );
-            assert_eq!(
-                finding.related.span.start(),
-                source.find("first = v").unwrap() + "first = ".len()
-            );
         },
     );
 }

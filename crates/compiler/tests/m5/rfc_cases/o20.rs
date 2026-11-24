@@ -187,13 +187,10 @@ fn incomplete_interpolation_caps_now_give_resource_limit() {
                     .unwrap();
                 let (old, _) = limits(statistics((2230, 81, 3)));
                 let limited = lower_body(&receipt, module, &render.id, old).unwrap();
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none() && limited.findings().is_empty());
+                crate::limit::assert_body_limit(&limited);
                 let (old, _) = limits(statistics((186364, 4176, 5)));
                 let limited = analyze_ownership(&receipt, old);
-                assert_eq!(limited.completion(), GraphCompletion::ResourceLimit);
-                assert!(limited.findings().is_empty());
-                assert!(limited.roots().iter().all(|r| r.ordinary_mir().is_none()));
+                crate::limit::assert_graph_limit(&limited);
             }
         },
     );

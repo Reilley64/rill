@@ -1,6 +1,8 @@
 //! Boolean match snapshots and Result residences at the installed receipt boundary.
 // The installed M4 profile that can issue a receipt is macOS AArch64.
 #![cfg(all(target_arch = "aarch64", target_os = "macos"))]
+#[path = "support/limit.rs"]
+mod limit;
 mod support;
 
 use compiler::analysis::AnalysisLimits;
@@ -852,12 +854,7 @@ fn installed_over_parent(
                     max_depth,
                 },
             );
-            assert_eq!(
-                parent.completion(),
-                TypedCompletion::ResourceLimit,
-                "{name}, test={test_mode}: parent cap"
-            );
-            assert!(parent.receipt().is_none());
+            crate::limit::assert_typed_limit(&parent);
         }
         let stats = report.statistics();
         let exact = AnalysisLimits {
@@ -883,12 +880,7 @@ fn installed_over_parent(
             },
         ] {
             let stopped = analyze_typed(&graph, cap);
-            assert_eq!(
-                stopped.completion(),
-                TypedCompletion::ResourceLimit,
-                "{name}, test={test_mode}: {cap:?}"
-            );
-            assert!(stopped.receipt().is_none());
+            crate::limit::assert_typed_limit(&stopped);
         }
     }
 }

@@ -69,7 +69,7 @@ fn unsupported_list_arrow_shapes_keep_the_old_caps() {
 #[test]
 fn installed_two_list_arrow_frames() {
     use compiler::analysis::generics::{GoalState, callables::CaptureForm};
-    use compiler::analysis::ownership::{GraphCompletion, GraphReport};
+    use compiler::analysis::ownership::GraphReport;
 
     let source = format!(
         "{TWO_ARROW_BODY}{}",
@@ -294,8 +294,7 @@ fn installed_two_list_arrow_frames() {
                 },
             )
             .unwrap();
-            assert_eq!(limited.completion(), Completion::ResourceLimit);
-            assert!(limited.mir().is_none());
+            crate::limit::assert_body_limit(&limited);
             let conflict = lower("conflicting");
             let [finding] = conflict.findings() else {
                 panic!("{:?} at {:?}", conflict.completion(), conflict.blocked_at())
@@ -361,8 +360,7 @@ fn installed_two_list_arrow_frames() {
                 },
             ] {
                 let limited = analyze_ownership(&receipt, caps);
-                assert_eq!(limited.completion(), GraphCompletion::ResourceLimit);
-                assert!(limited.roots().iter().all(|root| root.mir().is_none()));
+                crate::limit::assert_graph_limit(&limited);
             }
             let foreign = loader::load_installed(request.clone()).unwrap();
             let foreign_module = foreign
@@ -970,8 +968,7 @@ fn grouped_list_index_and_unadmitted_selectors() {
                     ..default
                 },
             );
-            assert_eq!(limited.completion(), Completion::ResourceLimit);
-            assert!(limited.mir().is_none());
+            crate::limit::assert_body_limit(&limited);
             // Exact budgets for these unchanged pending routes on 9b020d1.
             for (name, max_work, max_entries) in [
                 ("dynamic", 2008, 88),
@@ -1081,7 +1078,6 @@ fn check_exact(
         },
     ] {
         let lower = lower_body(receipt, module, id, short).unwrap();
-        assert_eq!(lower.completion(), Completion::ResourceLimit);
-        assert!(lower.mir().is_none());
+        crate::limit::assert_body_limit(&lower);
     }
 }

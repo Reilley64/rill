@@ -164,8 +164,7 @@ fn assert_targeted<'g>(
     assert_eq!(replay.statistics(), pinned);
     for short in short {
         let limited = query(short);
-        assert_eq!(limited.completion(), Completion::ResourceLimit);
-        assert!(limited.mir().is_none() && limited.findings().is_empty());
+        crate::limit::assert_body_limit(&limited);
     }
 }
 
@@ -306,10 +305,7 @@ fn mixed_wrapper_exports_the_view_then_cleans_the_owned_wrapper() {
                 max_depth: 5,
             };
             for short in std::iter::once(old).chain(short) {
-                assert_eq!(
-                    analyze_ownership(receipt, short).completion(),
-                    GraphCompletion::ResourceLimit
-                );
+                crate::limit::assert_graph_limit(&analyze_ownership(receipt, short));
             }
         },
     );

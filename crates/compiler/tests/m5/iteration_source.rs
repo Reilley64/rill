@@ -48,8 +48,7 @@ fn installed_list_source_can_propagate_before_cursor_commitment() {
             );
             for cap in short {
                 let limited = analyze_typed(&capture, cap);
-                assert_eq!(limited.completion(), TypedCompletion::ResourceLimit);
-                assert!(limited.receipt().is_none());
+                crate::limit::assert_typed_limit(&limited);
             }
             let measured = analyze_ownership(receipt, AnalysisLimits::default());
             let (exact, short) = limits(measured.statistics());
@@ -60,8 +59,7 @@ fn installed_list_source_can_propagate_before_cursor_commitment() {
             assert_eq!(graph.context(), receipt.context());
             for cap in short {
                 let limited = analyze_ownership(receipt, cap);
-                assert_eq!(limited.completion(), GraphCompletion::ResourceLimit);
-                assert!(limited.roots().iter().all(|r| r.ordinary_mir().is_none()));
+                crate::limit::assert_graph_limit(&limited);
             }
             for (name, prefix_len) in [
                 ("probe", 1),
@@ -83,8 +81,7 @@ fn installed_list_source_can_propagate_before_cursor_commitment() {
                 assert_eq!(body.statistics(), stats);
                 for cap in short {
                     let limited = run(cap);
-                    assert_eq!(limited.completion(), Completion::ResourceLimit, "{name}");
-                    assert!(limited.mir().is_none() && limited.findings().is_empty());
+                    crate::limit::assert_body_limit(&limited);
                 }
                 let root = graph
                     .roots()
@@ -445,8 +442,7 @@ fn unproved_list_sources_keep_their_old_caps() {
             assert_eq!(graph.completion(), GraphCompletion::SourceRejected);
             for cap in short {
                 let limited = analyze_ownership(receipt, cap);
-                assert_eq!(limited.completion(), GraphCompletion::ResourceLimit);
-                assert!(limited.roots().iter().all(|r| r.ordinary_mir().is_none()));
+                crate::limit::assert_graph_limit(&limited);
             }
             for (name, work, entries, max_depth, blocked) in [
                 ("make", 1962, 74, 2, "[a]"),
@@ -512,8 +508,7 @@ fn unproved_list_sources_keep_their_old_caps() {
                 }
                 for cap in short {
                     let limited = lower_body(receipt, module, &function.id, cap).unwrap();
-                    assert_eq!(limited.completion(), Completion::ResourceLimit);
-                    assert!(limited.mir().is_none());
+                    crate::limit::assert_body_limit(&limited);
                 }
             }
         },
@@ -576,8 +571,7 @@ function elementDisposer(gate: Option<Owner>, first: Owner, last: Owner): Option
             assert!(body.mir().is_none() && body.findings().is_empty());
             for cap in short {
                 let limited = run(cap);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
             let graph = analyze_ownership(receipt, AnalysisLimits::default());
             let root = graph

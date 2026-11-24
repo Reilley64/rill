@@ -1,5 +1,7 @@
 //! A private callable requirement does not check an actual environment by itself.
 #![cfg(all(target_arch = "aarch64", target_os = "macos"))]
+#[path = "support/limit.rs"]
+mod limit;
 
 use compiler::analysis::generics::{GoalState, callables::CaptureForm};
 use compiler::analysis::scalars::{NodeFactKind, ScalarFindingKind, data::Access};
@@ -377,12 +379,7 @@ fn check_sources(entry: &Path) {
                 },
             ] {
                 let short_report = analyze_typed(&graph, short);
-                assert_eq!(
-                    short_report.completion(),
-                    TypedCompletion::ResourceLimit,
-                    "{name} {test_mode} {short:?}"
-                );
-                assert!(short_report.receipt().is_none());
+                crate::limit::assert_typed_limit_keeping_body_findings(&short_report);
             }
             // Rule 1 exception (chief of staff, 2026-11-23, ri-2s0.10): these
             // three siblings pay for their rejection before no paid fact can
@@ -402,12 +399,7 @@ fn check_sources(entry: &Path) {
                         max_depth,
                     },
                 );
-                assert_eq!(
-                    parent.completion(),
-                    TypedCompletion::ResourceLimit,
-                    "{name} {test_mode} parent cap"
-                );
-                assert!(parent.receipt().is_none());
+                crate::limit::assert_typed_limit(&parent);
             }
             let one_debt = |at: &[u8], origin: &[u8], kind| {
                 let [debt] = uses.discards() else {

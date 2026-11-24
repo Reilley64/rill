@@ -374,13 +374,7 @@ fn fresh_join_checks_capture_conflicts_and_parent_cleanup() {
             assert_eq!(conflict.related.span.bytes(), b"&mut flag");
             for cap in short {
                 let limited = analyze_ownership(receipt, cap);
-                assert_eq!(limited.completion(), GraphCompletion::ResourceLimit);
-                assert!(
-                    limited
-                        .roots()
-                        .iter()
-                        .all(|root| root.ordinary_mir().is_none())
-                );
+                crate::limit::assert_graph_limit(&limited);
             }
 
             for (name, expected, (work, entries, max_depth)) in [
@@ -426,12 +420,7 @@ fn fresh_join_checks_capture_conflicts_and_parent_cleanup() {
                 assert_eq!(target.statistics(), stats, "{name}");
                 for cap in short {
                     let limited = lower_body(receipt, module, &d.id, cap).unwrap();
-                    assert_eq!(
-                        limited.completion(),
-                        Completion::ResourceLimit,
-                        "{name}: {cap:?}"
-                    );
-                    assert!(limited.mir().is_none());
+                    crate::limit::assert_body_limit(&limited);
                 }
                 assert_eq!(
                     target.completion(),
@@ -542,9 +531,7 @@ fn plain_conflict_reports_r0201_at_the_second_capture() {
             assert_eq!(conflict.related.span.bytes(), b"&mut flag");
             for cap in short {
                 let limited = analyze_ownership(receipt, cap);
-                assert_eq!(limited.completion(), GraphCompletion::ResourceLimit);
-                // The graph keeps findings met before the meter ran out (ri-grwx).
-                assert!(limited.roots().iter().all(|r| r.mir().is_none()));
+                crate::limit::assert_graph_limit(&limited);
             }
 
             let d = &module.declarations[named(module, "conflictPlain")];
@@ -566,8 +553,7 @@ fn plain_conflict_reports_r0201_at_the_second_capture() {
             assert_eq!(finding.related.span, conflict.related.span);
             for cap in short {
                 let limited = lower_body(receipt, module, &d.id, cap).unwrap();
-                assert_eq!(limited.completion(), Completion::ResourceLimit, "{cap:?}");
-                assert!(limited.mir().is_none() && limited.findings().is_empty());
+                crate::limit::assert_body_limit(&limited);
             }
             let root = graph
                 .roots()
@@ -618,9 +604,7 @@ fn live_parent_error_reaches_the_join_at_its_repinned_cap() {
                 assert!(graph.findings().is_empty());
                 for cap in short {
                     let limited = analyze_ownership(&receipt, cap);
-                    assert_eq!(limited.completion(), GraphCompletion::ResourceLimit);
-                    assert!(limited.findings().is_empty());
-                    assert!(limited.roots().iter().all(|r| r.mir().is_none()));
+                    crate::limit::assert_graph_limit(&limited);
                 }
 
                 for (name, expected, (work, entries, max_depth)) in [
@@ -656,12 +640,7 @@ fn live_parent_error_reaches_the_join_at_its_repinned_cap() {
                     assert!(target.findings().is_empty());
                     for cap in short {
                         let limited = lower_body(&receipt, module, &d.id, cap).unwrap();
-                        assert_eq!(
-                            limited.completion(),
-                            Completion::ResourceLimit,
-                            "{name}: {cap:?}"
-                        );
-                        assert!(limited.mir().is_none() && limited.findings().is_empty());
+                        crate::limit::assert_body_limit(&limited);
                     }
                     let root = graph
                         .roots()
@@ -684,8 +663,7 @@ fn live_parent_error_reaches_the_join_at_its_repinned_cap() {
                         max_depth: 3,
                     };
                     let stopped = lower_body(&receipt, module, &d.id, old).unwrap();
-                    assert_eq!(stopped.completion(), Completion::ResourceLimit);
-                    assert!(stopped.mir().is_none() && stopped.findings().is_empty());
+                    crate::limit::assert_body_limit(&stopped);
                 }
             }
         },
@@ -743,8 +721,7 @@ fn shared_join_rejects_a_live_fresh_error_without_wrapper_selection() {
                 assert_eq!(target.blocked_at().unwrap().node, node);
                 for cap in short {
                     let limited = lower_body(&receipt, module, &caller.id, cap).unwrap();
-                    assert_eq!(limited.completion(), Completion::ResourceLimit, "{cap:?}");
-                    assert!(limited.mir().is_none());
+                    crate::limit::assert_body_limit(&limited);
                 }
                 assert_pre_equality_graph_cap(&receipt, (216_846, 6_179, 10));
                 // ri-e9t8 (rule 11, D2 (b)): `joinedOrder` is now a checked root, which
@@ -754,10 +731,7 @@ fn shared_join_rejects_a_live_fresh_error_without_wrapper_selection() {
                     max_entries: 6_313,
                     max_depth: 10,
                 };
-                assert_eq!(
-                    analyze_ownership(&receipt, before_o16).completion(),
-                    GraphCompletion::ResourceLimit
-                );
+                crate::limit::assert_graph_limit(&analyze_ownership(&receipt, before_o16));
                 let graph_cost = Statistics {
                     work: 218_475,
                     entries: 6_991,
@@ -781,8 +755,7 @@ fn shared_join_rejects_a_live_fresh_error_without_wrapper_selection() {
                 )));
                 for cap in short {
                     let limited = analyze_ownership(&receipt, cap);
-                    assert_eq!(limited.completion(), GraphCompletion::ResourceLimit);
-                    assert!(limited.roots().iter().all(|r| r.mir().is_none()));
+                    crate::limit::assert_graph_limit(&limited);
                 }
             }
         },

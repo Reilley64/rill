@@ -144,16 +144,11 @@ fn exclusive_relay_caller(
         }
         for cap in short {
             let limited = lower_body(receipt, module, &function.id, cap).unwrap();
-            assert_eq!(limited.completion(), Completion::ResourceLimit, "{name}");
-            assert!(limited.mir().is_none() && limited.findings().is_empty());
+            crate::limit::assert_body_limit(&limited);
         }
 
         let [graph, pre_equality] = graph;
-        assert_eq!(
-            analyze_ownership(receipt, pinned(pre_equality).1).completion(),
-            GraphCompletion::ResourceLimit,
-            "{name}"
-        );
+        crate::limit::assert_graph_limit(&analyze_ownership(receipt, pinned(pre_equality).1));
         let (stats, exact, short) = pinned(graph);
         let report = analyze_ownership(receipt, exact);
         assert_eq!(
@@ -207,11 +202,7 @@ fn exclusive_relay_caller(
         }
         for cap in short {
             let limited = analyze_ownership(receipt, cap);
-            assert_eq!(
-                limited.completion(),
-                GraphCompletion::ResourceLimit,
-                "{name}"
-            );
+            crate::limit::assert_graph_limit(&limited);
         }
     });
 }
@@ -550,8 +541,7 @@ function writeThrough(input: Option<&mut bool>): Option<bool> {
             );
             for cap in short {
                 let limited = analyze_typed(&graph, cap);
-                assert_eq!(limited.completion(), TypedCompletion::ResourceLimit);
-                assert!(limited.receipt().is_none());
+                crate::limit::assert_typed_limit(&limited);
             }
         },
     );

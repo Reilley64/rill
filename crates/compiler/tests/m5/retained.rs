@@ -383,8 +383,7 @@ fn caller_owned_descriptor_cannot_retain_body_local_sources() {
                 },
             ] {
                 let limited = check("remember", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
 
             let restored = lower("restored");
@@ -589,8 +588,7 @@ fn direct_calls_retain_compatible_inputs_not_the_access_loan() {
                 },
             ] {
                 let limited = check("valid", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
         },
     );
@@ -798,8 +796,7 @@ fn loop_carried_input_reaches_destination_on_second_iteration() {
                 },
             ] {
                 let limited = check("repaired", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
         },
     );
@@ -1085,8 +1082,7 @@ fn retained_pipes_separate_formal_roles_from_staging_order() {
                 },
             ] {
                 let limited = lower("pipedSource", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
         },
     );
@@ -1323,8 +1319,7 @@ fn a_scalar_destination_retains_both_compatible_shared_sources() {
                 },
             ] {
                 let limited = lower("checked", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
         },
     );
@@ -1515,8 +1510,7 @@ fn paired_retention_keeps_both_exclusive_source_restrictions() {
                 },
             ] {
                 let limited = lower("forward", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
         },
     );
@@ -1716,8 +1710,7 @@ fn paired_retention_pipes_keep_formal_roles_and_input_first() {
                 },
             ] {
                 let limited = lower("forward", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
         },
     );
@@ -2449,8 +2442,7 @@ fn direct_calls_retain_sources_in_named_record_fields() {
                 },
             ] {
                 let limited = check("valid", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
         },
     );
@@ -2663,8 +2655,7 @@ fn exclusive_aliases_retain_sources_in_the_proved_target() {
                 },
             ] {
                 let limited = check("valid", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
         },
     );
@@ -2888,8 +2879,7 @@ fn moved_incoming_access_keeps_the_original_caller_destination() {
                 },
             ] {
                 let limited = check("valid", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
         },
     );
@@ -3052,8 +3042,7 @@ fn exact_alias_reads_and_writes_keep_value_and_access_separate() {
                 },
             ] {
                 let short = check("replace", short);
-                assert_eq!(short.completion(), Completion::ResourceLimit);
-                assert!(short.mir().is_none());
+                crate::limit::assert_body_limit(&short);
             }
             for (name, code, site, related) in [
                 (
@@ -3299,8 +3288,7 @@ fn retained_shared_view_preserves_incoming_exclusive_access() {
                 },
             ] {
                 let report = check("resumes", short);
-                assert_eq!(report.completion(), Completion::ResourceLimit);
-                assert!(report.mir().is_none());
+                crate::limit::assert_body_limit(&report);
             }
             let replaces = lower("replacesOld");
             let mir = replaces
@@ -3457,7 +3445,6 @@ fn moved_incoming_write_checks_the_original_caller_contents() {
 fn terminal_nested_retained_writes_receive_typed_receipts() {
     use compiler::analysis::scalars::data::{Access, PathProjection};
     use compiler::analysis::scalars::{NodeFactKind, Place};
-    use compiler::analysis::typed::TypedCompletion;
     use compiler::analysis::{Stage, TypeTerm};
 
     probe_with_typed(
@@ -3590,8 +3577,7 @@ fn terminal_nested_retained_writes_receive_typed_receipts() {
                 },
             ] {
                 let limited = analyze_typed(&graph, short);
-                assert_eq!(limited.completion(), TypedCompletion::ResourceLimit);
-                assert!(limited.receipt().is_none());
+                crate::limit::assert_typed_limit(&limited);
             }
         },
     );
@@ -4123,8 +4109,7 @@ fn assert_retained_call_limits<'g>(
         },
     ] {
         let limited = check(short);
-        assert_eq!(limited.completion(), Completion::ResourceLimit);
-        assert!(limited.mir().is_none());
+        crate::limit::assert_body_limit(&limited);
     }
 }
 

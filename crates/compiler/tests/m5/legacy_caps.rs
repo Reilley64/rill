@@ -8,7 +8,7 @@
 //!
 //! This is LLVM-free host static analysis of ownership; no Rill program runs.
 use super::*;
-use compiler::analysis::ownership::{GraphCompletion, analyze_ownership, lower_body, lower_root};
+use compiler::analysis::ownership::{analyze_ownership, lower_body, lower_root};
 use compiler::analysis::scalars::BodyOwner;
 use compiler::analysis::{AnalysisLimits, Statistics};
 use std::collections::BTreeMap;
@@ -122,10 +122,10 @@ fn pre_equality_graph_caps_give_resource_limit() {
                         max_depth,
                     };
                     let report = analyze_ownership(&receipt, old);
-                    if report.completion() != GraphCompletion::ResourceLimit {
+                    let flaws = crate::limit::graph_limit_flaws(&report);
+                    if !flaws.is_empty() {
                         failures.push(format!(
-                            "{fixture} test_mode={test_mode}: {:?} at {old:?}",
-                            report.completion()
+                            "{fixture} test_mode={test_mode}: {flaws:?} at {old:?}"
                         ));
                     }
                 }
@@ -194,10 +194,9 @@ fn base_matrix_caps_give_resource_limit() {
                     let at = format!("{fixture} {subject:?} test_mode={test_mode} at {old:?}");
                     let Some(name) = subject else {
                         let report = analyze_ownership(&receipt, old);
-                        if report.completion() != GraphCompletion::ResourceLimit
-                            || report.roots().iter().any(|r| r.mir().is_some())
-                        {
-                            failures.push(format!("{at}: {:?}", report.completion()));
+                        let flaws = crate::limit::graph_limit_flaws(&report);
+                        if !flaws.is_empty() {
+                            failures.push(format!("{at}: {flaws:?}"));
                         }
                         continue;
                     };
@@ -214,11 +213,9 @@ fn base_matrix_caps_give_resource_limit() {
                         .id;
                     let report =
                         lower_root(&receipt, module, BodyOwner::Declaration(id), old).unwrap();
-                    if report.completion() != Completion::ResourceLimit
-                        || report.mir().is_some()
-                        || !report.findings().is_empty()
-                    {
-                        failures.push(format!("{at}: {:?}", report.completion()));
+                    let flaws = crate::limit::body_limit_flaws(&report);
+                    if !flaws.is_empty() {
+                        failures.push(format!("{at}: {flaws:?}"));
                     }
                     if matches!(name, "nestedCaller" | "rejected") {
                         let now = lower_root(

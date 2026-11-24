@@ -94,8 +94,7 @@ fn wraps_after_rhs_has_no_graph_root_mir_only_because_of_the_retained_display_ed
                 },
             ] {
                 let limited = at(short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
             assert_eq!(root.ordinary_completion(), Completion::Incomplete);
             assert!(root.ordinary_mir().is_none());
@@ -143,10 +142,7 @@ fn wraps_after_rhs_has_no_graph_root_mir_only_because_of_the_retained_display_ed
                     ..exact
                 },
             ] {
-                assert_eq!(
-                    analyze_ownership(receipt, short).completion(),
-                    GraphCompletion::ResourceLimit
-                );
+                crate::limit::assert_graph_limit(&analyze_ownership(receipt, short));
             }
         },
     );

@@ -465,16 +465,11 @@ fn relay_caller_keeps_caps(
         );
         for cap in short {
             let limited = lower_body(receipt, module, &caller.id, cap).unwrap();
-            assert_eq!(limited.completion(), Completion::ResourceLimit, "{name}");
-            assert!(limited.mir().is_none() && limited.findings().is_empty());
+            crate::limit::assert_body_limit(&limited);
         }
 
         let [graph, pre_equality] = graph;
-        assert_eq!(
-            analyze_ownership(receipt, pinned(pre_equality).1).completion(),
-            GraphCompletion::ResourceLimit,
-            "{name}"
-        );
+        crate::limit::assert_graph_limit(&analyze_ownership(receipt, pinned(pre_equality).1));
         let (stats, exact, short) = pinned(graph);
         let report = analyze_ownership(receipt, exact);
         assert_eq!(report.completion(), GraphCompletion::Incomplete, "{name}");
@@ -509,11 +504,7 @@ fn relay_caller_keeps_caps(
             assert!(root.dependencies().is_empty(), "{name}");
         }
         for cap in short {
-            assert_eq!(
-                analyze_ownership(receipt, cap).completion(),
-                GraphCompletion::ResourceLimit,
-                "{name}"
-            );
+            crate::limit::assert_graph_limit(&analyze_ownership(receipt, cap));
         }
     });
 }
@@ -664,16 +655,14 @@ fn exclusive_relay_caller_exceeds_its_parent_caps() {
                 max_depth: 4,
             };
             let report = lower_body(receipt, module, &caller.id, old).unwrap();
-            assert_eq!(report.completion(), Completion::ResourceLimit);
-            assert!(report.mir().is_none() && report.findings().is_empty());
+            crate::limit::assert_body_limit(&report);
             let old = AnalysisLimits {
                 max_work: 195691,
                 max_entries: 5792,
                 max_depth: 4,
             };
             let report = analyze_ownership(receipt, old);
-            assert_eq!(report.completion(), GraphCompletion::ResourceLimit);
-            assert!(report.findings().is_empty());
+            crate::limit::assert_graph_limit(&report);
             // Rule 8 (review ci-uaa1 R-7): and no root publishes MIR.
             assert!(
                 report
@@ -771,8 +760,7 @@ fn exported_and_scoped_relay_callees_keep_parent_caps() {
                 assert_eq!(report.blocked_at().unwrap().span.bytes(), site.as_bytes());
                 for cap in short {
                     let limited = lower_body(receipt, module, &caller.id, cap).unwrap();
-                    assert_eq!(limited.completion(), Completion::ResourceLimit, "{name}");
-                    assert!(limited.mir().is_none() && limited.findings().is_empty());
+                    crate::limit::assert_body_limit(&limited);
                 }
                 let (stats, exact, short) = pinned(graph);
                 let report = analyze_ownership(receipt, exact);
@@ -793,12 +781,7 @@ fn exported_and_scoped_relay_callees_keep_parent_caps() {
                 assert_eq!(root.blocked_at().unwrap().span.bytes(), site.as_bytes());
                 for cap in short {
                     let limited = analyze_ownership(receipt, cap);
-                    assert_eq!(
-                        limited.completion(),
-                        GraphCompletion::ResourceLimit,
-                        "{name}"
-                    );
-                    assert!(limited.roots().iter().all(|r| r.mir().is_none()));
+                    crate::limit::assert_graph_limit(&limited);
                 }
             });
         }

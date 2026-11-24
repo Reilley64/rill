@@ -100,8 +100,7 @@ fn installed_fresh_result_residences() {
             assert!(exact.inventory_complete());
             for short in shorts {
                 let exhausted = analyze_ownership(receipt, short);
-                assert_eq!(exhausted.completion(), GraphCompletion::ResourceLimit);
-                assert!(exhausted.roots().iter().all(|r| r.mir().is_none()));
+                crate::limit::assert_graph_limit(&exhausted);
             }
             let role = typed.result_role().unwrap();
             for (name, target_expected, root_expected) in [
@@ -159,8 +158,7 @@ fn installed_fresh_result_residences() {
                 assert_eq!(body.mir().is_some(), root_expected == Checked);
                 for short in shorts {
                     let exhausted = lower(short);
-                    assert_eq!(exhausted.completion(), Completion::ResourceLimit, "{name}");
-                    assert!(exhausted.mir().is_none());
+                    crate::limit::assert_body_limit(&exhausted);
                 }
                 match name {
                     "opaque" | "retireRetained" => {
@@ -453,7 +451,7 @@ fn installed_fresh_result_is_retired_at_an_existing_checkpoint() {
             );
             for short in shorts {
                 let exhausted = analyze_ownership(receipt, short);
-                assert_eq!(exhausted.completion(), GraphCompletion::ResourceLimit);
+                crate::limit::assert_graph_limit(&exhausted);
                 assert!(exhausted.roots().iter().all(
                     |r| r.mir().is_none() && !matches!(r.enabled_frame(), Delivery::Proved(_))
                 ));
@@ -470,8 +468,7 @@ fn installed_fresh_result_is_retired_at_an_existing_checkpoint() {
                 assert_eq!(target.completion(), Completion::Checked);
                 for short in shorts {
                     let exhausted = lower(short);
-                    assert_eq!(exhausted.completion(), Completion::ResourceLimit);
-                    assert!(exhausted.mir().is_none());
+                    crate::limit::assert_body_limit(&exhausted);
                 }
                 let mir = target.mir().unwrap();
                 let body = root(&graph, id);

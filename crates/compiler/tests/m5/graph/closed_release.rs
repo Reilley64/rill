@@ -351,14 +351,7 @@ fn implicit_guard_release_closes_the_ordinary_root() {
                 },
             ] {
                 let limited = analyze_ownership(receipt, short);
-                assert_eq!(limited.completion(), GraphCompletion::ResourceLimit);
-                assert!(limited.findings().is_empty());
-                assert!(
-                    limited
-                        .roots()
-                        .iter()
-                        .all(|root| root.ordinary_mir().is_none())
-                );
+                crate::limit::assert_graph_limit(&limited);
             }
         },
     );
@@ -464,14 +457,7 @@ fn assert_two_releases(
         }
         for cap in short(exact) {
             let limited = analyze_ownership(receipt, cap);
-            assert_eq!(limited.completion(), GraphCompletion::ResourceLimit);
-            assert!(limited.findings().is_empty());
-            assert!(
-                limited
-                    .roots()
-                    .iter()
-                    .all(|root| root.ordinary_mir().is_none())
-            );
+            crate::limit::assert_graph_limit(&limited);
         }
 
         let exact = AnalysisLimits {
@@ -492,8 +478,7 @@ fn assert_two_releases(
         assert_eq!(cleanup_sequence(targeted.mir().unwrap()), expected);
         for cap in short(exact) {
             let limited = lower_root(receipt, module, root.owner(), cap).unwrap();
-            assert_eq!(limited.completion(), Completion::ResourceLimit);
-            assert!(limited.mir().is_none() && limited.findings().is_empty());
+            crate::limit::assert_body_limit(&limited);
         }
     });
 }
@@ -530,10 +515,7 @@ fn implicit_guard_siblings_keep_their_parent_caps() {
                 max_entries: 3_979,
                 max_depth: 3,
             };
-            assert_eq!(
-                analyze_ownership(receipt, old).completion(),
-                GraphCompletion::ResourceLimit
-            );
+            crate::limit::assert_graph_limit(&analyze_ownership(receipt, old));
             let exact = AnalysisLimits {
                 max_work: 186_005,
                 max_entries: 4_113,
@@ -552,13 +534,7 @@ fn implicit_guard_siblings_keep_their_parent_caps() {
             assert!(report.findings().is_empty());
             for cap in short(exact) {
                 let limited = analyze_ownership(receipt, cap);
-                assert_eq!(limited.completion(), GraphCompletion::ResourceLimit);
-                assert!(
-                    limited
-                        .roots()
-                        .iter()
-                        .all(|root| root.ordinary_mir().is_none())
-                );
+                crate::limit::assert_graph_limit(&limited);
             }
             for (name, (work, entries), site) in [
                 (
@@ -608,8 +584,7 @@ fn implicit_guard_siblings_keep_their_parent_caps() {
                         },
                     )
                     .unwrap();
-                    assert_eq!(limited.completion(), Completion::ResourceLimit);
-                    assert!(limited.mir().is_none() && limited.findings().is_empty());
+                    crate::limit::assert_body_limit(&limited);
                 }
             }
         },
@@ -690,14 +665,7 @@ fn implicit_guard_binding_release_keeps_its_parent_caps() {
                 },
             ] {
                 let limited = analyze_ownership(receipt, short);
-                assert_eq!(limited.completion(), GraphCompletion::ResourceLimit);
-                assert!(limited.findings().is_empty());
-                assert!(
-                    limited
-                        .roots()
-                        .iter()
-                        .all(|root| root.ordinary_mir().is_none())
-                );
+                crate::limit::assert_graph_limit(&limited);
             }
         },
     );

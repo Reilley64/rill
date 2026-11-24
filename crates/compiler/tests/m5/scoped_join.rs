@@ -99,8 +99,7 @@ fn check_typed_budget(graph: &loader::Graph, typed: &TypedReport<'_>) {
             ..exact
         },
     );
-    assert_eq!(short.completion(), TypedCompletion::ResourceLimit);
-    assert!(short.receipt().is_none());
+    crate::limit::assert_typed_limit(&short);
 }
 
 fn ended(cleanup: Obligation<'_>) -> compiler::analysis::ownership::Place<'_> {
@@ -1050,8 +1049,7 @@ fn installed_scoped_join_checks_actual_child_frames_and_caller_successors() {
                         },
                     )
                     .unwrap();
-                    assert_eq!(short.completion(), Completion::ResourceLimit);
-                    assert!(short.mir().is_none());
+                    crate::limit::assert_body_limit(&short);
                     check_typed_budget(&graph, &typed);
 
                     let foreign = loader::load_installed(request).unwrap();
@@ -1327,8 +1325,7 @@ fn installed_join_rejects_the_second_overlapping_capture() {
                     },
                 )
                 .unwrap();
-                assert_eq!(short.completion(), Completion::ResourceLimit);
-                assert!(short.mir().is_none());
+                crate::limit::assert_body_limit(&short);
             }
         },
     );
@@ -1553,8 +1550,7 @@ function joined(numbers: List<i32>, otherInput: List<i32>): [i32, i32] {{
                     );
                     for cap in short {
                         let report = analyze_typed(&graph, cap);
-                        assert_eq!(report.completion(), TypedCompletion::ResourceLimit);
-                        assert!(report.receipt().is_none());
+                        crate::limit::assert_typed_limit(&report);
                     }
                     let stats = local.statistics();
                     // This acquisition already rejected before child-frame lowering
@@ -1578,23 +1574,21 @@ function joined(numbers: List<i32>, otherInput: List<i32>): [i32, i32] {{
                     );
                     for cap in short {
                         let report = lower_body(&receipt, module, &caller.id, cap).unwrap();
-                        assert_eq!(report.completion(), Completion::ResourceLimit);
-                        assert!(report.mir().is_none());
+                        crate::limit::assert_body_limit(&report);
                     }
                     let graph_stats = owned.statistics();
                     if live {
                         // Metering rule 11 (ri-785.9): this exact SourceRejected
                         // graph cap became 213,499/5,736/10 with the i32 equality
                         // source root. The old cap runs out after the finding is
-                        // recorded, so it keeps the R0201 but is not definitive.
+                        // recorded, so the limit report withholds it.
                         let old = AnalysisLimits {
                             max_work: 213183,
                             max_entries: 5602,
                             max_depth: 10,
                         };
                         let stopped = analyze_ownership(&receipt, old);
-                        assert_eq!(stopped.completion(), GraphCompletion::ResourceLimit);
-                        assert_eq!(stopped.findings()[0].code(), "R0201");
+                        crate::limit::assert_graph_limit(&stopped);
                     }
                     let (exact, short) = budget_caps(graph_stats);
                     let replay = analyze_ownership(&receipt, exact);
@@ -1604,13 +1598,7 @@ function joined(numbers: List<i32>, otherInput: List<i32>): [i32, i32] {{
                     );
                     for cap in short {
                         let report = analyze_ownership(&receipt, cap);
-                        assert_eq!(report.completion(), GraphCompletion::ResourceLimit);
-                        assert!(
-                            report
-                                .roots()
-                                .iter()
-                                .all(|r| r.mir().is_none() && r.ordinary_mir().is_none())
-                        );
+                        crate::limit::assert_graph_limit(&report);
                     }
                 }
             }
@@ -1877,8 +1865,7 @@ fn grouped_reference_publication_keeps_each_result_dependency() {
                 },
             ] {
                 let limited = lower(short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
         },
     );
@@ -1921,8 +1908,7 @@ fn grouped_reference_children_charge_depth_and_keep_the_written_escape() {
                     ..default
                 },
             );
-            assert_eq!(capped.completion(), Completion::ResourceLimit);
-            assert!(capped.mir().is_none() && capped.findings().is_empty());
+            crate::limit::assert_body_limit(&capped);
             assert!(run("skipped", default).mir().is_some());
         },
     );
@@ -1958,8 +1944,7 @@ fn typed_reference_operand_groups_count_toward_depth() {
                                 ..Default::default()
                             },
                         );
-                        assert_eq!(short.completion(), TypedCompletion::ResourceLimit);
-                        assert!(short.receipt().is_none());
+                        crate::limit::assert_typed_limit(&short);
                     }
                 }
             }
@@ -2280,8 +2265,7 @@ fn installed_join_checks_reference_result_escape_per_slot() {
                     assert_eq!(replay.findings().len(), local.findings().len());
                     for short in short {
                         let exhausted = lower_body(&receipt, module, &caller.id, short).unwrap();
-                        assert_eq!(exhausted.completion(), Completion::ResourceLimit);
-                        assert!(exhausted.mir().is_none());
+                        crate::limit::assert_body_limit(&exhausted);
                     }
                     let (exact, short) = caps(owned.statistics());
                     let replay = analyze_ownership(&receipt, exact);
@@ -2289,13 +2273,7 @@ fn installed_join_checks_reference_result_escape_per_slot() {
                     assert_eq!(replay.completion(), owned.completion());
                     for short in short {
                         let exhausted = analyze_ownership(&receipt, short);
-                        assert_eq!(exhausted.completion(), GraphCompletion::ResourceLimit);
-                        assert!(
-                            exhausted
-                                .roots()
-                                .iter()
-                                .all(|r| r.mir().is_none() && r.ordinary_mir().is_none())
-                        );
+                        crate::limit::assert_graph_limit(&exhausted);
                     }
                 }
             }
@@ -2586,8 +2564,7 @@ fn grouped_list_comparison_preserves_the_checked_operands() {
                 },
             )
             .unwrap();
-            assert_eq!(short.completion(), Completion::ResourceLimit);
-            assert!(short.mir().is_none());
+            crate::limit::assert_body_limit(&short);
         },
     );
 }
@@ -2597,7 +2574,7 @@ fn installed_join_publishes_heterogeneous_list_results_in_input_order() {
     use compiler::analysis::TypeTerm;
     use compiler::analysis::generics::{GoalJudgment, callables::CaptureForm};
     use compiler::analysis::ordinary::RequirementTarget;
-    use compiler::analysis::ownership::{GraphCompletion, GraphObligation, analyze_ownership};
+    use compiler::analysis::ownership::{GraphObligation, analyze_ownership};
     use compiler::analysis::scalars::data::{DataExpression, PatternProjection};
 
     installed(
@@ -2834,8 +2811,7 @@ fn installed_join_publishes_heterogeneous_list_results_in_input_order() {
                         assert!(replay.receipt().is_some());
                         for cap in short {
                             let exhausted = analyze_typed(&graph, cap);
-                            assert_eq!(exhausted.completion(), TypedCompletion::ResourceLimit);
-                            assert!(exhausted.receipt().is_none());
+                            crate::limit::assert_typed_limit(&exhausted);
                         }
                         let (exact, short) = budget_caps(report.statistics());
                         let replay = lower_body(&receipt, module, &caller.id, exact).unwrap();
@@ -2843,8 +2819,7 @@ fn installed_join_publishes_heterogeneous_list_results_in_input_order() {
                         assert!(replay.mir().is_some());
                         for cap in short {
                             let exhausted = lower_body(&receipt, module, &caller.id, cap).unwrap();
-                            assert_eq!(exhausted.completion(), Completion::ResourceLimit);
-                            assert!(exhausted.mir().is_none());
+                            crate::limit::assert_body_limit(&exhausted);
                         }
                         let (exact, short) = budget_caps(owned.statistics());
                         let replay = analyze_ownership(&receipt, exact);
@@ -2852,13 +2827,7 @@ fn installed_join_publishes_heterogeneous_list_results_in_input_order() {
                         assert_eq!(replay.completion(), owned.completion());
                         for cap in short {
                             let exhausted = analyze_ownership(&receipt, cap);
-                            assert_eq!(exhausted.completion(), GraphCompletion::ResourceLimit);
-                            assert!(
-                                exhausted
-                                    .roots()
-                                    .iter()
-                                    .all(|r| r.mir().is_none() && r.ordinary_mir().is_none())
-                            );
+                            crate::limit::assert_graph_limit(&exhausted);
                         }
                     }
                 }
@@ -3215,19 +3184,12 @@ fn installed_join_fresh_results_keep_the_written_occurrence() {
                 fresh_result::assert_dependencies(root, typed, join, site);
                 for cap in short {
                     let limited = lower_body(receipt, module, &d.id, cap).unwrap();
-                    assert_eq!(limited.completion(), Completion::ResourceLimit);
-                    assert!(limited.mir().is_none());
+                    crate::limit::assert_body_limit(&limited);
                 }
             }
             for cap in graph_short {
                 let limited = analyze_ownership(receipt, cap);
-                assert_eq!(limited.completion(), GraphCompletion::ResourceLimit);
-                assert!(
-                    limited
-                        .roots()
-                        .iter()
-                        .all(|root| root.mir().is_none() && root.ordinary_mir().is_none())
-                );
+                crate::limit::assert_graph_limit(&limited);
             }
             let loaded = loader::load_installed(request.clone()).unwrap();
             captured_keys(&loaded, true);
@@ -3242,8 +3204,7 @@ fn installed_join_fresh_results_keep_the_written_occurrence() {
             assert_eq!(checked.statistics(), typed_cost);
             for cap in short {
                 let limited = analyze_typed(&loaded, cap);
-                assert_eq!(limited.completion(), TypedCompletion::ResourceLimit);
-                assert!(limited.receipt().is_none());
+                crate::limit::assert_typed_limit(&limited);
             }
         },
     );
@@ -3319,10 +3280,7 @@ fn fresh_join_reads_the_actual_captured_flag() {
                 let replay = analyze_typed(&graph, exact);
                 assert_eq!(replay.completion(), expected);
                 assert_eq!(replay.statistics(), typed.statistics());
-                assert_eq!(
-                    analyze_typed(&graph, shorts[2]).completion(),
-                    TypedCompletion::ResourceLimit
-                );
+                crate::limit::assert_typed_limit(&analyze_typed(&graph, shorts[2]));
                 let uses = typed.result_use().unwrap();
                 assert!(uses.pending().is_empty());
                 if expected == TypedCompletion::Checked {
@@ -3585,11 +3543,7 @@ fn fresh_join_reads_copyable_match_sources() {
                 check(&replay);
                 for cap in short {
                     let limited = analyze_typed(&graph, cap);
-                    assert_eq!(
-                        limited.completion(),
-                        TypedCompletion::ResourceLimit,
-                        "{name}"
-                    );
+                    crate::limit::assert_typed_limit(&limited);
                     assert!(limited.receipt().is_none(), "{name}");
                 }
         }
@@ -3629,8 +3583,7 @@ fn an_unproved_join_does_not_invent_a_discard() {
             assert_eq!(pending.site.node, call_node(module, "join(["));
             for cap in short {
                 let limited = analyze_typed(&loaded, cap);
-                assert_eq!(limited.completion(), TypedCompletion::ResourceLimit);
-                assert!(limited.receipt().is_none());
+                crate::limit::assert_typed_limit(&limited);
             }
             let origins = uses
                 .discards()
@@ -3760,8 +3713,7 @@ fn reference_pair_reserves_before_it_builds_each_slot() {
             );
             for cap in short {
                 let limited = analyze_typed(&graph, cap);
-                assert_eq!(limited.completion(), TypedCompletion::ResourceLimit);
-                assert!(limited.receipt().is_none());
+                crate::limit::assert_typed_limit(&limited);
             }
         },
     );

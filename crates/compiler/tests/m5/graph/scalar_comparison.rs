@@ -84,12 +84,7 @@ fn installed_i32_equality_checks_the_loaded_source_root() {
             assert_equality_body(exact.mir().unwrap());
             for short in [short_work, short_entries, short_depth] {
                 let exhausted = run_target(short);
-                assert_eq!(
-                    exhausted.completion(),
-                    Completion::ResourceLimit,
-                    "{short:?}"
-                );
-                assert!(exhausted.mir().is_none());
+                crate::limit::assert_body_limit(&exhausted);
             }
             let [exact, short_work, short_entries, short_depth] = caps(report.statistics());
             let exact = run_graph(exact);
@@ -98,17 +93,7 @@ fn installed_i32_equality_checks_the_loaded_source_root() {
             assert_equality_body(report_for(&exact, owner).ordinary_mir().unwrap());
             for short in [short_work, short_entries, short_depth] {
                 let exhausted = run_graph(short);
-                assert_eq!(
-                    exhausted.completion(),
-                    GraphCompletion::ResourceLimit,
-                    "{short:?}"
-                );
-                assert!(
-                    exhausted
-                        .roots()
-                        .iter()
-                        .all(|root| root.ordinary_mir().is_none())
-                );
+                crate::limit::assert_graph_limit(&exhausted);
             }
 
             // This admits no other primitive width, and no generic &&T adapter.
@@ -171,10 +156,7 @@ fn other_compare_bodies_keep_their_pre_equality_caps() {
                 max_depth: 3,
             };
             let [old, ..] = caps(before);
-            assert_eq!(
-                analyze_ownership(receipt, old).completion(),
-                GraphCompletion::ResourceLimit
-            );
+            crate::limit::assert_graph_limit(&analyze_ownership(receipt, old));
             let after = Statistics {
                 work: before.work + 316,
                 entries: before.entries + 134,
@@ -185,10 +167,7 @@ fn other_compare_bodies_keep_their_pre_equality_caps() {
             assert_eq!(report.statistics(), after);
             assert_eq!(report.completion(), GraphCompletion::Incomplete);
             for short in [short_work, short_entries, short_depth] {
-                assert_eq!(
-                    analyze_ownership(receipt, short).completion(),
-                    GraphCompletion::ResourceLimit
-                );
+                crate::limit::assert_graph_limit(&analyze_ownership(receipt, short));
             }
             let others = compare
                 .declarations
@@ -222,8 +201,7 @@ fn other_compare_bodies_keep_their_pre_equality_caps() {
                     max_work: 8,
                     ..exact
                 });
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none() && limited.findings().is_empty());
+                crate::limit::assert_body_limit(&limited);
                 let root = report_for(&report, owner);
                 assert_eq!(root.ordinary_completion(), Completion::Incomplete);
                 assert!(root.ordinary_mir().is_none());

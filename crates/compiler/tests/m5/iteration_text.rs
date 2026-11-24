@@ -122,8 +122,7 @@ fn unadmitted_text_parameters_keep_their_old_caps() {
                     ..exact
                 },
             );
-            assert_eq!(short.completion(), Completion::ResourceLimit);
-            assert!(short.mir().is_none());
+            crate::limit::assert_body_limit(&short);
             let graph = analyze_ownership(receipt, AnalysisLimits::default());
             let cap = limits(graph.statistics()).0;
             let at = analyze_ownership(receipt, cap);
@@ -147,8 +146,7 @@ fn unadmitted_text_parameters_keep_their_old_caps() {
                     ..cap
                 },
             );
-            assert_eq!(short.completion(), GraphCompletion::ResourceLimit);
-            assert!(short.roots().iter().all(|r| r.ordinary_mir().is_none()));
+            crate::limit::assert_graph_limit(&short);
         },
     );
 }
@@ -312,8 +310,7 @@ fn installed_consuming_string_iteration() {
             assert_eq!(at.not_performed(), &[Stage::Ownership, Stage::Execution]);
             for cap in short {
                 let limited = analyze_typed(&capture, cap);
-                assert_eq!(limited.completion(), TypedCompletion::ResourceLimit);
-                assert!(limited.receipt().is_none());
+                crate::limit::assert_typed_limit(&limited);
             }
 
             let graph = analyze_ownership(receipt, AnalysisLimits::default());
@@ -326,8 +323,7 @@ fn installed_consuming_string_iteration() {
             assert_eq!(at.completion(), GraphCompletion::SourceRejected);
             for cap in short {
                 let limited = analyze_ownership(receipt, cap);
-                assert_eq!(limited.completion(), GraphCompletion::ResourceLimit);
-                assert!(limited.roots().iter().all(|r| r.ordinary_mir().is_none()));
+                crate::limit::assert_graph_limit(&limited);
             }
 
             for (name, expected) in [
@@ -371,12 +367,7 @@ fn installed_consuming_string_iteration() {
                 ));
                 for cap in short {
                     let limited = run(cap);
-                    assert_eq!(
-                        limited.completion(),
-                        Completion::ResourceLimit,
-                        "{name}: {cap:?}"
-                    );
-                    assert!(limited.mir().is_none() && limited.findings().is_empty());
+                    crate::limit::assert_body_limit(&limited);
                 }
                 if expected == Completion::Checked {
                     for mir in [body.mir().unwrap(), root.ordinary_mir().unwrap()] {

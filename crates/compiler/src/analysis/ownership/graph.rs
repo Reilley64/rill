@@ -276,7 +276,7 @@ impl<'g> GraphReport<'g> {
     pub fn test_mode(&self) -> bool {
         self.test_mode
     }
-    /// Resource exhaustion takes precedence; already recorded findings survive.
+    /// Resource exhaustion takes precedence and withholds every finding.
     pub fn completion(&self) -> GraphCompletion {
         self.completion
     }
@@ -342,9 +342,32 @@ pub fn analyze_ownership<'g>(
         } else {
             GraphCompletion::SourceRejected
         };
+    } else {
+        withhold_judgments(&mut report);
     }
     report.statistics = budget.statistics;
     report
+}
+
+/// `ResourceLimit` publishes no finding and no MIR. Root verdicts and
+/// deliveries that cite a withheld finding go back to unresolved.
+fn withhold_judgments(report: &mut GraphReport<'_>) {
+    fn unreject<P>(delivery: &mut Delivery<'_, P>) {
+        if matches!(delivery, Delivery::Rejected { .. }) {
+            *delivery = Delivery::Unresolved;
+        }
+    }
+    report.findings.clear();
+    for root in &mut report.bodies {
+        if root.ordinary_completion == Completion::SourceRejected {
+            root.ordinary_completion = Completion::ResourceLimit;
+        }
+        root.ordinary_mir = None;
+        unreject(&mut root.enabled_frame);
+        unreject(&mut root.selected_call);
+        unreject(&mut root.forwarded_call);
+        unreject(&mut root.replacement);
+    }
 }
 
 #[derive(Default)]

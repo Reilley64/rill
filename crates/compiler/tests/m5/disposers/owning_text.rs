@@ -195,8 +195,7 @@ fn assert_targeted<'g>(
     assert_eq!(replay.statistics(), pinned);
     for short in short {
         let limited = query(short);
-        assert_eq!(limited.completion(), Completion::ResourceLimit);
-        assert!(limited.mir().is_none() && limited.findings().is_empty());
+        crate::limit::assert_body_limit(&limited);
     }
 }
 
@@ -323,10 +322,7 @@ fn outer_disposer_runs_once_then_drops_the_remaining_text_fields() {
                 max_entries: 5_963,
                 max_depth: 5,
             };
-            assert_eq!(
-                analyze_ownership(receipt, old).completion(),
-                GraphCompletion::ResourceLimit
-            );
+            crate::limit::assert_graph_limit(&analyze_ownership(receipt, old));
             let pinned = stats(198_767, 5_963, 5);
             assert_eq!(graph.statistics(), pinned);
             assert_eq!(graph.completion(), GraphCompletion::SourceRejected);
@@ -336,8 +332,7 @@ fn outer_disposer_runs_once_then_drops_the_remaining_text_fields() {
             assert_eq!(replay.completion(), GraphCompletion::SourceRejected);
             for short in short {
                 let limited = analyze_ownership(receipt, short);
-                assert_eq!(limited.completion(), GraphCompletion::ResourceLimit);
-                assert!(limited.roots().iter().all(|root| root.mir().is_none()));
+                crate::limit::assert_graph_limit(&limited);
             }
         },
     );
@@ -758,8 +753,7 @@ fn nested_record_disposer_runs_once_then_drops_the_remaining_fields() {
             assert_eq!(replay.completion(), GraphCompletion::SourceRejected);
             for short in short {
                 let limited = analyze_ownership(receipt, short);
-                assert_eq!(limited.completion(), GraphCompletion::ResourceLimit);
-                assert!(limited.roots().iter().all(|root| root.mir().is_none()));
+                crate::limit::assert_graph_limit(&limited);
             }
         },
     );
@@ -822,8 +816,7 @@ fn written_field_disposal_siblings_keep_their_parent_caps() {
             assert_eq!(analyze_ownership(receipt, exact).statistics(), pinned);
             for short in short {
                 let limited = analyze_ownership(receipt, short);
-                assert_eq!(limited.completion(), GraphCompletion::ResourceLimit);
-                assert!(limited.roots().iter().all(|root| root.mir().is_none()));
+                crate::limit::assert_graph_limit(&limited);
             }
         },
     );

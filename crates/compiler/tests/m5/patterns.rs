@@ -267,8 +267,7 @@ fn owned_narrow_variant_exports_the_lexical_payload() {
                     },
                 ] {
                     let limited = lower(name, short);
-                    assert_eq!(limited.completion(), Completion::ResourceLimit);
-                    assert!(limited.mir().is_none() && limited.findings().is_empty());
+                    crate::limit::assert_body_limit(&limited);
                 }
             }
             let stats = graph.statistics();
@@ -291,10 +290,7 @@ fn owned_narrow_variant_exports_the_lexical_payload() {
                     ..exact
                 },
             ] {
-                assert_eq!(
-                    analyze_ownership(receipt, short).completion(),
-                    GraphCompletion::ResourceLimit
-                );
+                crate::limit::assert_graph_limit(&analyze_ownership(receipt, short));
             }
             let shallow = analyze_ownership(
                 receipt,
@@ -303,7 +299,7 @@ fn owned_narrow_variant_exports_the_lexical_payload() {
                     ..default
                 },
             );
-            assert_eq!(shallow.completion(), GraphCompletion::ResourceLimit);
+            crate::limit::assert_graph_limit(&shallow);
             for name in ["groupedSource", "groupedPattern"] {
                 let root = shallow
                     .roots()
@@ -392,8 +388,7 @@ fn narrow_variant_early_exit_keeps_only_the_reached_owner() {
                             (short[i].max_entries, short[i].max_depth)
                         );
                         let exhausted = run(short[i]);
-                        assert_eq!(exhausted.completion(), Completion::ResourceLimit);
-                        assert!(exhausted.mir().is_none());
+                        crate::limit::assert_body_limit(&exhausted);
                     }
                 }
             }
@@ -465,8 +460,7 @@ fn owned_narrow_variant_keeps_other_storage_routes_incomplete() {
             assert_eq!(run("borrowed", tight).completion(), Completion::Incomplete);
             for name in ["groupedInput", "groupedChild"] {
                 let short = run(name, tight);
-                assert_eq!(short.completion(), Completion::ResourceLimit, "{name}");
-                assert!(short.mir().is_none() && short.findings().is_empty());
+                crate::limit::assert_body_limit(&short);
             }
         },
     );
@@ -887,8 +881,7 @@ fn owned_record_binding_transfers_fields_and_cleans_the_remainder() {
                 },
             ] {
                 let limited = check("unpack", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
 
             let carried = lower("pointsOutside");
@@ -1128,8 +1121,7 @@ fn shared_record_binding_uses_canonical_fields_and_retains_backing() {
                 },
             ] {
                 let limited = lower("forward", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
             let ignored = check("ignores");
             let mir = ignored
@@ -1355,8 +1347,7 @@ fn owned_tuple_binding_transfers_and_cleans_initialized_elements() {
                 },
             ] {
                 let limited = check(short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
 
             for (name, site, source, code) in [
@@ -1627,8 +1618,7 @@ fn fresh_exclusive_tuple_pattern_keeps_the_original_restriction() {
                 },
             ] {
                 let limited = lower("resumes", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
             assert!(
                 matches!(path_drops(mir, mir.entry).as_slice(), [Obligation::Drop(old), Obligation::Drop(replacement)]
@@ -1834,8 +1824,7 @@ fn explicit_exclusive_tuple_pattern_reborrow_suspends_the_named_parent() {
                 },
             ] {
                 let limited = lower("resumes", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
             let incoming = check("incoming");
             let mir = incoming
@@ -2184,8 +2173,7 @@ fn shared_product_binding_copies_carried_references_not_container_access() {
                 },
             ] {
                 let limited = lower("tupleForward", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
             for (name, code, site, related) in [
                 ("siblingBacking", "R0202", "return view;", "flag: bool"),
@@ -2469,8 +2457,7 @@ fn nested_exclusive_patterns_keep_the_incoming_parent_suspended() {
                 },
             ] {
                 let report = lower("resumes", short);
-                assert_eq!(report.completion(), Completion::ResourceLimit);
-                assert!(report.mir().is_none());
+                crate::limit::assert_body_limit(&report);
             }
         },
     );
@@ -2780,8 +2767,7 @@ fn owned_nested_tuple_patterns_transfer_leaves_and_clean_the_temporary() {
             };
             assert!(lower("depthBare", depth).mir().is_some());
             let grouped = lower("depthGrouped", depth);
-            assert_eq!(grouped.completion(), Completion::ResourceLimit);
-            assert!(grouped.mir().is_none());
+            crate::limit::assert_body_limit(&grouped);
             for short in [
                 AnalysisLimits {
                     max_work: exact.max_work - 1,
@@ -2793,8 +2779,7 @@ fn owned_nested_tuple_patterns_transfer_leaves_and_clean_the_temporary() {
                 },
             ] {
                 let report = lower("unpack", short);
-                assert_eq!(report.completion(), Completion::ResourceLimit);
-                assert!(report.mir().is_none());
+                crate::limit::assert_body_limit(&report);
             }
         },
     );
@@ -3382,8 +3367,7 @@ fn whole_record_child_preflight_counts_grouped_sources() {
             assert!(lower("bare", limits).mir().is_some());
             for name in ["grouped", "constructed"] {
                 let short = lower(name, limits);
-                assert_eq!(short.completion(), Completion::ResourceLimit, "{name}");
-                assert!(short.mir().is_none());
+                crate::limit::assert_body_limit(&short);
             }
         },
     );
@@ -3593,8 +3577,7 @@ fn named_owned_tuple_pattern_transfers_whole_child() {
                     },
                 ] {
                     let limited = lower(name, short);
-                    assert_eq!(limited.completion(), Completion::ResourceLimit);
-                    assert!(limited.mir().is_none() && limited.findings().is_empty());
+                    crate::limit::assert_body_limit(&limited);
                 }
             }
         },
@@ -3744,8 +3727,7 @@ fn grouped_tuple_pattern_literal_stages_only_on_reached_paths() {
                 },
             ] {
                 let bounded = lower("grouped", short);
-                assert_eq!(bounded.completion(), Completion::ResourceLimit);
-                assert!(bounded.mir().is_none());
+                crate::limit::assert_body_limit(&bounded);
             }
 
             let bare = lower("bareInner", default);
@@ -3756,8 +3738,7 @@ fn grouped_tuple_pattern_literal_stages_only_on_reached_paths() {
             };
             assert!(lower("bareInner", depth).mir().is_some());
             let limited = lower("groupedInner", depth);
-            assert_eq!(limited.completion(), Completion::ResourceLimit);
-            assert!(limited.mir().is_none());
+            crate::limit::assert_body_limit(&limited);
 
             let skipped = lower("skipped", default);
             let mir = skipped.mir().expect("a dead literal does not move seed");
@@ -4016,8 +3997,7 @@ fn shared_nested_tuple_patterns_keep_exact_leaf_routes() {
                 },
             ] {
                 let limited = lower("view", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
             for (name, site) in [
                 ("nestedName", "pair"),
@@ -4155,8 +4135,7 @@ fn shared_tuple_binding_copies_scalars_and_borrows_string_members() {
                 },
             ] {
                 let limited = lower("view", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
             let ignored = check("ignores");
             let mir = ignored.mir().expect("wildcards observe no member");

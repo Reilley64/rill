@@ -32,6 +32,8 @@ mod iteration;
 mod iteration_result_use;
 #[path = "m5/legacy_caps.rs"]
 mod legacy_caps;
+#[path = "support/limit.rs"]
+mod limit;
 #[path = "m5/o05_field_arithmetic.rs"]
 mod o05_field_arithmetic;
 #[path = "m5/o15_arithmetic.rs"]
@@ -254,8 +256,7 @@ fn ownership_from_installed_source() {
                 },
             )
             .unwrap();
-            assert_eq!(limited.completion(), Completion::ResourceLimit);
-            assert!(limited.mir().is_none());
+            crate::limit::assert_body_limit(&limited);
             let entries = split.statistics().entries;
             assert!(
                 lower_body(
@@ -281,8 +282,7 @@ fn ownership_from_installed_source() {
                 },
             )
             .unwrap();
-            assert_eq!(limited.completion(), Completion::ResourceLimit);
-            assert!(limited.mir().is_none());
+            crate::limit::assert_body_limit(&limited);
             let other = loader::load_installed(request.clone()).unwrap();
             let foreign = other
                 .modules()
@@ -743,17 +743,7 @@ fn assert_pre_equality_graph_cap(
         max_depth: depth,
     };
     let report = compiler::analysis::ownership::analyze_ownership(receipt, old);
-    assert_eq!(
-        report.completion(),
-        compiler::analysis::ownership::GraphCompletion::ResourceLimit,
-        "pre-equality graph cap {old:?}"
-    );
-    assert!(
-        report
-            .roots()
-            .iter()
-            .all(|root| root.ordinary_mir().is_none())
-    );
+    crate::limit::assert_graph_limit(&report);
 }
 
 /// Lowers `name` at exactly `(work, entries, depth)`, asserts `Checked` with
@@ -826,12 +816,7 @@ fn assert_whole_cleanup(
         },
     ] {
         let limited = lower_body(receipt, module, id, short).unwrap();
-        assert_eq!(
-            limited.completion(),
-            Completion::ResourceLimit,
-            "{name} {short:?}"
-        );
-        assert!(limited.mir().is_none() && limited.findings().is_empty());
+        crate::limit::assert_body_limit(&limited);
     }
 }
 

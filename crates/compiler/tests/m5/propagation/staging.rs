@@ -320,8 +320,7 @@ fn interrupted_tuple_initializer_cleans_only_the_reached_prefix() {
                 assert_eq!(at_cap.completion(), completion, "{name}");
                 for short in one_short(pinned) {
                     let limited = lower(name, short);
-                    assert_eq!(limited.completion(), Completion::ResourceLimit, "{name}");
-                    assert!(limited.mir().is_none() && limited.findings().is_empty());
+                    crate::limit::assert_body_limit(&limited);
                 }
             }
             // Groups add written depth, not work beyond one step per layer.
@@ -513,7 +512,7 @@ fn interrupted_tuple_initializer_cleans_only_the_reached_prefix() {
                 assert_eq!(report.blocked_at().unwrap().span.bytes(), blocked, "{name}");
                 assert_eq!(root(name).ordinary_completion(), Completion::Incomplete);
                 for short in one_short(parent) {
-                    assert_eq!(lower(name, short).completion(), Completion::ResourceLimit);
+                    crate::limit::assert_body_limit(&lower(name, short));
                 }
             }
 
@@ -525,8 +524,7 @@ fn interrupted_tuple_initializer_cleans_only_the_reached_prefix() {
             assert_eq!(analyze_ownership(receipt, exact(whole)).statistics(), whole);
             for short in one_short(whole) {
                 let limited = analyze_ownership(receipt, short);
-                assert_eq!(limited.completion(), GraphCompletion::ResourceLimit);
-                assert!(limited.roots().iter().all(|r| r.mir().is_none()));
+                crate::limit::assert_graph_limit(&limited);
             }
         },
     );
@@ -593,8 +591,7 @@ fn condition_postfix_continues_on_the_ordinary_branch() {
                 );
                 for short in one_short(pinned) {
                     let limited = lower(name, short);
-                    assert_eq!(limited.completion(), Completion::ResourceLimit, "{name}");
-                    assert!(limited.mir().is_none() && limited.findings().is_empty());
+                    crate::limit::assert_body_limit(&limited);
                 }
             }
             assert!(lower("grouped", default).statistics().max_depth > 6);
@@ -762,7 +759,7 @@ fn condition_postfix_continues_on_the_ordinary_branch() {
                 assert_eq!(report.blocked_at().unwrap().span.bytes(), blocked, "{name}");
                 assert_eq!(root(name).ordinary_completion(), Completion::Incomplete);
                 for short in one_short(parent) {
-                    assert_eq!(lower(name, short).completion(), Completion::ResourceLimit);
+                    crate::limit::assert_body_limit(&lower(name, short));
                 }
             }
 
@@ -773,8 +770,7 @@ fn condition_postfix_continues_on_the_ordinary_branch() {
             assert_eq!(analyze_ownership(receipt, exact(whole)).statistics(), whole);
             for short in one_short(whole) {
                 let limited = analyze_ownership(receipt, short);
-                assert_eq!(limited.completion(), GraphCompletion::ResourceLimit);
-                assert!(limited.roots().iter().all(|r| r.mir().is_none()));
+                crate::limit::assert_graph_limit(&limited);
             }
         },
     );
@@ -810,8 +806,7 @@ function deadCondition(gate: Option<bool>, retired: string): Option<bool> {
             assert!(graph.findings().is_empty());
             for short in one_short(graph_stats) {
                 let limited = analyze_ownership(receipt, short);
-                assert_eq!(limited.completion(), GraphCompletion::ResourceLimit);
-                assert!(limited.roots().iter().all(|r| r.ordinary_mir().is_none()));
+                crate::limit::assert_graph_limit(&limited);
             }
             for (name, pinned, expected) in [
                 (
@@ -855,8 +850,7 @@ function deadCondition(gate: Option<bool>, retired: string): Option<bool> {
                 assert_eq!(linear_path(mir, typed, mir.entry), expected, "{name}");
                 for short in one_short(pinned) {
                     let limited = lower_body(receipt, module, &d.id, short).unwrap();
-                    assert_eq!(limited.completion(), Completion::ResourceLimit, "{name}");
-                    assert!(limited.mir().is_none() && limited.findings().is_empty());
+                    crate::limit::assert_body_limit(&limited);
                 }
                 let root = graph
                     .roots()

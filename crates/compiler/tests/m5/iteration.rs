@@ -112,12 +112,7 @@ fn installed_consuming_list_iteration() {
             ));
             for cap in short {
                 let limited = run(cap);
-                assert_eq!(
-                    limited.completion(),
-                    Completion::ResourceLimit,
-                    "{name}: {cap:?}"
-                );
-                assert!(limited.mir().is_none() && limited.findings().is_empty());
+                crate::limit::assert_body_limit(&limited);
             }
             if expected == Completion::Checked {
                 assert!(report.findings().is_empty());
@@ -148,8 +143,7 @@ fn installed_consuming_list_iteration() {
         assert_eq!(at.statistics(), graph.statistics());
         for cap in short {
             let limited = analyze_ownership(receipt, cap);
-            assert_eq!(limited.completion(), GraphCompletion::ResourceLimit);
-            assert!(limited.roots().iter().all(|r| r.ordinary_mir().is_none()));
+            crate::limit::assert_graph_limit(&limited);
         }
     });
 }
@@ -257,8 +251,7 @@ fn scalar_iteration_screens_unsupported_bodies_and_charges_binder_depth() {
                     ..default
                 },
             );
-            assert_eq!(short.completion(), Completion::ResourceLimit);
-            assert!(short.mir().is_none());
+            crate::limit::assert_body_limit(&short);
         },
     );
 }

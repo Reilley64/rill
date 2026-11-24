@@ -44,8 +44,7 @@ fn grouped_record_fields_keep_the_named_initializer_budget() {
                     ..Default::default()
                 },
             );
-            assert_eq!(short.completion(), Completion::ResourceLimit);
-            assert!(short.mir().is_none());
+            crate::limit::assert_body_limit(&short);
         },
     );
 }
@@ -391,8 +390,7 @@ fn interrupted_record_commits_binders_only_on_success() {
                 ..default
             };
             let short = run("grouped", grouped_depth);
-            assert_eq!(short.completion(), Completion::ResourceLimit);
-            assert!(short.mir().is_none());
+            crate::limit::assert_body_limit(&short);
             for (name, read, prior) in [
                 (
                     "reachMovedSuffix",
@@ -441,11 +439,7 @@ fn interrupted_record_commits_binders_only_on_success() {
                     ..default
                 },
             );
-            assert_eq!(
-                short_graph.completion(),
-                compiler::analysis::ownership::GraphCompletion::ResourceLimit
-            );
-            assert!(short_graph.roots().iter().all(|r| r.mir().is_none()));
+            crate::limit::assert_graph_limit(&short_graph);
             let s = direct.statistics();
             let exact = AnalysisLimits {
                 max_work: s.work,
@@ -468,8 +462,7 @@ fn interrupted_record_commits_binders_only_on_success() {
                 },
             ] {
                 let r = run("directInterrupt", lim);
-                assert_eq!(r.completion(), Completion::ResourceLimit);
-                assert!(r.mir().is_none() && r.findings().is_empty());
+                crate::limit::assert_body_limit(&r);
             }
         },
     );

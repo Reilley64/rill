@@ -226,8 +226,7 @@ fn owned_option_postfix_preserves_shared_text_backing() {
                     },
                 ] {
                     let limited = check(name, short);
-                    assert_eq!(limited.completion(), Completion::ResourceLimit, "{name}");
-                    assert!(limited.mir().is_none() && limited.findings().is_empty());
+                    crate::limit::assert_body_limit(&limited);
                 }
             }
         },
@@ -351,8 +350,7 @@ fn exclusive_option_postfix_moves_the_carrier_and_descriptor() {
                 },
             ] {
                 let limited = check(short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none() && limited.findings().is_empty());
+                crate::limit::assert_body_limit(&limited);
             }
         },
     );
@@ -817,8 +815,7 @@ fn shared_option_copies_keep_the_named_carrier_and_its_backing() {
                 ..default
             };
             let short = run("grouped", limit);
-            assert_eq!(short.completion(), Completion::ResourceLimit);
-            assert!(short.mir().is_none());
+            crate::limit::assert_body_limit(&short);
             for name in ["live", "beforeTake"] {
                 let report = run(name, default);
                 assert_eq!(report.completion(), Completion::SourceRejected);
@@ -1026,8 +1023,7 @@ fn option_postfix_returns_through_initialized_cleanup() {
                 },
             ] {
                 let limited = check("paths", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
 
             let bad = lower("rejected");
@@ -1266,8 +1262,7 @@ fn option_pipe_propagates_the_staged_call_output_once() {
                 },
             ] {
                 let limited = lower("paths", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
         },
     );
@@ -1584,8 +1579,7 @@ fn scalar_infix_wraps_only_failure_and_preserves_the_cause() {
                 },
             ] {
                 let short = check("paths", short);
-                assert_eq!(short.completion(), Completion::ResourceLimit);
-                assert!(short.mir().is_none());
+                crate::limit::assert_body_limit(&short);
             }
             for (name, site, related) in [
                 ("movedRhs", "message", "dispose(message)"),
@@ -1699,12 +1693,7 @@ fn wrapping_rhs_keeps_ordinary_and_unadmitted_budgets() {
                     },
                 ] {
                     let exhausted = run(name, short);
-                    assert_eq!(
-                        exhausted.completion(),
-                        Completion::ResourceLimit,
-                        "{name} one short"
-                    );
-                    assert!(exhausted.mir().is_none());
+                    crate::limit::assert_body_limit(&exhausted);
                 }
             }
             let direct = run("direct", AnalysisLimits::default());
@@ -1717,8 +1706,7 @@ fn wrapping_rhs_keeps_ordinary_and_unadmitted_budgets() {
                     ..Default::default()
                 },
             );
-            assert_eq!(short.completion(), Completion::ResourceLimit);
-            assert!(short.mir().is_none());
+            crate::limit::assert_body_limit(&short);
         },
     );
 }
@@ -2062,8 +2050,7 @@ fn returning_wrap_rhs_forwards_instead_of_wrapping() {
                     },
                 ] {
                     let limited = check(name, short);
-                    assert_eq!(limited.completion(), Completion::ResourceLimit, "{name}");
-                    assert!(limited.mir().is_none());
+                    crate::limit::assert_body_limit(&limited);
                 }
             }
 
@@ -2336,8 +2323,7 @@ fn fresh_scalar_error_keeps_constructor_origin_through_postfix() {
                     },
                 ] {
                     let limited = check(name, short);
-                    assert_eq!(limited.completion(), Completion::ResourceLimit);
-                    assert!(limited.mir().is_none());
+                    crate::limit::assert_body_limit(&limited);
                 }
             }
             let moved = lower("moved");
@@ -2523,8 +2509,7 @@ fn result_postfix_forwards_existing_failure_before_cleanup() {
                 },
             ] {
                 let limited = check("paths", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
         },
     );
@@ -2883,8 +2868,7 @@ fn fresh_error_pipe_keeps_the_written_constructor_anchor() {
                 },
             ] {
                 let limited = lower("failed", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
         },
     );
@@ -3037,8 +3021,7 @@ fn propagation_statements_discard_only_the_feasible_success_payload() {
                 },
             ] {
                 let limited = lower("wrap", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
         },
     );
@@ -3269,8 +3252,7 @@ fn an_early_call_argument_exit_cleans_only_the_staged_prefix() {
                 },
             ] {
                 let limited = lower("option", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
         },
     );
@@ -3507,8 +3489,7 @@ fn wrapping_and_pipe_arguments_use_the_same_early_exit_cleanup() {
                 },
             ] {
                 let limited = lower("piped", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
         },
     );
@@ -3801,8 +3782,7 @@ fn single_edge_arguments_do_not_lower_an_unreachable_call_path() {
                 },
             ] {
                 let limited = lower("failure", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
         },
     );
@@ -4003,8 +3983,7 @@ fn two_propagating_arguments_clean_their_own_staged_prefixes() {
                 },
             ] {
                 let limited = lower("options", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
         },
     );
@@ -4204,8 +4183,7 @@ fn paired_arguments_use_only_their_feasible_edges() {
                 },
             ] {
                 let limited = lower("secondStops", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
         },
     );
@@ -4350,8 +4328,7 @@ fn wider_propagating_calls_keep_each_reached_prefix() {
                 },
             ] {
                 let limited = check("three", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
         },
     );
@@ -4482,8 +4459,7 @@ fn outer_pipes_stage_the_input_before_propagating_written_arguments() {
                 },
             ] {
                 let limited = lower("pipe", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
         },
     );
@@ -4639,8 +4615,7 @@ fn propagating_pipe_input_runs_before_written_arguments() {
                 },
             ] {
                 let limited = lower("pipe", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
         },
     );
@@ -4860,8 +4835,7 @@ fn propagating_pipe_step_runs_only_after_all_arguments_continue() {
                 },
             ] {
                 let limited = lower("pipe", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
         },
     );
@@ -5003,8 +4977,7 @@ fn composed_pipe_statements_discard_only_the_success_payload() {
                 },
             ] {
                 let limited = lower("results", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
         },
     );
@@ -5186,8 +5159,7 @@ fn scalar_call_statements_preserve_propagating_argument_exits() {
                 },
             ] {
                 let limited = lower("pipe", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
         },
     );
@@ -5376,8 +5348,7 @@ fn propagating_calls_create_owning_results_only_on_success() {
                 },
             ] {
                 let limited = lower("pipe", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
         },
     );
@@ -5738,8 +5709,7 @@ fn option_text_propagation_moves_or_drops_the_owned_payload() {
                 },
             ] {
                 let limited = lower("discarded", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
         },
     );
@@ -5936,8 +5906,7 @@ fn live_option_text_cleanup_drops_only_the_initialized_carrier_payload() {
                     },
                 ] {
                     let limited = lower(name, short);
-                    assert_eq!(limited.completion(), Completion::ResourceLimit);
-                    assert!(limited.mir().is_none());
+                    crate::limit::assert_body_limit(&limited);
                 }
             }
         },
@@ -6132,8 +6101,7 @@ fn fresh_option_text_propagation_stages_the_constructor_once() {
                 },
             ] {
                 let limited = lower("named", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
         },
     );
@@ -6326,8 +6294,7 @@ fn option_text_factory_propagation_checks_the_reached_call_once() {
             };
             assert!(lower("flat", depth).mir().is_some());
             let grouped = lower("named", depth);
-            assert_eq!(grouped.completion(), Completion::ResourceLimit);
-            assert!(grouped.mir().is_none());
+            crate::limit::assert_body_limit(&grouped);
             let exact = AnalysisLimits {
                 max_work: named.statistics().work,
                 max_entries: named.statistics().entries,
@@ -6345,8 +6312,7 @@ fn option_text_factory_propagation_checks_the_reached_call_once() {
                 },
             ] {
                 let limited = lower("named", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
         },
     );
@@ -6605,8 +6571,7 @@ fn option_text_pipe_propagation_stages_input_and_transfers_the_returned_owner() 
             };
             assert!(lower("named", depth).mir().is_some());
             let exhausted = lower("grouped", depth);
-            assert_eq!(exhausted.completion(), Completion::ResourceLimit);
-            assert!(exhausted.mir().is_none());
+            crate::limit::assert_body_limit(&exhausted);
             let exact = AnalysisLimits {
                 max_work: named.statistics().work,
                 max_entries: named.statistics().entries,
@@ -6624,8 +6589,7 @@ fn option_text_pipe_propagation_stages_input_and_transfers_the_returned_owner() 
                 },
             ] {
                 let limited = lower("named", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
         },
     );
@@ -6845,8 +6809,7 @@ fn owning_option_argument_propagation_cleans_only_reached_stages() {
                 },
             ] {
                 let limited = lower("paired", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
         },
     );
@@ -7093,8 +7056,7 @@ fn owning_option_arguments_before_propagating_steps_have_distinct_exits() {
                 },
             ] {
                 let limited = lower("composed", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
         },
     );
@@ -7377,8 +7339,7 @@ fn one_composed_pipe_argument_keeps_inner_and_outer_cleanup_prefixes() {
             };
             assert!(lower("skipped", cap).mir().is_some());
             let grouped = lower("skipGrouped", cap);
-            assert_eq!(grouped.completion(), Completion::ResourceLimit);
-            assert!(grouped.mir().is_none());
+            crate::limit::assert_body_limit(&grouped);
             let direct = lower("deepDirect", default);
             let mir = direct
                 .mir()
@@ -7453,8 +7414,7 @@ fn one_composed_pipe_argument_keeps_inner_and_outer_cleanup_prefixes() {
                     },
                 ] {
                     let limited = lower(name, short);
-                    assert_eq!(limited.completion(), Completion::ResourceLimit, "{name}");
-                    assert!(limited.mir().is_none());
+                    crate::limit::assert_body_limit(&limited);
                 }
             }
         },
@@ -7682,8 +7642,7 @@ fn sibling_composed_arguments_keep_their_own_cleanup_prefixes() {
                 },
             ] {
                 let limited = lower("siblings", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
         },
     );
@@ -7939,8 +7898,7 @@ fn composed_arguments_of_ordinary_pipes_keep_evaluation_order_and_cleanup() {
                 },
             ] {
                 let limited = lower("written", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
         },
     );
@@ -8263,8 +8221,7 @@ fn composed_arguments_before_a_propagating_outer_step_keep_all_exit_prefixes() {
                 },
             ] {
                 let limited = lower("written", short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
             let too_shallow = lower(
                 "written",
@@ -8273,8 +8230,7 @@ fn composed_arguments_before_a_propagating_outer_step_keep_all_exit_prefixes() {
                     ..exact
                 },
             );
-            assert_eq!(too_shallow.completion(), Completion::ResourceLimit);
-            assert!(too_shallow.mir().is_none());
+            crate::limit::assert_body_limit(&too_shallow);
         },
     );
 }
@@ -8454,8 +8410,7 @@ fn recursive_pipe_operands_have_separate_failure_prefixes() {
                     },
                 ] {
                     let limited = lower(name, short);
-                    assert_eq!(limited.completion(), Completion::ResourceLimit, "{name}");
-                    assert!(limited.mir().is_none());
+                    crate::limit::assert_body_limit(&limited);
                 }
             }
         },
@@ -8752,8 +8707,7 @@ fn discarded_compound_call_cleans_only_the_materialized_success_result() {
                 ..AnalysisLimits::default()
             };
             let grouped = lower_body(receipt, module, id("groupedPair"), depth).unwrap();
-            assert_eq!(grouped.completion(), Completion::ResourceLimit);
-            assert!(grouped.mir().is_none());
+            crate::limit::assert_body_limit(&grouped);
             for short in [
                 AnalysisLimits {
                     max_depth: exact.max_depth - 1,
@@ -8769,8 +8723,7 @@ fn discarded_compound_call_cleans_only_the_materialized_success_result() {
                 },
             ] {
                 let limited = bounded(short);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none());
+                crate::limit::assert_body_limit(&limited);
             }
         },
     );
@@ -8961,8 +8914,7 @@ fn named_compound_call_keeps_the_result_until_lexical_exit() {
                     },
                 ] {
                     let limited = bounded(short);
-                    assert_eq!(limited.completion(), Completion::ResourceLimit);
-                    assert!(limited.mir().is_none());
+                    crate::limit::assert_body_limit(&limited);
                 }
             } else {
                 assert_ne!(named.completion(), Completion::Checked);

@@ -1040,8 +1040,7 @@ fn r1_caller_provided_exclusive_source_stops_typed() {
                     assert_eq!(replay.statistics(), typed.statistics());
                     for short in short {
                         let limited = analyze_typed(&graph, short);
-                        assert_eq!(limited.completion(), TypedCompletion::ResourceLimit);
-                        assert!(limited.receipt().is_none());
+                        crate::limit::assert_typed_limit_keeping_body_findings(&limited);
                     }
                 }
             }
@@ -1111,10 +1110,7 @@ pub(super) fn old_root_caps(request: &InstalledRequest, olds: &[OldCaps<'_>]) {
             let receipt = typed.receipt().unwrap();
             let module = super::o12::application(&graph);
             let (old, _) = limits(statistics(*whole));
-            assert_eq!(
-                analyze_ownership(&receipt, old).completion(),
-                GraphCompletion::ResourceLimit
-            );
+            crate::limit::assert_graph_limit(&analyze_ownership(&receipt, old));
             for (name, old) in *roots {
                 let declaration = module
                     .declarations
@@ -1125,8 +1121,7 @@ pub(super) fn old_root_caps(request: &InstalledRequest, olds: &[OldCaps<'_>]) {
                     .unwrap();
                 let (old, _) = limits(statistics(*old));
                 let limited = lower_body(&receipt, module, &declaration.id, old).unwrap();
-                assert_eq!(limited.completion(), Completion::ResourceLimit, "{name}");
-                assert!(limited.mir().is_none() && limited.findings().is_empty());
+                crate::limit::assert_body_limit(&limited);
             }
         }
     }

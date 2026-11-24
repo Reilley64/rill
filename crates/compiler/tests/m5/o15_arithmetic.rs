@@ -68,8 +68,7 @@ fn counter_probe(test: &str, source: &str, name: &str) {
         check_counter(replay.mir().unwrap());
         for short in short {
             let limited = query(short);
-            assert_eq!(limited.completion(), Completion::ResourceLimit);
-            assert!(limited.mir().is_none() && limited.findings().is_empty());
+            crate::limit::assert_body_limit(&limited);
         }
 
         let graph = analyze_ownership(receipt, AnalysisLimits::default());
@@ -83,10 +82,7 @@ fn counter_probe(test: &str, source: &str, name: &str) {
             check_counter(root.ordinary_mir().unwrap());
         }
         for short in short {
-            assert_eq!(
-                analyze_ownership(receipt, short).completion(),
-                GraphCompletion::ResourceLimit
-            );
+            crate::limit::assert_graph_limit(&analyze_ownership(receipt, short));
         }
 
         // The expectation root calls the function and compares its i32 result
@@ -146,17 +142,16 @@ fn rfc_counter_caps_include_the_charged_local_reads() {
             assert_eq!(target.statistics(), stats);
             for cap in short {
                 let limited = query(cap);
-                assert_eq!(limited.completion(), Completion::ResourceLimit);
-                assert!(limited.mir().is_none() && limited.findings().is_empty());
+                crate::limit::assert_body_limit(&limited);
             }
             // Metering rule 11 (ri-785.9): the A2 graph cap 187,543/4,297/6
             // gives ResourceLimit now that the i32 equality source root
             // (+316/+134, depth 5) and the counter expectation root
             // (+184/+65) are checked.
-            assert_eq!(
-                analyze_ownership(receipt, caps(statistics(187543, 4297, 6)).0).completion(),
-                GraphCompletion::ResourceLimit
-            );
+            crate::limit::assert_graph_limit(&analyze_ownership(
+                receipt,
+                caps(statistics(187543, 4297, 6)).0,
+            ));
             let graph_stats = statistics(188043, 4496, 6);
             let (exact, short) = caps(graph_stats);
             let graph = analyze_ownership(receipt, exact);
@@ -165,10 +160,7 @@ fn rfc_counter_caps_include_the_charged_local_reads() {
             let root = graph_root(&graph, module, decl.node);
             assert_eq!(root.ordinary_completion(), Completion::Checked);
             for cap in short {
-                assert_eq!(
-                    analyze_ownership(receipt, cap).completion(),
-                    GraphCompletion::ResourceLimit
-                );
+                crate::limit::assert_graph_limit(&analyze_ownership(receipt, cap));
             }
         },
     );
@@ -217,8 +209,7 @@ fn counter_expectation_checks_past_its_incomplete_cap() {
                     lower_root(&receipt, module, BodyOwner::Declaration(&expect.id), cap).unwrap()
                 };
                 let incomplete = query(caps(statistics(2279, 210, 1)).0);
-                assert_eq!(incomplete.completion(), Completion::ResourceLimit);
-                assert!(incomplete.mir().is_none() && incomplete.findings().is_empty());
+                crate::limit::assert_body_limit(&incomplete);
 
                 let stats = statistics(5329, 781, 6);
                 assert_eq!(query(AnalysisLimits::default()).statistics(), stats);
@@ -235,8 +226,7 @@ fn counter_expectation_checks_past_its_incomplete_cap() {
                 check_expectation(root.ordinary_mir().unwrap(), counter, "counter()", "12i32");
                 for cap in short {
                     let limited = query(cap);
-                    assert_eq!(limited.completion(), Completion::ResourceLimit);
-                    assert!(limited.mir().is_none() && limited.findings().is_empty());
+                    crate::limit::assert_body_limit(&limited);
                 }
             }
         },
@@ -301,20 +291,14 @@ expect seven() == 7i32 && true;
             // Whole-graph cap before: the i32 equality source root alone adds
             // 316 work and 134 entries and sets depth 5 (metering rule 11).
             let before = statistics(190397, 4219, 3);
-            assert_eq!(
-                analyze_ownership(receipt, caps(before).0).completion(),
-                GraphCompletion::ResourceLimit
-            );
+            crate::limit::assert_graph_limit(&analyze_ownership(receipt, caps(before).0));
             let graph_stats = statistics(190713, 4353, 5);
             let (exact, short) = caps(graph_stats);
             let graph = analyze_ownership(receipt, exact);
             assert_eq!(graph.completion(), GraphCompletion::Incomplete);
             assert_eq!(graph.statistics(), graph_stats);
             for cap in short {
-                assert_eq!(
-                    analyze_ownership(receipt, cap).completion(),
-                    GraphCompletion::ResourceLimit
-                );
+                crate::limit::assert_graph_limit(&analyze_ownership(receipt, cap));
             }
             for (root, work, entries, depth, blocker) in [
                 ("function different(", 1975, 80, 3, "left != right"),
@@ -368,8 +352,7 @@ expect seven() == 7i32 && true;
                 );
                 for cap in short {
                     let limited = query(cap);
-                    assert_eq!(limited.completion(), Completion::ResourceLimit, "{root}");
-                    assert!(limited.mir().is_none() && limited.findings().is_empty());
+                    crate::limit::assert_body_limit(&limited);
                 }
             }
         },
@@ -391,20 +374,14 @@ expect 7i32 == seven();
         |_, module, receipt| {
             // Before: Incomplete at each comparison, 188,285/4,095/3 for the graph.
             let before = statistics(188285, 4095, 3);
-            assert_eq!(
-                analyze_ownership(receipt, caps(before).0).completion(),
-                GraphCompletion::ResourceLimit
-            );
+            crate::limit::assert_graph_limit(&analyze_ownership(receipt, caps(before).0));
             let graph_stats = statistics(189812, 4724, 8);
             let (exact, short) = caps(graph_stats);
             let graph = analyze_ownership(receipt, exact);
             assert_eq!(graph.completion(), GraphCompletion::Incomplete);
             assert_eq!(graph.statistics(), graph_stats);
             for cap in short {
-                assert_eq!(
-                    analyze_ownership(receipt, cap).completion(),
-                    GraphCompletion::ResourceLimit
-                );
+                crate::limit::assert_graph_limit(&analyze_ownership(receipt, cap));
             }
             let seven = &named(module, "seven").id;
             // Groups add depth, not operations: the grouped expectation is
@@ -489,8 +466,7 @@ expect 7i32 == seven();
                 }
                 for cap in short {
                     let limited = query(cap);
-                    assert_eq!(limited.completion(), Completion::ResourceLimit, "{root}");
-                    assert!(limited.mir().is_none() && limited.findings().is_empty());
+                    crate::limit::assert_body_limit(&limited);
                 }
             }
         },
@@ -746,20 +722,17 @@ function screened(xs: List<i32>, left: i32, right: i32): i32 {
             // Exact results measured at a2d8e05, before arithmetic lowering.
             // Metering rule 11 (ri-785.9): the graph was 191,033/4,151/5; the
             // i32 equality source root adds 316 work and 134 entries.
-            assert_eq!(
-                analyze_ownership(receipt, caps(statistics(191033, 4151, 5)).0).completion(),
-                GraphCompletion::ResourceLimit
-            );
+            crate::limit::assert_graph_limit(&analyze_ownership(
+                receipt,
+                caps(statistics(191033, 4151, 5)).0,
+            ));
             let graph_stats = statistics(191349, 4285, 5);
             let (exact, short) = caps(graph_stats);
             let graph = analyze_ownership(receipt, exact);
             assert_eq!(graph.completion(), GraphCompletion::Incomplete);
             assert_eq!(graph.statistics(), graph_stats);
             for cap in short {
-                assert_eq!(
-                    analyze_ownership(receipt, cap).completion(),
-                    GraphCompletion::ResourceLimit
-                );
+                crate::limit::assert_graph_limit(&analyze_ownership(receipt, cap));
             }
             for (name, work, entries, depth, expected) in [
                 ("direct", 2015, 101, 3, "left * right"),
@@ -798,8 +771,7 @@ function screened(xs: List<i32>, left: i32, right: i32): i32 {
                 assert_eq!(root.blocked_at().unwrap().span.bytes(), expected.as_bytes());
                 for cap in short {
                     let limited = query(cap);
-                    assert_eq!(limited.completion(), Completion::ResourceLimit, "{name}");
-                    assert!(limited.mir().is_none() && limited.findings().is_empty());
+                    crate::limit::assert_body_limit(&limited);
                 }
             }
         },
@@ -826,20 +798,17 @@ function arrowUninvoked(first: i32, second: i32): i32 {
 }
 "#,
         |_, module, receipt| {
-            assert_eq!(
-                analyze_ownership(receipt, caps(statistics(186809, 4039, 4)).0).completion(),
-                GraphCompletion::ResourceLimit
-            );
+            crate::limit::assert_graph_limit(&analyze_ownership(
+                receipt,
+                caps(statistics(186809, 4039, 4)).0,
+            ));
             let graph_stats = statistics(187125, 4173, 5);
             let (exact, short) = caps(graph_stats);
             let graph = analyze_ownership(receipt, exact);
             assert_eq!(graph.completion(), GraphCompletion::Incomplete);
             assert_eq!(graph.statistics(), graph_stats);
             for cap in short {
-                assert_eq!(
-                    analyze_ownership(receipt, cap).completion(),
-                    GraphCompletion::ResourceLimit
-                );
+                crate::limit::assert_graph_limit(&analyze_ownership(receipt, cap));
             }
             for (name, work, entries, depth, expected) in [
                 ("arrowInvoked", 1906, 50, 3, "f()"),
@@ -868,8 +837,7 @@ function arrowUninvoked(first: i32, second: i32): i32 {
                 assert_eq!(root.blocked_at().unwrap().span.bytes(), expected.as_bytes());
                 for cap in short {
                     let limited = query(cap);
-                    assert_eq!(limited.completion(), Completion::ResourceLimit, "{name}");
-                    assert!(limited.mir().is_none() && limited.findings().is_empty());
+                    crate::limit::assert_body_limit(&limited);
                 }
             }
         },
