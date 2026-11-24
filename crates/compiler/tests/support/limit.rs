@@ -1,5 +1,6 @@
 //! The one place that says what `ResourceLimit` publishes (metering rule 8):
-//! no MIR and no finding (a typed report: no receipt and no body finding).
+//! no MIR and no finding (a typed report: no receipt and no finding in any list
+//! it publishes).
 //! Every `ResourceLimit` assertion calls one of these, so a site cannot omit
 //! part of it. The `*_flaws` forms list what is wrong, for tests that collect
 //! failures instead of panicking.
@@ -43,22 +44,39 @@ pub(crate) fn body_limit_flaws(report: &Report<'_>) -> Vec<&'static str> {
     flaws
 }
 
-/// A typed report: no receipt and no body finding.
+/// A typed report: no receipt, and no finding in any list it publishes: body,
+/// conditional, annotation, public-interface, declaration issue, and the
+/// inventory's type findings and declaration issues.
 pub(crate) fn typed_limit_flaws(report: &TypedReport<'_>) -> Vec<&'static str> {
-    let mut flaws = typed_limit_without_findings_flaws(report);
-    if !report.bodies().findings().is_empty() {
-        flaws.push("publishes a body finding");
-    }
-    flaws
-}
-
-fn typed_limit_without_findings_flaws(report: &TypedReport<'_>) -> Vec<&'static str> {
     let mut flaws = Vec::new();
     if report.completion() != TypedCompletion::ResourceLimit {
         flaws.push("completion is not ResourceLimit");
     }
     if report.receipt().is_some() {
         flaws.push("grants a receipt");
+    }
+    let bodies = report.bodies();
+    if !bodies.findings().is_empty() {
+        flaws.push("publishes a body finding");
+    }
+    if !bodies.conditional_findings().is_empty() {
+        flaws.push("publishes a conditional finding");
+    }
+    if bodies.annotations().findings().next().is_some() {
+        flaws.push("publishes an annotation finding");
+    }
+    if !bodies.declaration_issues().is_empty() {
+        flaws.push("publishes a declaration issue");
+    }
+    if !report.public_interface_findings().is_empty() {
+        flaws.push("publishes a public-interface finding");
+    }
+    let inventory = report.inventory();
+    if inventory.type_facts().findings().next().is_some() {
+        flaws.push("publishes an inventory type finding");
+    }
+    if !inventory.declaration_issues().is_empty() {
+        flaws.push("publishes an inventory declaration issue");
     }
     flaws
 }
@@ -78,14 +96,5 @@ pub(crate) fn assert_body_limit(report: &Report<'_>) {
 #[track_caller]
 pub(crate) fn assert_typed_limit(report: &TypedReport<'_>) {
     let flaws = typed_limit_flaws(report);
-    assert!(flaws.is_empty(), "{flaws:?} at {:?}", report.statistics());
-}
-
-/// Pending `ri-68mu`: `analyze_typed` publishes body findings at `ResourceLimit`
-/// (the typed twin of `ri-grwx`), so five sites cannot assert the full rule yet.
-/// Each moves to `assert_typed_limit` when that bead lands; no new site may use this.
-#[track_caller]
-pub(crate) fn assert_typed_limit_keeping_body_findings(report: &TypedReport<'_>) {
-    let flaws = typed_limit_without_findings_flaws(report);
     assert!(flaws.is_empty(), "{flaws:?} at {:?}", report.statistics());
 }

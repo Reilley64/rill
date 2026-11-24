@@ -576,5 +576,10 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
             report.not_performed = vec![Stage::Ownership, Stage::Execution];
         }
     }
+    if report.completion == TypedCompletion::ResourceLimit {
+        report.inventory.withhold_findings();
+        report.bodies.withhold_findings();
+        report.public_interface_findings.clear();
+    }
     report
 }

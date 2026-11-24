@@ -133,6 +133,11 @@ pub struct OrdinaryAnalysis<'g> {
 }
 
 impl<'g> OrdinaryAnalysis<'g> {
+    pub(super) fn withhold_findings(&mut self) {
+        self.types.withhold_findings();
+        self.declaration_issues.clear();
+    }
+
     pub(super) fn graph(&self) -> &'g Graph {
         self.graph
     }

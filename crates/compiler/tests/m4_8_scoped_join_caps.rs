@@ -438,7 +438,7 @@ fn exact_replay(graph: &loader::Graph) -> (AnalysisLimits, TypedReport<'_>) {
         },
     ] {
         let limited = analyze_typed(graph, short);
-        crate::limit::assert_typed_limit_keeping_body_findings(&limited);
+        crate::limit::assert_typed_limit(&limited);
     }
     (exact, replay)
 }

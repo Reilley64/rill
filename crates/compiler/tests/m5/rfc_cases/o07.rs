@@ -92,6 +92,286 @@ fn overlapping_construction_rejects_r0201() {
     );
 }
 
+/// Done when 3 (review ci-0mdr Q3, SP-4; chief ruling 11): a member
+/// replacement that creates an overlap rejects R0201 at the replacement with
+/// no later use, as construction does. The store uses the record's other
+/// members, so their loans are held while the new loan is staged; the replaced
+/// member's own old loan is released by the store (`sameOwnerAgain` in
+/// `o07_forms`). The site is the new borrow, the related site the loan it
+/// meets, the construction's `&mut a` or `&mut b` (the two have the same text
+/// in `overlapNoUse`, `replacesFirst` and `looped`; `sharedMember` and
+/// `sharedFirst` tell the sites apart). `looped` repeats the replacement in a
+/// loop.
+const REPLACEMENT: Case = Case {
+    text: r#"
+type Pair = { x: &mut i32; y: &mut i32 };
+type Holder = { first: &mut i32; second: &i32 };
+type Reversed = { first: &i32; second: &mut i32 };
+function overlapNoUse(): i32 {
+  let mut a = 1i32;
+  let mut b = 2i32;
+  let mut holder = Pair { x: &mut a, y: &mut b };
+  holder.y = &mut a;
+  return 0i32;
+}
+function replacesFirst(): i32 {
+  let mut a = 1i32;
+  let mut b = 2i32;
+  let mut holder = Pair { x: &mut a, y: &mut b };
+  holder.x = &mut b;
+  return 0i32;
+}
+function sharedMember(): i32 {
+  let mut a = 1i32;
+  let b = 2i32;
+  let mut holder = Holder { first: &mut a, second: &b };
+  holder.second = &a;
+  return 0i32;
+}
+function sharedFirst(): i32 {
+  let b = 2i32;
+  let mut a = 1i32;
+  let mut holder = Reversed { first: &b, second: &mut a };
+  holder.first = &a;
+  return 0i32;
+}
+function looped(flag: bool): i32 {
+  let mut a = 1i32;
+  let mut b = 2i32;
+  let mut holder = Pair { x: &mut a, y: &mut b };
+  while (flag) { holder.y = &mut a; }
+  return 0i32;
+}
+"#,
+    typed_stats: (336765, 49495, 12),
+    graph: (GraphCompletion::SourceRejected, (196876, 5724, 6)),
+    roots: &[
+        Root {
+            name: "overlapNoUse",
+            want: Want::Rejected {
+                code: "R0201",
+                site: r####"&mut a"####,
+                related: r####"&mut a"####,
+            },
+            graph: None,
+            stats: (2828, 385, 5),
+        },
+        Root {
+            name: "replacesFirst",
+            want: Want::Rejected {
+                code: "R0201",
+                site: r####"&mut b"####,
+                related: r####"&mut b"####,
+            },
+            graph: None,
+            stats: (2823, 384, 5),
+        },
+        Root {
+            name: "sharedMember",
+            want: Want::Rejected {
+                code: "R0201",
+                site: r####"&a"####,
+                related: r####"&mut a"####,
+            },
+            graph: None,
+            stats: (2828, 385, 5),
+        },
+        Root {
+            name: "sharedFirst",
+            want: Want::Rejected {
+                code: "R0201",
+                site: r####"&a"####,
+                related: r####"&mut a"####,
+            },
+            graph: None,
+            stats: (2823, 384, 5),
+        },
+        Root {
+            name: "looped",
+            want: Want::Rejected {
+                code: "R0201",
+                site: r####"&mut a"####,
+                related: r####"&mut a"####,
+            },
+            graph: None,
+            stats: (3073, 514, 6),
+        },
+    ],
+};
+
+#[test]
+fn member_replacement_overlap_without_later_use() {
+    check(
+        "rfc_cases::o07::member_replacement_overlap_without_later_use",
+        &REPLACEMENT,
+    );
+}
+
+/// Metering rule 11, the mandated flip of Q3: the parent `da5bec50` checked
+/// every `REPLACEMENT` root at the caps below (the graph was `Incomplete` at
+/// its first loop), and the new check costs less, because the replacement
+/// rejects before the rest of the body is lowered. The old caps therefore still
+/// hold and give the new outcome, R0201, not `ResourceLimit`.
+#[test]
+fn member_replacement_overlap_gives_r0201_at_its_parent_caps() {
+    at_parent_caps(
+        "rfc_cases::o07::member_replacement_overlap_gives_r0201_at_its_parent_caps",
+        REPLACEMENT.text,
+        (198404, 6418, 6),
+        &[
+            ("overlapNoUse", (3061, 491, 5)),
+            ("replacesFirst", (3056, 490, 5)),
+            ("sharedMember", (3061, 491, 5)),
+            ("sharedFirst", (3056, 490, 5)),
+            ("looped", (3679, 789, 6)),
+        ],
+        Parent::Rejects("R0201"),
+    );
+}
+
+/// What a root or graph does at the caps the parent revision measured.
+pub(super) enum Parent {
+    /// The check now costs more: the old caps give `ResourceLimit`.
+    Exceeds,
+    /// The check now costs less: the old caps still hold and reject with this code.
+    Rejects(&'static str),
+}
+
+/// Review ci-0mdr Q3 (metering rule 11): the targeted roots and the whole
+/// graph of `text` at the caps `da5bec50` measured.
+pub(super) fn at_parent_caps(
+    test: &str,
+    text: &str,
+    graph_caps: Triple,
+    roots: &[(&str, Triple)],
+    parent: Parent,
+) {
+    installed(test, |request| {
+        fs::write(&request.entry, format!("{IMPORTS}\n{text}")).unwrap();
+        for test_mode in [false, true] {
+            let request = InstalledRequest {
+                test_mode,
+                ..request.clone()
+            };
+            let graph = loader::load_installed(request).unwrap();
+            let typed = analyze_typed(&graph, AnalysisLimits::default());
+            assert_eq!(typed.completion(), TypedCompletion::Checked);
+            let module = graph
+                .modules()
+                .iter()
+                .find(|m| m.key.origin == Origin::Application && m.key.path == "main.rill")
+                .unwrap();
+            let receipt = typed.receipt().unwrap();
+            let (old, _) = limits(statistics(graph_caps));
+            let whole = analyze_ownership(&receipt, old);
+            match parent {
+                Parent::Exceeds => crate::limit::assert_graph_limit(&whole),
+                Parent::Rejects(_) => {
+                    assert_eq!(whole.completion(), GraphCompletion::SourceRejected)
+                }
+            }
+            for &(name, caps) in roots {
+                let declaration = module
+                    .declarations
+                    .iter()
+                    .find(|d| {
+                        d.id.kind == DeclarationKind::Function && d.name.as_deref() == Some(name)
+                    })
+                    .unwrap();
+                let (old, _) = limits(statistics(caps));
+                let report = lower_body(&receipt, module, &declaration.id, old).unwrap();
+                match parent {
+                    Parent::Exceeds => crate::limit::assert_body_limit(&report),
+                    Parent::Rejects(code) => {
+                        assert_eq!(report.completion(), Completion::SourceRejected, "{name}");
+                        assert!(report.mir().is_none() && report.blocked_at().is_none());
+                        let codes: Vec<_> = report.findings().iter().map(|f| f.code()).collect();
+                        assert_eq!(codes, [code], "{name}");
+                    }
+                }
+            }
+        }
+    });
+}
+
+/// Review ci-0mdr SP-3, the rejecting twins of construction that the second
+/// review found correct but unpinned (probe 2 of ci-0mdr): a record moved
+/// twice is R0200 at the second move (related the first); a member and its
+/// referent in one call, `refFirst(&a, One { first: &mut a })`, is R0201 at the
+/// exclusive borrow (related the shared one); a `&mut` parameter stored in two
+/// members is R0200 at the second use (related the first). `refFirst` is the
+/// call's callee and checks.
+const TWINS: Case = Case {
+    text: r#"
+type Pair = { x: &mut i32; y: &mut i32 };
+type One = { first: &mut i32 };
+function refFirst(r: &i32, o: One): i32 { return 0i32; }
+function movedTwice(): i32 {
+  let mut a = 1i32;
+  let h = One { first: &mut a };
+  let h2 = h;
+  let h3 = h;
+  return 0i32;
+}
+function memberAndReferent(): i32 {
+  let mut a = 1i32;
+  return refFirst(&a, One { first: &mut a });
+}
+function dupParam(p: &mut i32): i32 {
+  let h = Pair { x: p, y: p };
+  return 0i32;
+}
+"#,
+    typed_stats: (330147, 48293, 12),
+    graph: (GraphCompletion::SourceRejected, (191771, 4990, 7)),
+    roots: &[
+        Root {
+            name: "refFirst",
+            want: Want::Checked,
+            graph: None,
+            stats: (2430, 190, 3),
+        },
+        Root {
+            name: "movedTwice",
+            want: Want::Rejected {
+                code: "R0200",
+                site: r####"h"####,
+                related: r####"h"####,
+            },
+            graph: None,
+            stats: (3344, 409, 5),
+        },
+        Root {
+            name: "memberAndReferent",
+            want: Want::Rejected {
+                code: "R0201",
+                site: r####"&mut a"####,
+                related: r####"&a"####,
+            },
+            graph: None,
+            stats: (2498, 223, 7),
+        },
+        Root {
+            name: "dupParam",
+            want: Want::Rejected {
+                code: "R0200",
+                site: r####"p"####,
+                related: r####"p"####,
+            },
+            graph: None,
+            stats: (2461, 205, 4),
+        },
+    ],
+};
+
+#[test]
+fn construction_twins_the_review_found_unpinned() {
+    check(
+        "rfc_cases::o07::construction_twins_the_review_found_unpinned",
+        &TWINS,
+    );
+}
+
 /// Done when 2: loans staged into one record conflict unless the owners are
 /// distinct. `disjoint` is the RFC's disjoint form (`&mut a`, `&b`), written
 /// through and read back. Rejected sites are the later borrow or access, the

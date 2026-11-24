@@ -1,4 +1,7 @@
 //! Bounded M4.8 checks over real M3 captures. Prelude selectors do not admit core providers.
+#[path = "support/limit.rs"]
+mod limit;
+
 use compiler::analysis::data::{DataExpression, PathProjection};
 use compiler::analysis::scalars::{BodyOwner, NodeFactKind, ScalarFindingKind, ScalarUnsupported};
 use compiler::analysis::typed::{CoreBlocker, PublicInterfaceKind, TypedCompletion, analyze_typed};
@@ -315,19 +318,128 @@ fn a_nested_named_function_shadows_an_outer_callable_value() {
 }
 
 #[test]
-fn resource_exhaustion_does_not_erase_independent_lexical_findings() {
+fn resource_exhaustion_publishes_no_lexical_finding() {
     let fixture = Fixture::new("function probe(): void { let text = `text ${missing}`; }");
     let graph = fixture.load(false);
-    // This budget permits name lookup but exhausts during expression checking.
-    let limited = analyze_typed(
-        &graph,
+    let finding =
+        |report: &compiler::analysis::typed::TypedReport<'_>| {
+            report.bodies().findings().iter().any(|f| {
+                f.kind == ScalarFindingKind::MissingValue && f.site.span.bytes() == b"missing"
+            })
+        };
+    let full = analyze_typed(&graph, AnalysisLimits::default());
+    assert_ne!(full.completion(), TypedCompletion::ResourceLimit);
+    assert!(finding(&full));
+    let stats = full.statistics();
+    let exact = AnalysisLimits {
+        max_work: stats.work,
+        max_entries: stats.entries,
+        max_depth: stats.max_depth,
+    };
+    let at = analyze_typed(&graph, exact);
+    assert_eq!(
+        (at.completion(), at.statistics()),
+        (full.completion(), stats)
+    );
+    assert!(finding(&at));
+    for short in [
+        AnalysisLimits {
+            max_work: exact.max_work - 1,
+            ..exact
+        },
+        AnalysisLimits {
+            max_entries: exact.max_entries - 1,
+            ..exact
+        },
+        AnalysisLimits {
+            max_depth: exact.max_depth - 1,
+            ..exact
+        },
+        // Permits name lookup but exhausts during expression checking.
         AnalysisLimits {
             max_entries: 123,
             ..AnalysisLimits::default()
         },
-    );
-    assert_eq!(limited.completion(), TypedCompletion::ResourceLimit);
-    assert!(limited.bodies().findings().iter().any(|f| f.kind == ScalarFindingKind::MissingValue && f.site.span.bytes() == b"missing"));
+    ] {
+        limit::assert_typed_limit(&analyze_typed(&graph, short));
+    }
+}
+
+/// Every finding list a typed report publishes, summed.
+fn published_findings(report: &compiler::analysis::typed::TypedReport<'_>) -> usize {
+    let bodies = report.bodies();
+    bodies.findings().len()
+        + bodies.conditional_findings().len()
+        + bodies.annotations().findings().count()
+        + bodies.declaration_issues().len()
+        + report.public_interface_findings().len()
+        + report.inventory().type_facts().findings().count()
+        + report.inventory().declaration_issues().len()
+}
+
+#[test]
+fn resource_exhaustion_publishes_no_finding_list() {
+    for source in [
+        // Public-interface findings (R0401) and a declaration issue.
+        "type Hidden = { value: bool };\n\
+         export enum Bad { Tag([Hidden,bool]) }\n\
+         export type Box<T = Hidden> = { value: T };\n\
+         function privateFamily<T>(x: T): bool;\n\
+         export function bad<T>(x: T): bool where privateFamily(T), noBorrow(T);\n\
+         export function opaque(x: Hidden): Hidden { return x; }\n\
+         type A = { next: A };",
+        // A rejected header: annotation and inventory type findings.
+        "function broken(x: Missing): bool { return true; }\n\
+         function usesBroken(): bool { return broken(true); }\n\
+         function other(): bool { return 2i32; }",
+        // A rejected declaration cycle next to a missing type.
+        "type A = { next: A };\ntype B = { x: Missing };\nfunction f(): bool { return true; }",
+    ] {
+        let fixture = Fixture::new(source);
+        let graph = fixture.load(false);
+        let full = analyze_typed(&graph, AnalysisLimits::default());
+        assert_ne!(full.completion(), TypedCompletion::ResourceLimit);
+        assert!(published_findings(&full) > 0, "{source}");
+        let stats = full.statistics();
+        let exact = AnalysisLimits {
+            max_work: stats.work,
+            max_entries: stats.entries,
+            max_depth: stats.max_depth,
+        };
+        let at = analyze_typed(&graph, exact);
+        assert_eq!(
+            (at.completion(), at.statistics()),
+            (full.completion(), stats)
+        );
+        assert_eq!(published_findings(&at), published_findings(&full));
+        for short in [
+            AnalysisLimits {
+                max_work: exact.max_work - 1,
+                ..exact
+            },
+            AnalysisLimits {
+                max_entries: exact.max_entries - 1,
+                ..exact
+            },
+            AnalysisLimits {
+                max_depth: exact.max_depth - 1,
+                ..exact
+            },
+        ] {
+            limit::assert_typed_limit(&analyze_typed(&graph, short));
+        }
+        // Whichever list a stop falls inside, no finding is published.
+        for step in 0..64 {
+            let work = stats.work * step / 64;
+            limit::assert_typed_limit(&analyze_typed(
+                &graph,
+                AnalysisLimits {
+                    max_work: work,
+                    ..exact
+                },
+            ));
+        }
+    }
 }
 
 #[test]

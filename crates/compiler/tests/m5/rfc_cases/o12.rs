@@ -306,7 +306,7 @@ function viewField(): i32 { let view = &shifted(Point { x: 1, y: 2 }); return vi
                 &[Case {
                     text: VIEW,
                     typed_stats: (325209, 47806, 12),
-                    graph: (GraphCompletion::SourceRejected, (188579, 4666, 7)),
+                    graph: (GraphCompletion::SourceRejected, (188588, 4666, 7)),
                     roots: &[
                         Root {
                             name: "shifted",
@@ -322,10 +322,16 @@ function viewField(): i32 { let view = &shifted(Point { x: 1, y: 2 }); return vi
                                 related: r####"&shifted(Point { x: 1, y: 2 })"####,
                             },
                             graph: None,
-                            stats: (2962, 348, 7),
+                            stats: (2971, 348, 7),
                         },
                     ],
                 }],
+            );
+            // Metering rule 11 (ri-px1.11.4, ST-3): `view.x` probes `locals`
+            // through `charge_key`; the parent caps (`eabe14ad`) give `ResourceLimit`.
+            super::list_contents::old_root_caps(
+                &request,
+                &[(VIEW, &[("viewField", (2962, 348, 7))], (188579, 4666, 7))],
             );
             fs::write(&request.entry, format!("{IMPORTS}\n{VIEW}")).unwrap();
             for test_mode in [false, true] {

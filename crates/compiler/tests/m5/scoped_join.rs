@@ -1596,6 +1596,12 @@ function joined(numbers: List<i32>, otherInput: List<i32>): [i32, i32] {{
                         (replay.completion(), replay.statistics()),
                         (graph_expected, graph_stats)
                     );
+                    if live {
+                        let [finding] = replay.findings() else {
+                            panic!("{:?}", replay.findings())
+                        };
+                        assert_eq!(finding.code(), "R0201");
+                    }
                     for cap in short {
                         let report = analyze_ownership(&receipt, cap);
                         crate::limit::assert_graph_limit(&report);

@@ -332,6 +332,9 @@ pub struct PartialFacts<'g> {
     obligations: BTreeMap<(&'g ModuleKey, usize, Unsupported), Obligation<'g>>,
 }
 impl<'g> PartialFacts<'g> {
+    pub(crate) fn withhold_findings(&mut self) {
+        self.findings.clear();
+    }
     pub fn declarations(&self) -> impl Iterator<Item = &DeclarationFacts<'g>> {
         self.declarations.values()
     }
