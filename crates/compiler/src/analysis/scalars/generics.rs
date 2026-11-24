@@ -78,6 +78,14 @@ impl<'g> GenericReport<'g> {
         &self.facts.findings
     }
 
+    /// A `ResourceLimit` report publishes no finding (metering rule 8).
+    pub(in crate::analysis) fn withhold_findings(&mut self) {
+        self.facts.findings.clear();
+        self.facts.annotations.withhold_findings();
+        self.conditional_findings.clear();
+        self.declaration_issues.clear();
+    }
+
     pub fn conditional_findings(&self) -> &[ConditionalFinding<'g>] {
         &self.conditional_findings
     }

@@ -269,6 +269,8 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         let right_slot = self.slot(right, right_ty)?;
         let left_temp = self.call_field_operand(left, depth + 1)?;
         let right_temp = self.call_field_operand(right, depth + 1)?;
+        self.budget
+            .reserve(usize::from(left_temp.is_some()) + usize::from(right_temp.is_some()))?;
         let scratch: Vec<Slot> = left_temp
             .iter()
             .chain(&right_temp)

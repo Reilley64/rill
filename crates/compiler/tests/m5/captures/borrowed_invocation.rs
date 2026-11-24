@@ -315,7 +315,7 @@ fn borrowed_once_and_unproved_bodies_do_not_issue_receipts() {
                 assert_eq!(analyze_typed(&graph, limit).completion(), expected);
                 for short in short_capture_limits(exact(typed.statistics())) {
                     let limited = analyze_typed(&graph, short);
-                    crate::limit::assert_typed_limit_keeping_body_findings(&limited);
+                    crate::limit::assert_typed_limit(&limited);
                 }
             },
         );
