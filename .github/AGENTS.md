@@ -1,6 +1,5 @@
 # GitHub automation
 
-Adapted from [fnv_decomp PR #1](https://github.com/Reilley64/vegas/blob/1b40ff6c14c51817b2decab437082f76cbe3c815/.github/AGENTS.md).
 This guide owns CI/CD terminology and YAML layout under `.github/`.
 The root `AGENTS.md` still applies.
 
