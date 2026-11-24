@@ -147,37 +147,19 @@ class WorkspaceTests(unittest.TestCase):
 
 
 class OwnershipArchiveTests(unittest.TestCase):
-    """build.rs sets RILL_OWNERSHIP_ARCHIVE only for aarch64-apple-darwin."""
+    """build.rs builds the first-party archive for every host, and m5 compiles on every host."""
 
-    @staticmethod
-    def gates_to_aarch64_macos(line):
-        return ("cfg(" in line and "not(" not in line
-                and 'target_arch = "aarch64"' in line and 'target_os = "macos"' in line)
-
-    def gated(self, path, lines):
-        text = "\n".join(lines)
-        if any(line.startswith("#![") and self.gates_to_aarch64_macos(line) for line in lines):
-            return True
-        for parent in (path.parent.with_suffix(".rs"), path.parent / "mod.rs"):
-            if path.name != "mod.rs" and parent.is_file() and parent != path:
-                declaration = parent.read_text().splitlines()
-                for number, line in enumerate(declaration):
-                    if line.rstrip(";").split()[-2:] == ["mod", path.stem] and number \
-                            and self.gates_to_aarch64_macos(declaration[number - 1]):
-                        return True
-        uses = [number for number, line in enumerate(lines) if 'env!("RILL_OWNERSHIP_ARCHIVE")' in line]
-        return all(any(self.gates_to_aarch64_macos(line) for line in lines[max(0, number - 3):number])
-                   for number in uses)
-
-    def test_archive_users_compile_only_for_aarch64_macos(self):
+    def test_archive_is_not_gated_to_one_host(self):
         crate = doctor.ROOT / "crates" / "compiler"
-        users = [path for path in sorted(crate.rglob("*.rs"))
-                 if "target" not in path.relative_to(crate).parts and path.name != "build.rs"
-                 and 'env!("RILL_OWNERSHIP_ARCHIVE")' in path.read_text()]
-        self.assertTrue(users)
-        ungated = [str(path.relative_to(doctor.ROOT)) for path in users
-                   if not self.gated(path, path.read_text().splitlines())]
-        self.assertEqual(ungated, [])
+        self.assertNotIn("return;", (crate / "build.rs").read_text())
+        self.assertNotIn("#![cfg(", (crate / "tests" / "m5.rs").read_text())
+        self.assertNotIn("cfg(", (crate / "src" / "loader" / "installed.rs").read_text())
+
+    def test_check_runs_the_zero_test_guard_for_m5(self):
+        tasks = doctor.tomllib.loads((doctor.ROOT / "mise.toml").read_text())["tasks"]
+        self.assertIn("check:m5", tasks["check"]["depends"])
+        self.assertEqual(tasks["check:m5"]["run"],
+                         "cargo test --locked --no-default-features -p compiler --test m5 -- --list | grep -c ': test$'")
 
 
 class WorkflowTests(unittest.TestCase):

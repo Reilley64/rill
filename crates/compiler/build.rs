@@ -3,11 +3,7 @@ use std::{env, path::PathBuf, process::Command};
 fn main() {
     let source = "../../runtime/ownership";
     println!("cargo:rerun-if-changed={source}");
-    let target = env::var("TARGET").unwrap();
-    if target != "aarch64-apple-darwin" {
-        return;
-    }
-
+    let target = "aarch64-apple-darwin";
     let archive = PathBuf::from(env::var_os("OUT_DIR").unwrap()).join("librill_ownership.rlib");
     let rustc = env::var("RUSTC").unwrap();
     let result = Command::new(&rustc)
@@ -16,7 +12,7 @@ fn main() {
             "--crate-name=rill_ownership",
             "--crate-type=rlib",
             "--target",
-            &target,
+            target,
             "-Dwarnings",
             "-o",
         ])
