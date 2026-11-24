@@ -647,3 +647,88 @@ function textBind(): void { let view = &named(); }
         },
     );
 }
+
+/// A call result whose record has a custom `Dispose` stays `Incomplete`, but the
+/// screen that rejects it needs the charged `DisposerLookup::select`, so each
+/// root pays before it rejects: `within` 1,875 / 27 / 3 to 2,252 / 90 / 6 and
+/// `bound` 1,891 / 34 / 4 to 2,263 / 97 / 4 against `7002855e` (whole graph
+/// 187,649 / 4,260 / 5 to 188,398 / 4,386 / 6). Metering rule 1 named
+/// exception (chief of staff, ruling of 2026-11-24 14:47 AEDT, ST-4): no paid
+/// fact names a type's custom disposer (`ri-qlh.4`). The roots keep their
+/// outcome and blocker, pinned exact and one short (`check_cases`); each
+/// parent cap gives `ResourceLimit`. Pins of current behaviour: they pass on
+/// the base, so rule 10's red-first does not apply.
+#[test]
+fn disposer_record_results_pay_the_disposer_lookup_and_keep_their_outcomes() {
+    const DISPOSER: &str = r####"
+type Tracked = { x: i32 };
+implement dispose(value: Tracked): void {}
+function make(): Tracked { return Tracked { x: 1i32 }; }
+function within(): i32 { return (&make()).x; }
+function bound(): void { let v = &make(); }
+"####;
+    installed(
+        "rfc_cases::o12::disposer_record_results_pay_the_disposer_lookup_and_keep_their_outcomes",
+        |request| {
+            check_cases(
+                &request,
+                &[Case {
+                    text: DISPOSER,
+                    typed_stats: (327240, 47914, 12),
+                    graph: (GraphCompletion::Incomplete, (188398, 4386, 6)),
+                    roots: &[
+                        Root {
+                            name: "make",
+                            want: Want::Checked,
+                            graph: None,
+                            stats: (2339, 137, 4),
+                        },
+                        Root {
+                            name: "within",
+                            want: Want::Incomplete {
+                                blocker: r####"(&make()).x"####,
+                            },
+                            graph: None,
+                            stats: (2252, 90, 6),
+                        },
+                        Root {
+                            name: "bound",
+                            want: Want::Incomplete {
+                                blocker: r####"make()"####,
+                            },
+                            graph: None,
+                            stats: (2263, 97, 4),
+                        },
+                    ],
+                }],
+            );
+            fs::write(&request.entry, format!("{IMPORTS}\n{DISPOSER}")).unwrap();
+            for test_mode in [false, true] {
+                let request = InstalledRequest {
+                    test_mode,
+                    ..request.clone()
+                };
+                let graph = loader::load_installed(request).unwrap();
+                let typed = analyze_typed(&graph, AnalysisLimits::default());
+                let receipt = typed.receipt().unwrap();
+                let module = application(&graph);
+                for (name, parent) in [("within", (1875, 27, 3)), ("bound", (1891, 34, 4))] {
+                    let declaration = module
+                        .declarations
+                        .iter()
+                        .find(|d| {
+                            d.id.kind == DeclarationKind::Function
+                                && d.name.as_deref() == Some(name)
+                        })
+                        .unwrap();
+                    let (parent, _) = limits(statistics(parent));
+                    let limited = lower_body(&receipt, module, &declaration.id, parent).unwrap();
+                    crate::limit::assert_body_limit(&limited);
+                }
+                let (parent, _) = limits(statistics((187649, 4260, 5)));
+                let limited = analyze_ownership(&receipt, parent);
+                crate::limit::assert_graph_limit(&limited);
+            }
+        },
+    );
+}

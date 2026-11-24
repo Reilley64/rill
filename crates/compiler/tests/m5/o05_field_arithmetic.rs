@@ -146,41 +146,50 @@ type Row = (&'static str, usize, usize, usize, &'static str);
 /// of the parent before the source change.
 fn keeps_parent_caps(test: &str, source: &'static str, graph_stats: Statistics, rows: &[Row]) {
     probe(test, source, |_, module, receipt| {
-        let (exact, short) = caps(graph_stats);
-        let graph = analyze_ownership(receipt, exact);
-        assert_eq!(graph.completion(), GraphCompletion::Incomplete);
-        assert_eq!(graph.statistics(), graph_stats);
-        for cap in short {
-            crate::limit::assert_graph_limit(&analyze_ownership(receipt, cap));
-        }
-        for &(name, work, entries, depth, expected) in rows {
-            let decl = named(module, name);
-            let query = |cap| lower_body(receipt, module, &decl.id, cap).unwrap();
-            let stats = statistics(work, entries, depth);
-            let (exact, short) = caps(stats);
-            let target = query(exact);
-            assert_eq!(target.completion(), Completion::Incomplete, "{name}");
-            assert_eq!(target.statistics(), stats, "{name}");
-            assert!(target.mir().is_none() && target.findings().is_empty());
-            assert_eq!(
-                target.blocked_at().unwrap().span.bytes(),
-                expected.as_bytes(),
-                "{name}"
-            );
-            let root = graph
-                .roots()
-                .iter()
-                .find(|r| r.site().module == &module.key && r.site().node == decl.node)
-                .unwrap();
-            assert_eq!(root.ordinary_completion(), Completion::Incomplete, "{name}");
-            assert!(root.ordinary_mir().is_none());
-            assert_eq!(root.blocked_at().unwrap().span.bytes(), expected.as_bytes());
-            for cap in short {
-                let limited = query(cap);
-                crate::limit::assert_body_limit(&limited);
-            }
-        }
+        check_incomplete_rows(module, receipt, graph_stats, rows);
     });
+}
+
+fn check_incomplete_rows<'g>(
+    module: &'g loader::Module,
+    receipt: &TypedReceipt<'_, 'g>,
+    graph_stats: Statistics,
+    rows: &[Row],
+) {
+    let (exact, short) = caps(graph_stats);
+    let graph = analyze_ownership(receipt, exact);
+    assert_eq!(graph.completion(), GraphCompletion::Incomplete);
+    assert_eq!(graph.statistics(), graph_stats);
+    for cap in short {
+        crate::limit::assert_graph_limit(&analyze_ownership(receipt, cap));
+    }
+    for &(name, work, entries, depth, expected) in rows {
+        let decl = named(module, name);
+        let query = |cap| lower_body(receipt, module, &decl.id, cap).unwrap();
+        let stats = statistics(work, entries, depth);
+        let (exact, short) = caps(stats);
+        let target = query(exact);
+        assert_eq!(target.completion(), Completion::Incomplete, "{name}");
+        assert_eq!(target.statistics(), stats, "{name}");
+        assert!(target.mir().is_none() && target.findings().is_empty());
+        assert_eq!(
+            target.blocked_at().unwrap().span.bytes(),
+            expected.as_bytes(),
+            "{name}"
+        );
+        let root = graph
+            .roots()
+            .iter()
+            .find(|r| r.site().module == &module.key && r.site().node == decl.node)
+            .unwrap();
+        assert_eq!(root.ordinary_completion(), Completion::Incomplete, "{name}");
+        assert!(root.ordinary_mir().is_none());
+        assert_eq!(root.blocked_at().unwrap().span.bytes(), expected.as_bytes());
+        for cap in short {
+            let limited = query(cap);
+            crate::limit::assert_body_limit(&limited);
+        }
+    }
 }
 
 /// Measured at the parent 7002855e, before field operands lower.
@@ -354,3 +363,69 @@ function separate(): i32 {
   return pair.left + pair.right;
 }
 "#;
+
+/// A write through a local `&mut i32` binding that was not written
+/// `&mut record.field` reaches `self.place(target)` before the slot flag
+/// rejects it, so it pays one work unit that the parent did not (graph +1).
+/// Metering rule 1 named exception (chief of staff, ruling of 2026-11-24
+/// 14:47 AEDT, ST-9): the checks the review named after the charge (type,
+/// literal) cannot fire at that site, and no paid fact says how the binding was
+/// written. Each root keeps its outcome and blocker, pinned exact and one
+/// short, as a targeted query and as the graph root; the parent caps
+/// (`f24d825b`, before the route existed) give `ResourceLimit`. Pins of
+/// current behaviour: they pass on the base, so rule 10's red-first does not
+/// apply.
+fn pays_one_work(
+    test: &str,
+    source: &'static str,
+    graph: (Statistics, Statistics),
+    row: Row,
+    parent_row: Statistics,
+) {
+    probe(test, source, |_, module, receipt| {
+        check_incomplete_rows(module, receipt, graph.0, &[row]);
+        let decl = named(module, row.0);
+        let (parent, _) = caps(parent_row);
+        crate::limit::assert_body_limit(&lower_body(receipt, module, &decl.id, parent).unwrap());
+        let (parent, _) = caps(graph.1);
+        crate::limit::assert_graph_limit(&analyze_ownership(receipt, parent));
+    });
+}
+
+#[test]
+fn local_descriptor_write_through_another_binding_pays_one_work() {
+    pays_one_work(
+        "o05_field_arithmetic::local_descriptor_write_through_another_binding_pays_one_work",
+        r#"
+type Holder = { x: i32 };
+function viaOther(p: &mut i32): void {
+  let mut h = Holder { x: 1i32 };
+  let e = &mut h.x;
+  let d = p;
+  *d += 1i32;
+}
+"#,
+        (statistics(186742, 4198, 5), statistics(186741, 4198, 5)),
+        ("viaOther", 2246, 103, 2, "*d += 1i32;"),
+        statistics(2245, 103, 2),
+    );
+}
+
+#[test]
+fn local_descriptor_write_through_a_reborrow_pays_one_work() {
+    pays_one_work(
+        "o05_field_arithmetic::local_descriptor_write_through_a_reborrow_pays_one_work",
+        r#"
+type Holder = { x: i32 };
+function viaReborrow(p: &mut i32): void {
+  let mut h = Holder { x: 1i32 };
+  let e = &mut h.x;
+  let d = &mut *p;
+  *d += 1i32;
+}
+"#,
+        (statistics(186866, 4200, 5), statistics(186865, 4200, 5)),
+        ("viaReborrow", 2250, 105, 2, "*d += 1i32;"),
+        statistics(2249, 105, 2),
+    );
+}

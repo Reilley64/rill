@@ -1648,6 +1648,8 @@ Ten rows of `base-matrix.tsv` do not reproduce, in both modes. They were measure
 
 Whether these moves are the intended cost of the forwarding proof is the owner's decision under D2. This is LLVM-free host ownership analysis. No Rill program ran.
 
+**Superseded (2026-11-24, review `ci-0mdr` ST-19).** The owner decided under O3 (2026-11-23) that these moves are the intended cost of the forwarding proof, and the ten rows are now active rows of [`legacy-caps.tsv`](m5/legacy-caps.tsv) in both modes. The "Now" column above is out of date: `retaining-rc` whole graph is `SourceRejected` 247,377 / 14,656 / 11 (not 247,063 / 14,523 / 11), `infeasibleOuter` reproduces its `68f3788` cap 10,495 / 2,458 / 6 (not 10,887 / 2,609 / 6), `safe-rc` whole graph is `Incomplete` 200,280 / 7,079 / 11 and `foreign-rc` whole graph is `SourceRejected` 193,683 / 5,333 / 6. [`ri-px1.11.md`](m5-acceptance/ri-px1.11.md) ("Base-matrix rows") holds the table. The text above is not edited.
+
 ## Boolean match review counterexamples, 2026-11-23
 
 Ticket ri-785.2 (A4). [`installed_boolean_matches`](m4_8_match_boolean_snapshots.rs) now also runs the reviewers' repros verbatim, including their `import std::routine::join;`, through both installed load modes. Each case uses the same work, entries and depth in both modes. The test pins those exact numbers; one short in any dimension gives `ResourceLimit` with no receipt.
@@ -1661,6 +1663,8 @@ Ticket ri-785.2 (A4). [`installed_boolean_matches`](m4_8_match_boolean_snapshots
 | `computed`: `match (*(if (gate) &flag else &flag))` | `e519e598` | `SourceRejected`, `R0103` at `Err<bool,i32>(61i32)` | 428,253 / 49,198 / 12 |
 
 At `db944e6`, all three wildcard repros are `SourceRejected` with `R0103` in both modes, as both reviews reported. The two `e519e598` rows are false diagnostics, pinned at their current outcome as known limitations; general Boolean identity discovery is not attempted.
+
+**Superseded (2026-11-24, review `ci-0mdr` ST-19).** C12 (`ri-2s0.4`, [`ri-2s0.4.md`](m5-acceptance/ri-2s0.4.md)) fixed both `e519e598` rows: `pre` and `computed` are `Checked` with a receipt, at 426,895 / 48,892 / 12 and 427,988 / 49,104 / 12. The `SourceRejected` rows above are history. The text above is not edited.
 
 The historical caps of review `a3839064` were already pinned by `bd10617`: `call14` 331,637/49,402/12, `split14` 331,989/49,850/12 and `known14` 333,400/50,513/12 check, and twelve equivalent arm-local copy classes check within 54,002 entries. At `5ab195a`, `call14` is `ResourceLimit` at its cap (it needs 331,945 work and 49,472 entries).
 
@@ -1837,11 +1841,15 @@ Where the change lives:
 - Old-cap assertion: [`live_parent_error_reaches_the_join_at_its_repinned_cap`](m5/scoped_join/fresh_result.rs), in both installed modes. At 3,449 / 320 / 3, `liveParentError` gives `ResourceLimit` with no MIR and no finding. At 4,024 / 571 / 7 it is `Incomplete` at the join call, in the target and the ordinary graph root, and one short on any axis gives `ResourceLimit`.
 - The same test pins two numbers for the first time; they move no published cap. The control `retiredParentError`, which consumes the parent `Err` before the join, is `Checked` at 25,740 / 13,172 / 8 with MIR in the target and the graph root. The whole graph is `Incomplete` at 219,596 / 17,727 / 8. At `d95ae9e`, `retiredParentError` measured `Incomplete` at 3,457 / 326 / 3 and the graph measured 197,064 / 4,761 / 5. The fresh `Result` join admission (`332454a`, `72f3d81`) produced those changes, not D3 (b). Neither number was ever published, so this section claims neither under D2 (b).
 
+**Note (2026-11-24, review `ci-0mdr` ST-18, R-2).** The `d95ae9e` numbers in this section (3,449 / 320 / 3, 3,457 / 326 / 3 and 197,064 / 4,761 / 5) are **transcript only, not reproduced**: the measuring files were outside the repository. The source, the measuring snippet, the command and the output are committed in [`ri-px1.11.6-d95ae9e/`](m5-acceptance/ri-px1.11.6-d95ae9e/README.md); nothing was re-run for this record.
+
 For the review's ruling on `003c414`: apart from the cap above, that commit replaced default-limit or self-measured assertions with fixed caps measured on `003c414` itself. These are first pins, not moves. In `fresh_join_checks_capture_conflicts_and_parent_cleanup`: graph 228,462 / 18,860 / 8; `unproved` 4,246 / 561 / 7; `conflict` 4,520 / 693 / 7; `liveParentError` (in that fixture) 4,182 / 638 / 7; `retiredParentError` 25,938 / 13,247 / 8. In `installed_join_fresh_results_keep_the_written_occurrence`: graph 282,035 / 49,331 / 8; typed 445,380 / 51,426 / 12; `success` and `successSecond` 22,226 / 10,127 / 8; `failure` 24,588 / 12,120 / 8; `failureFirst` 25,683 / 13,123 / 8. That test checks both result orders and all four retirement subsets. In `an_unproved_join_does_not_invent_a_discard`: typed 427,565 / 49,016 / 12. It also added `bag: Bag` to `conflict`. All of these pass unchanged on this branch, and so do `m4_8_scoped_join_caps`, `m4_8_match_boolean_snapshots` and `disjoint-live`. `disjoint-live` keeps `R0201` at the target 4,159 / 838 / 10 and the graph 213,183 / 5,602 / 10.
 
 No other cap or expectation moved. This is LLVM-free host ownership analysis. No Rill program ran.
 
 ## Final record (2026-11-24, ri-px1.11, R-D6b)
+
+**Update (2026-11-24, `ri-px1.11.6`).** The second review (`ci-0mdr`) ran and the fix pass answered it: see "Final record after the review-2 fix pass" at the end of this file. Where that section differs (the open found beads, the ready-for-agent state of `ri-2s0.13`, the stated limits), it supersedes the lines below. They are not edited.
 
 This section replaces the first final record of 2026-11-23 (`ed783d26`) and rewrites it for everything merged since `7002855e`. Review `ci-uaa1` of that commit led to the owner's decision of 2026-11-23 19:18 AEDT: every Required row that the first record deferred is built in M5. The record is the base `implementation/m5-ownership-cleanup` at `c6b2cc98` (the K3 propagation exit, `ri-2s0.13`, is its last build merge). Bead states were checked with `gc bd show <id> --rig rill` on 2026-11-24.
 
@@ -1849,7 +1857,7 @@ The evidence of each ticket is in [`m5-acceptance/`](m5-acceptance/README.md). T
 
 ### Rows built after the first record
 
-None of these is deferred. Each has a per-ticket evidence file and a closing comment on its rill bead. `ri-2s0.13` was merged by the rig merger at `c6b2cc98` and its bead still reads ready-for-agent; the rest are closed.
+None of these is deferred. Each has a per-ticket evidence file and a closing comment on its rill bead. `ri-2s0.13` was merged by the rig merger at `c6b2cc98` and its bead still reads ready-for-agent; the rest are closed. (Superseded 2026-11-24, review `ci-0mdr` ST-19: `ri-2s0.13` is closed.)
 
 | Row | Outcome now | Bead | Evidence |
 | --- | --- | --- | --- |
@@ -1938,10 +1946,79 @@ These are what the delivered rows do not reach. Each is pinned in the test its e
 - **R1's known conservative rejection (`ri-2s0.12`, `ri-ema`).** R1 reads the declared signature only, so a callee that stores nothing is rejected like one that stores (`rfc_cases::list_contents::r1_known_conservative_rejection_of_a_callee_that_stores_nothing`).
 - **O7, tuple and nested-reference shapes (`ri-pfxi`).** Only an `&mut i32` member of a record without a custom disposer is admitted. The tuple and the nested-reference shapes stay `Incomplete`, pinned at exact and one-short caps in `m5/rfc_cases/o07_forms.rs`. Writes through the member other than `*record.field += literal` stay `Incomplete`.
 - **O10, untested `LookupListElement` MIR form (`ri-2s0.7.2`).** The lookup always reaches R0202 on its one route, so no checked root exercises `Operation::LookupListElement`. Its MIR form is tested only as far as compiling and the shared flow checks.
-- **K3, the `movedLocal` graph root (`ri-2s0.13`).** `let held = lock;` first: the targeted query is `Checked` and releases `held` on both exits, but the graph root stays `Incomplete` with no MIR (3,914 / 703 / 4), D3's local-binding gap. A guard in a record field or a wrapper, a guard passed into a call and a shared view of the guard across the `?` remain without a propagation proof (`ri-qlh.8`).
+- **K3, the `movedLocal` graph root (`ri-2s0.13`).** `let held = lock;` first: the targeted query is `Checked` and releases `held` on both exits, but the graph root stays `Incomplete` with no MIR (3,914 / 703 / 4), D3's local-binding gap. A guard in a record field or a wrapper, a guard passed into a call and a shared view of the guard across the `?` remain without a propagation proof (`ri-qlh.8`). (Corrected 2026-11-24, review `ci-0mdr` SP-8: `ri-qlh.8` does not cover these; the planner filed `ri-qlh.11` for them. `ri-qlh.8` keeps delivered exits, K7 replacement and wrappers on the normal exit.)
 
 ### For the second review
 
 Probe two admissions for a wrong acceptance (chief's conditions, `ri-ema` and `ri-pfxi`): R1's admitted forms (direct-function retain, two calls, call in a loop, pair of `&User` sources, lone destination, source read after the call), and the `&mut i32` record member forms `withText`, the record parameter read and passed to a call, and the function returning one. The Comments policy (`docs/agents/comments.md`) does not apply to the M5 branch or its reviews.
 
 M5 is not complete against the whole of RFC 0007. Whole-graph completion is not claimed: the pinned ordinary graph roots are `Incomplete` or `SourceRejected` by roots outside the delivered rows (`ri-un6`). No Rill program ran. Runtime, native/Wasm support, backend, CLI and client acceptance remain separate (M6, `ri-qlh`). The hosted checks on the final head and the second review are not part of this record. Do not merge this increment or begin M6.
+
+## Final record after the review-2 fix pass (2026-11-24, ri-px1.11.6, C7)
+
+This section answers the second review, `ci-0mdr` of `81d317b3`, and the single fix pass that followed (`ri-px1.11`, children C1 to C9) under the chief of staff's rulings 11 to 16 of 2026-11-24 (`review/chief-rulings-11.md` to `chief-rulings-16.md` in the city notes). It supersedes the lines of "Final record (2026-11-24, ri-px1.11, R-D6b)" where they differ (the record's base, the open found beads, the rule exceptions). Bead states were checked with `gc bd show <id> --rig rill` on 2026-11-24. Review `ci-0mdr` found no high finding and no wrong acceptance. The per-finding record, one line for each of the 20 Standards and 9 Spec findings, is the section "Review ci-0mdr fixes" of [`ri-px1.11.md`](m5-acceptance/ri-px1.11.md). No Rill program ran.
+
+**Base.** Review base `81d317b3`. This pass's last integration merge before this section is `61f22ae3` (C9, `ri-q9lj`) on `implementation/m5-ownership-cleanup`; C7 merges the tip `61f22ae3`. The record's earlier base `c6b2cc98` (SP-9) is superseded by this one. The hosted checks on the final head and the focused re-review of the fix range are not part of this record.
+
+### Children and merge commits
+
+Merge commits are from `git log --merges --first-parent` of the integration branch. Evidence files are in [`m5-acceptance/`](m5-acceptance/README.md).
+
+| Child | Bead (city bead) | Scope | Evidence | Merge |
+| --- | --- | --- | --- | --- |
+| C1 | `ri-px1.11` (`ci-iilr`) | Q1, ST-5, `ri-grwx`: `analyze_ownership` withholds findings and root MIR at `ResourceLimit`; the shared helpers | [`ri-px1.11-c1.md`](m5-acceptance/ri-px1.11-c1.md) | `da5bec50` |
+| C2 | `ri-px1.11.1` (`ci-gtmo`) | Q3, SP-3, SP-4: member replacement rejects R0201 | [`ri-px1.11.1.md`](m5-acceptance/ri-px1.11.1.md) | `a4e56651` |
+| C3 | `ri-px1.11.2` (`ci-e9ek`, `ci-sybf`) | Q4, SP-7: mutable binder and source Boolean copies check; the immutable local source | [`ri-px1.11.2.md`](m5-acceptance/ri-px1.11.2.md) | `2052c240` |
+| C4 | `ri-px1.11.3` (`ci-e8rg`) | ST-2, ST-4, ST-9: screen before charging; ST-4 and ST-9 at `i32_arithmetic.rs:202` stopped | [`ri-px1.11.3.md`](m5-acceptance/ri-px1.11.3.md) | `eabe14ad` |
+| C5 | `ri-px1.11.4` (`ci-h68b`) | ST-3, ST-8: two path-keyed probes charged; the scratch `Vec` reserved | [`ri-px1.11.4.md`](m5-acceptance/ri-px1.11.4.md) | `d58380d1` |
+| C6 | `ri-px1.11.5` (`ci-gjvp`, `ci-em6d`) | Test-only pins and measurements (ST-1, 6, 7, 10 to 13, 15 to 17, SP-1, 2, 5, 6); the `retained_contents` measurement; `ri-zee8` | [`ri-px1.11.5.md`](m5-acceptance/ri-px1.11.5.md) | `34d39c4e` |
+| C7 | `ri-px1.11.6` (`ci-ru4p`) | Records, the ST-4 and ST-9 pins, the conversion report probe, this section | [`ri-px1.11.6.md`](m5-acceptance/ri-px1.11.6.md) | this branch |
+| C8 | `ri-68mu` (`ci-1c5f`) | `analyze_typed` withholds findings at `ResourceLimit` | [`ri-68mu.md`](m5-acceptance/ri-68mu.md) | `6f35705e` |
+| C9 | `ri-q9lj` (`ci-jr0z`) | `analyze_ordinary`, `analyze_generics` and `ConversionReport::bodies` withhold findings at `ResourceLimit` | [`ri-q9lj.md`](m5-acceptance/ri-q9lj.md) | `61f22ae3` |
+
+C1's evidence file is `ri-px1.11-c1.md`; no `ri-grwx.md` exists.
+
+### Exceptions granted by rulings 11 to 16
+
+All are written in [`compiler-metering.md`](../../../docs/agents/compiler-metering.md) with the ruling that granted them.
+
+- **Standing rule-1 exception uses** (rulings of 07:19 and 11:35 on 2026-11-24, bound (c) as amended): `ri-1up` and `ri-ema` (listed in the earlier record), plus `grouped` as a fifth use (ST-1: `rfc_cases::list_contents::list_destination_siblings_keep_their_outcomes_and_blockers`, +74 work, +3 entries), plus C6's list-parameter siblings (`&mut List<&R>` parameters of a record with a `string` field, a nested record or an enum, +72 and up to +148 work, up to +3 entries: `rfc_cases::list_contents::list_parameter_siblings_pay_their_lookup_and_keep_their_outcomes`).
+- **C3's admission** (ruling 14, 14:50 AEDT): `pre: immutable local source` is accepted (the same false `R0103` as C12, `m4_8_match_boolean_snapshots::installed_boolean_matches`); its read-only twins are pinned. `pre: mutable binder` and `pre: mutable source` left the rule-1 exception list (Q4).
+- **ST-4 and ST-9** (ruling 13, 14:47 AEDT): two named rule-1 exceptions. ST-4: `within` 1,875 / 27 / 3 to 2,252 / 90 / 6 and `bound` 1,891 / 34 / 4 to 2,263 / 97 / 4, `rfc_cases::o12::disposer_record_results_pay_the_disposer_lookup_and_keep_their_outcomes`; the site is on `ri-qlh.4`. ST-9: `viaOther` 2,245 to 2,246 and `viaReborrow` 2,249 to 2,250, `o05_field_arithmetic::local_descriptor_write_through_another_binding_pays_one_work` and `::local_descriptor_write_through_a_reborrow_pays_one_work`.
+- **The `ri-zee8` named exception** (ruling 16, 15:28 AEDT): the `&mut &R` forwarding roots pay three charged lookups (+216 work, +210 for an enum), `rfc_cases::record_contents::forwarded_record_slot_roots_pay_three_lookups_and_keep_their_outcomes`.
+- **The rule-2 hybrid base** (ruling 16): O1's `EXCLUSIVE_WRITE_SIBLINGS` caps are measured on `7002855e` plus [`ri-px1.11.5-hybrid.patch`](m5-acceptance/ri-px1.11.5-hybrid.patch); splitting such a ticket into a typed and a lowering commit is preferred from now on.
+- **Other rulings in the pass:** Q2 (rule 11 note: an in-test cap is pinned in its test; `legacy-caps.tsv` holds fixture files), Q3 (member replacement rejects R0201: a mandated flip under rule 11's third case), Q4 (a fix under the third case, see C3), Q5 (bound (c) covers the entries of the lookups), ruling 12 (the standing ruling on `ResourceLimit` entry points) and ruling 15 (a dated note under rule 8: rule 8 covers report completions; an `Err` partial at `ResourceLimit` is outside it, `ri-qlh.9`).
+
+### Rule-8 entry points fixed
+
+Each withholds its finding lists at `ResourceLimit` (publication only; no published cap moved) and has a helper in `tests/support/limit.rs`.
+
+- `analyze_ownership` (C1, `assert_graph_limit`, `assert_body_limit`), `analyze_typed` (C8, `assert_typed_limit`), `analyze_ordinary` (C9, `assert_ordinary_limit`), `analyze_generics` and `ConversionReport::bodies` (C9, `assert_generics_limit`).
+- `ConversionReport::type_facts` and `header_metadata` (C7, standing ruling, item 3): they published the input's findings at a conversion `ResourceLimit` (808 of 901 limited reports for one probe source, all 55 for the other); they now publish no facts and no header there (`assert_conversion_limit`, `m4_7::conversion_report_publishes_no_finding_list_at_resource_limit`). No conversion statistic moved.
+- Outside rule 8 (ruling 15): `analyze_declaration_types`, `check_declarations`, `check_scalars`, `check_data` (an `Err` value with a partial).
+
+### Open found beads (additions and changes)
+
+State checked 2026-11-24. These add to the list in "Open found beads" above, whose `ri-grwx` row is superseded: `ri-grwx` is closed (Q1), as are `ri-68mu` and `ri-q9lj`. The other rows keep their state (`ri-ce4` open, the rest needs-triage).
+
+| Bead | State | Gap |
+| --- | --- | --- |
+| `ri-qlh.9` | needs triage | Decide after M5 whether `ResourceLimit` failure partials (`analyze_declaration_types`, `check_declarations`) may carry findings at all (rule 8 boundary; ruling 15). |
+| `ri-zee8` | needs triage | `&mut &R` parameter forwarded to a retaining call pays three charged lookups (outside bound (c)); named exception; a further reason for the M4 field-list fact of `ri-qlh.4`. |
+| `ri-qlh.10` | needs triage | The MUST KILL comment sites of review `ci-0mdr`, which no fix restructured: `ownership/build.rs` (the disposer note in `binding_temporary_borrow`, the screen and charge prose in `family_retaining_shape` and `call`), `build/i32_arithmetic.rs` (the zero-count note) and the retained-contents split in `analysis.rs` and `ownership.rs`. |
+| `ri-qlh.11` | needs triage | Guard release on a `?` exit for a guard passed to a call, viewed, returned or held in a field or wrapper (SP-8); `ri-qlh.8` does not own them. |
+
+### Stated limits recorded by this pass
+
+- **ST-4 and `ri-qlh.4`:** no paid fact names a type's custom disposer; the M4 fact "carry a type's custom disposer as an M4 fact" is recorded on `ri-qlh.4`.
+- **Temporary list sources (SP-2):** `retain(dst, &make())` stays `Incomplete` (no list destination for a temporary), pinned by `rfc_cases::list_contents::r1_owned_parameter_and_temporary_sources_do_not_escape`.
+- **Conversion report at `ResourceLimit`:** `type_facts` and `header_metadata` publish nothing, not only no finding: a `ConversionReport` cannot hide findings alone without cloning its input. Nothing in the repository reads them there.
+- **RFC 0007 line 542** ("No compiler evidence exists for O9 yet") is the owner's text and is left alone (review ST-19; the triage list for U2). It disagrees with `m5-status.md`.
+
+### Where the evidence logs live (ST-20)
+
+Gate and probe logs of every build bead are outside the repository, in `~/.t3/evidence/rill/m5-build-2026-11-22/<city bead>/` (for example `ci-iilr/` for C1, `ci-ru4p/` for C7), not under `~/.t3/evidence/rill/<bead-id>/` as `docs/agents/development.md` item 4 says. The measuring files of `ri-2s0.10` are not in the repository. The one re-derivation whose numbers the ledger quotes without a test, the `d95ae9e` caps of A7, is committed as a transcript in [`ri-px1.11.6-d95ae9e/`](m5-acceptance/ri-px1.11.6-d95ae9e/README.md).
+
+### For the re-review of the fix range
+
+The chief's condition (b): re-run probe 2 (O7's `&mut i32` member forms) on the replacement forms in both load modes, and check that Q1 moved no published cap (every existing expectation passed unedited in C1's filtered runs). The forms C2 touched are listed in [`ri-px1.11.1.md`](m5-acceptance/ri-px1.11.1.md), "Probe note". Hosted CI on the integration head has not run on this pass. Do not merge this increment or begin M6.

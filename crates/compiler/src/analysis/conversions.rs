@@ -93,6 +93,8 @@ pub struct ConversionReport<'r, 'g> {
     pub(in crate::analysis) families: BTreeMap<&'g DeclarationId, ConversionFamily<'g>>,
     completion: ordinary::Completion,
     statistics: Statistics,
+    /// What `type_facts` publishes at `ResourceLimit` (metering rule 8).
+    withheld: PartialFacts<'g>,
 }
 
 impl<'g> ConversionReport<'_, 'g> {
@@ -114,15 +116,21 @@ impl<'g> ConversionReport<'_, 'g> {
     }
 
     /// Canonical annotation terms and source-binding routes used by this inventory.
+    /// A `ResourceLimit` report publishes none, as it publishes no finding.
     pub fn type_facts(&self) -> &PartialFacts<'g> {
+        if self.completion == ordinary::Completion::ResourceLimit {
+            return &self.withheld;
+        }
         self.input().type_facts()
     }
 
+    /// A `ResourceLimit` report publishes no header, as it publishes no finding.
     pub fn header_metadata(
         &self,
         id: &DeclarationId,
     ) -> Result<Option<&ordinary::HeaderMetadata<'g>>, QueryError> {
-        self.input().header_metadata(id)
+        let header = self.input().header_metadata(id)?;
+        Ok(header.filter(|_| self.completion != ordinary::Completion::ResourceLimit))
     }
 
     pub fn family(&self, id: &DeclarationId) -> Result<Option<&ConversionFamily<'g>>, QueryError> {
@@ -387,6 +395,7 @@ pub fn analyze_conversions<'r, 'g>(
             complete.completion()
         },
         statistics: Statistics::default(),
+        withheld: PartialFacts::default(),
     };
     for &premise in roles {
         let (binding, result) = premise.bindings();
