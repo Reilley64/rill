@@ -27,7 +27,7 @@ run = "python tools/doctor.py"
 
 [tasks.check]
 description = "Run LLVM-free Rust tests, formatting, lint, documentation and fixture checks"
-depends = ["check:rust", "check:docs", "check:fixtures", "check:tools", "test"]
+depends = ["check:rust", "check:docs", "check:comments", "check:fixtures", "check:tools", "test"]
 
 [tasks."check:rust"]
 description = "Check Rust formatting and LLVM-free clippy"
@@ -57,6 +57,11 @@ run = "cargo test --locked --no-default-features -p compiler --test m5 -- legacy
 [tasks."check:docs"]
 depends = ["doctor"]
 run = ["python tools/check_docs.py", "git diff --check"]
+
+[tasks."check:comments"]
+description = "Refuse Rust comments added since the merge base with origin/main that are outside the keep list"
+depends = ["doctor"]
+run = "python tools/check_comments.py"
 
 [tasks."check:fixtures"]
 depends = ["setup"]

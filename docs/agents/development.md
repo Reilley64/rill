@@ -27,3 +27,11 @@
    - A worker's summary is not evidence: check the source and the logs.
 
 Completion requires passing applicable implemented checks and an explicit list of unavailable or unrun acceptance gates. Release/support claims require every supported profile, not a successful skip or a configured CI matrix. Preserve prototype sources and recorded experiment evidence unless the task expressly changes them.
+
+## Comment check
+
+[Comments in Rust code](comments.md) holds the policy. `mise run check:comments` enforces it, and `mise run check` and CI run it. It reads the `.rs` files under `crates/`, `runtime/` and `tools/` and refuses each comment added or changed since the merge base with `origin/main`, unless the comment fits one of the four forms in the policy. On a pull request the base is `origin/$GITHUB_BASE_REF`. A dispatched run on a branch with no pull request uses `origin/main`. The checkout needs the full history (`fetch-depth: 0`) to find it. `python tools/check_comments.py --base <commit>` picks another base.
+
+`python tools/check_comments.py --tree` checks every comment in the tree, not only added ones. The check does not use that mode yet: the sweep (bead `ri-qlh.18.6`) turns it on in `mise.toml`.
+
+The check reads a doc comment as a contract only when it sits on a `pub` item, on a variant of a `pub enum` or on a member of a `pub trait`, or when it is a `//!` on a crate root or a `pub mod`. It does not know whether a `pub` item is reachable from outside the crate.
