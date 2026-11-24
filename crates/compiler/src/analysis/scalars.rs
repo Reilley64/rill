@@ -124,6 +124,7 @@ pub struct ExpressionFacts<'g> {
     pub access: data::Access,
     pub(in crate::analysis) copy_of: CopySource<'g>,
     pub(in crate::analysis) written_before: bool,
+    pub(in crate::analysis) initializer: Option<NodeId>,
     /// The written shape is `local * literal`, or a local or that product
     /// plus a local. M5 still resolves the actual scalar slots.
     pub(in crate::analysis) bounded_i32_arithmetic: bool,
@@ -439,6 +440,7 @@ struct Slot<'g> {
     copy_of: CopySource<'g>,
     written_before: bool,
     written: Option<Rc<Cell<bool>>>,
+    initializer: Option<NodeId>,
 }
 /// Operand shape of a normal `i32` expression, classified from its children
 /// during the flow pass so that M5 admits arithmetic without a lookup.
@@ -483,6 +485,7 @@ struct Local<'g> {
     boolean: Option<BooleanSet>,
     copy_of: CopySource<'g>,
     written: Option<Rc<Cell<bool>>>,
+    initializer: Option<NodeId>,
 }
 #[derive(Clone)]
 struct Context<'r, 'g> {
@@ -1896,6 +1899,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                             boolean: None,
                             copy_of: CopySource::Unknown,
                             written: None,
+                            initializer: None,
                         },
                     );
                 }
@@ -2202,6 +2206,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                         slot.copy_of = local.copy_of;
                         slot.written_before = local.written.as_ref().is_some_and(|w| w.get());
                         slot.written = local.written.clone();
+                        slot.initializer = local.initializer;
                         slot.place = if local.mutable {
                             Place::Writable
                         } else {
@@ -2930,6 +2935,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                         access: slot.access,
                         copy_of: slot.copy_of,
                         written_before: slot.written_before,
+                        initializer: slot.initializer,
                         bounded_i32_arithmetic: matches!(
                             slot.i32_operand,
                             I32Operand::Product | I32Operand::Sum
@@ -3273,6 +3279,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                                 boolean,
                                 copy_of,
                                 written: mutable.then(|| Rc::new(Cell::new(false))),
+                                initializer: Some(initializer),
                             });
                         self.elab.reserve(1)?;
                         self.record_node(NodeFacts {

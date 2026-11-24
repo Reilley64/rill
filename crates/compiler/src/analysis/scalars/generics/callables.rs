@@ -574,6 +574,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                             boolean: None,
                             copy_of: CopySource::Unknown,
                             written: None,
+                            initializer: None,
                         },
                     )
                     .is_some()
