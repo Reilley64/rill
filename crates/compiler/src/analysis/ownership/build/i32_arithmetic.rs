@@ -323,6 +323,13 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         let [left, right] = *self.module.syntax.nodes[node].children.as_slice() else {
             return Err(Stop::Pending(node));
         };
+        // A dead operand grants nothing and stops here, before any charge.
+        if ![left, right]
+            .into_iter()
+            .all(|operand| self.flows_normally(operand))
+        {
+            return Err(Stop::Pending(node));
+        }
         let left_facts = self.normal_value(left)?;
         // A statically decided left operand has a dead edge, which grants nothing.
         if Self::outcomes(left_facts) != (true, true) {
