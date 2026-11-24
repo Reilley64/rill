@@ -1,6 +1,6 @@
-# Re-review fix C16: C3 gate fourth sibling (2A-F1) and the ri-j6fm-cause forms (2A-F2) (2026-11-24, city bead ci-011a)
+# Re-review fix C16: C3 gate fourth sibling (2A-F1) and the ri-j6fm-cause forms (2A-F2) (2026-11-24, city beads ci-011a and ci-af50)
 
-Findings 2A-F1 and 2A-F2 of focused re-review `ci-9qga` (Subagent A), ticket `ri-px1.11.13`, spec `ri-2s0`. Base `2e13bc6e`, branch `m5-ownership-cleanup/r4f-ri-px1.11.13`. Parent for every number below: `81d317b3`, measured in its own `git worktree` and `CARGO_TARGET_DIR` (`probe-parent.log`). "Base" is `2e13bc6e` (`probe-base.log`), "fixed" is this branch with the first commit (`probe-fixed.log`). This is M4 Result use; no Rill program ran. **The ticket is closed `blocked`:** the fix the ticket prescribes moves one of C12's three pinned rows, and the ticket says to stop and report if that happens. Two commits are on the branch; see "Decision for the planner".
+Findings 2A-F1 and 2A-F2 of focused re-review `ci-9qga` (Subagent A), ticket `ri-px1.11.13`, spec `ri-2s0`. Base `2e13bc6e`, branch `m5-ownership-cleanup/r4f-ri-px1.11.13`. Parent for every number below: `81d317b3`, measured in its own `git worktree` and `CARGO_TARGET_DIR` (`probe-parent.log`). "Base" is `2e13bc6e` (`probe-base.log`), "fixed" is this branch with the first commit (`probe-fixed.log`). This is M4 Result use; no Rill program ran. The fix the ticket prescribes (variant A, the first commit) moves one of C12's three pinned rows, and the ticket says to stop if that happens. The first builder (`ci-011a`) stopped and built both variants; the planner chose variant B (`ci-af50`, see "Decision"). Both commits stay on the branch; history is not rewritten.
 
 ## Item 1 (2A-F1): mutable copy of the source, then lent
 
@@ -16,22 +16,24 @@ Red first: with `values.rs` at the base, the row fails on its exact pin, `left: 
 
 Change, first commit: in `parameter_copy_source` (`result_use/values.rs`) the test `last_written == id` moves before `written_binding(id)` and no longer asks whether the copy is mutable. Second commit: the same early return, only when no wildcard source is a parameter (below).
 
-## The stop: C12's row moves under the first commit
+## C12's row moves under the first commit (47858e16) and is restored by the second (503fdf72)
 
 The ticket requires C12's three rows, the admitted forms and the ri-j6fm pins X2 to X4 not to move. Under the first commit exactly one pinned row moved: `pre: mutable binder lent mutably before the match` (`pre("let mut before = flag; flip(&mut before);", "before")`, `Incomplete`, `Storage` at `*value = !*value;`, one `R0103` discard): 325,886 / 48,178 / 12 (its pin, equal to its parent) now 325,874 / 48,178 / 12 (-12). Its source is a parameter, so `written_binding` was paid there at the parent too.
 
-What I checked: I changed only that row's pin to 325,874 and ran `m4_8_match_boolean_snapshots` once (`probe-after-12move.log`): the whole test passed. So in that binary, both load modes, no other pin moved: the three admitted forms (324,714 / 48,105 / 12, 324,568 / 48,115 / 12, 324,518 / 48,115 / 12), C12's other two rows, X2, X3, X4, the two `ReadOnly` twins, the new 2A-F1 row and both 2A-F2 rows. I did not run the `m5` filters, `m4_8_scoped_join_caps`, `m4_8_callable_once` or `m4_8_result_use` for this branch (blocked; see below), so nothing is claimed about them. The pin edit was reverted.
+What I checked: I changed only that row's pin to 325,874 and ran `m4_8_match_boolean_snapshots` once (`probe-after-12move.log`): the whole test passed. So in that binary, both load modes, no other pin moved: the three admitted forms (324,714 / 48,105 / 12, 324,568 / 48,115 / 12, 324,518 / 48,115 / 12), C12's other two rows, X2, X3, X4, the two `ReadOnly` twins, the new 2A-F1 row and both 2A-F2 rows. I did not run the `m5` filters, `m4_8_scoped_join_caps`, `m4_8_callable_once` or `m4_8_result_use` for this branch (blocked; see below), so nothing is claimed about them. The pin edit was reverted. `47858e16` alone moves C12's lent-binder row from 325,886 to 325,874; `503fdf72` restores it to 325,886.
 
-## Decision for the planner
+## Decision: variant B (planner, 2026-11-24)
 
-* **A, first commit** (`last_written == id` before `written_binding`, as the ticket says): 2A-F1 at its parent cap; C12's lent-binder row moves -12 (below its parent). Needs the chief to accept re-pinning that row to 325,874 / 48,178 / 12 (its parent cap 325,886 still gives the same outcome).
-* **B, second commit** (the same return only when no `wildcard_sources` entry is a parameter): 2A-F1 at 324,747 / 48,205 / 12 and C12's lent-binder row stays 325,886 / 48,178 / 12. With B the whole `m4_8_match_boolean_snapshots` binary passes with every pin as written in this file's rows and the existing ones (`variant-B-narrow.log`). B adds a source-kind condition that the ticket did not ask for, so it is the planner's choice. To take A, drop the second commit and re-pin the one row.
+* **A, first commit `47858e16`** (`last_written == id` before `written_binding`, as the ticket says): 2A-F1 at its parent cap; C12's lent-binder row moves -12 (below its parent), so that row would need a re-pin to 325,874 / 48,178 / 12, which the brief said must not move.
+* **B, second commit `503fdf72`, kept** (the same return only when no `wildcard_sources` entry is a parameter): 2A-F1 at 324,747 / 48,205 / 12 and C12's lent-binder row stays 325,886 / 48,178 / 12. The whole `m4_8_match_boolean_snapshots` binary passes with every pin as written and no pin moves (`variant-B-narrow.log`).
+
+The planner chose B because it meets the brief: 2A-F1's row costs its parent cap, and C12's three rows, the admitted forms and the ri-j6fm rows X2 to X4 do not move. A would re-pin a C12 row. B adds a source-kind condition the ticket did not ask for; that is the price of keeping C12's pin.
 
 ## Item 2 (2A-F2): pinned under the ri-j6fm exception, widened
 
 Chief of staff ruling 2026-11-24 17:54 AEDT (`chief-rulings-21.md`, mailed by the planner): the exception covers the source or the copy paying its `never_written` scan when another local is written or lent before the match. Both forms are `SourceRejected`, `R0103` at `Err<bool,i32>(61i32)`, no pending, in both load modes, at the parent and now.
 
-| Row | Parent `81d317b3` | Base `2e13bc6e` | Fixed (A and B) |
+| Row | Parent `81d317b3` | Base `2e13bc6e` | Fixed (A and B, as at `503fdf72`) |
 |---|---|---|---|
 | (a) `let before = current; let r = &mut current; let mut z = flag; z = !flag;` | 326,063 / 48,685 / 12 | 326,153 (+90) | 326,153 / 48,685 / 12 |
 | (b) `let mut before = current; let r = &mut before; let mut z = flag; z = !flag;` | 326,063 / 48,685 / 12 | 326,113 (+50) | 326,113 / 48,685 / 12 |
@@ -40,8 +42,10 @@ Chief of staff ruling 2026-11-24 17:54 AEDT (`chief-rulings-21.md`, mailed by th
 
 ## Logs
 
-`~/.t3/evidence/rill/m5-build-2026-11-22/ci-011a/`: `red-item1.log`, `red-all-reverted.log`, `probe-parent.log`, `probe-base.log`, `probe-fixed.log`, `probe-after-12move.log`, `variant-A-reorder.diff`, `variant-B-narrow.diff`, `variant-B-narrow.log`. The probe rows were a temporary early-return loop in the test, not committed.
+First builder, `~/.t3/evidence/rill/m5-build-2026-11-22/ci-011a/`: `red-item1.log`, `red-all-reverted.log`, `probe-parent.log`, `probe-base.log`, `probe-fixed.log`, `probe-after-12move.log`, `variant-A-reorder.diff`, `variant-B-narrow.diff`, `variant-B-narrow.log`. The probe rows were a temporary early-return loop in the test, not committed.
+
+Finish, `~/.t3/evidence/rill/m5-build-2026-11-22/ci-af50/`, on the branch after merging `origin/implementation/m5-ownership-cleanup` at `b0b8c13b`: `m4_8-snap-result.log` (`m4_8_match_boolean_snapshots`, `m4_8_result_use`), `m5-filters.log` (`m5 -- rfc_cases retained legacy_caps graph::inventory`, 156 tests, `legacy_caps` and `graph::inventory` listed), `m4_8-caps-once.log` (`m4_8_scoped_join_caps`, `m4_8_callable_once`), `fmt.log`, `clippy.log`, `docs.log`. All pass.
 
 ## Not established
 
-Only `m4_8_match_boolean_snapshots` was run. The gate checks (`m5` filters, `m4_8_scoped_join_caps`, `m4_8_callable_once`, `m4_8_result_use`, clippy), the merge of the newest integration tip and the push were not run, because the ticket is blocked at the decision above. I swept no other form for a cost over its parent.
+The full M5 binary and `mise run check` were not run (hosted CI only, owner policy). I swept no other form for a cost over its parent.
