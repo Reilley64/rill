@@ -21,6 +21,8 @@ Red before the change: with the source change reverted, each row fails on its ex
 
 The screen returns exactly what `never_written` would have returned: a write rooted at the local that was evaluated is an `Assignment` or `&mut` inside the local's scope, which the scan counts. It adds no rejection the scan would not have made.
 
+*Correction (2026-11-24, `ri-px1.11.15` (city bead `ci-d5gm`, re-review `ci-9qga`), 2A-F1, 2A-F3).* "It adds no rejection the scan would not have made" held for the forms this ticket pinned; the re-review found one it did not cover: a mutable copy of an immutable local source lent by `&mut` has no scan, and the screen returns `None` where `d87e5dd2` returned the source. The re-review ran it and it is a `ReadOnly` source error either way (no outcome flip). The sentence "leaves no row over its parent" in this file held for the three pinned rows only: a fourth sibling, a mutable copy of a local source then lent, paid +11 work over its parent (324,758 against 324,747 / 48,205 / 12). C16 (`ri-px1.11.13`, merge `0a8e2caf`, variant B) returned it to its parent triple and pinned it. The lines above are not edited.
+
 ## Per row: parent, now, outcome, blocker
 
 Both load modes give the same numbers. Parent measured at `81d317b3` in its own `git worktree` and `CARGO_TARGET_DIR` (`probe-parent.txt`); "before" is the base `d87e5dd2` (`probe-now.txt`); "after" is this branch (`probe-fixed.txt`). The probe source is `px119_probe.rs.txt` (not committed).
@@ -52,4 +54,5 @@ No published cap moved. The three rows now equal their parents, so no exception 
 ## Not established
 
 - Only the latest write or lend is remembered. A body that writes the source and then writes or lends a different local before the match still pays the scan for the source and rejects at `R0103`: the probe's `X2` (`let before = current; current = !flag; let mut z = flag; z = !flag;`) costs 326,183 / 48,707 / 12 against 326,097 at the parent (+86), the same as before this change. Closing it needs a per-local "written" fact (an M4 fact, the pattern of `ri-qlh.4`) or a reservation per write, which would move the caps of every program with an assignment. Filed as `ri-j6fm` (needs-triage), not pinned or fixed here.
+  - *Superseded (2026-11-24, `ri-px1.11.15` (city bead `ci-d5gm`, re-review `ci-9qga`), 2D-3).* `ri-j6fm` is pinned: `X2`, `X3` and `X4` by C14 (`ri-px1.11.11`, ruling 20), and the two further forms 2A-F2 (a) and (b) by C16 (`ri-px1.11.13`, ruling 21 (1)), each exact and one short in `m4_8_match_boolean_snapshots::installed_boolean_matches` with its parent cap `81d317b3` asserting `ResourceLimit`; it is a named rule-1 exception in `docs/agents/compiler-metering.md`. "Not pinned" is not edited above.
 - A `&mut` of an immutable local is a source error with no signal at that handler; it is recorded as a write like any `&mut`. No test covers it.

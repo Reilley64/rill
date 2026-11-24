@@ -22,6 +22,8 @@ Part of the single fix pass of review `ci-0mdr` (second review of `81d317b3`), a
 | ST-17 / S2-F4 | fixed | `scoped_join::reference_pair_reserves_before_it_builds_each_slot` |
 | "Unverified" (`retained_contents` siblings) | measured; list forms listed under the standing ruling and pinned; two `&mut &R` forms over bound (c) reported | below; found bead `ri-zee8` |
 
+*Superseded (2026-11-24, `ri-px1.11.15` (city bead `ci-d5gm`, re-review `ci-9qga`), 2D-3).* "SP-6 fixed" is wrong. The renamed test `rfc_cases::list_contents::r1_blocker_site_is_the_last_retention_not_the_storing_call` pins the compiler's R0202 site as the last retention before the exit, not the storing call, as a stated limit, bead `ri-i0kj` (C14, `ri-px1.11.11`). The line above and its test name are not edited.
+
 Each new `list_contents` test goes through `check_cases`: the targeted query and the ordinary graph root, both load modes, exact caps, one short on each axis (`assert_body_limit`, `assert_graph_limit`), and the finding code, site and related site of every rejected root.
 
 ## ST-1: `grouped` is the fifth use of the standing rule-1 exception
