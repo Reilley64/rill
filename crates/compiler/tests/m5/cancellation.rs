@@ -375,19 +375,16 @@ fn installed_guard_release_on_budget_delivery() {
                 // Without delivery the loop exits to the ordinary suffix:
                 // export the result, then release the guard once.
                 let (_, ordinary_exit) = branch_targets(mir);
-                let suffix = linear(mir, ordinary_exit);
-                let export = suffix
-                    .iter()
-                    .position(|op| matches!(op, Operation::Export(_)))
-                    .expect("ordinary suffix exports the result");
-                let release = suffix
-                    .iter()
-                    .position(|op| {
-                        matches!(op, Operation::Cleanup(actions)
-                        if actions.iter().any(|a| matches!(a, Obligation::ReleaseGuard { .. })))
-                    })
-                    .expect("ordinary suffix releases the guard");
-                assert!(export < release, "{suffix:?}");
+                let suffix = render_path(mir, ordinary_exit);
+                assert_eq!(
+                    suffix,
+                    [
+                        "init 7",
+                        "export 7",
+                        "cleanup [release lock: LockGuard<i32>; end again: bool]",
+                        "none",
+                    ]
+                );
                 let drops = path_drops(mir, ordinary_exit);
                 let [Obligation::ReleaseGuard { operand, .. }] = drops.as_slice() else {
                     panic!("ordinary suffix: {drops:?}");
