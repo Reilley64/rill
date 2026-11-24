@@ -2110,9 +2110,10 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
     }
 
     /// The contents a retained destination type holds, a reference to a
-    /// record of `i32` fields included (see `retained_contents_of`).
+    /// record of `i32` fields included, and a list's element contents (see
+    /// `retained_destination_contents`).
     fn retained_contents<'t>(&mut self, ty: &'t TypeTerm<'g>) -> ResultOf<Option<&'t Type<'g>>> {
-        retained_contents_of(self.typed, ty, self.budget)
+        retained_destination_contents(self.typed, ty, self.budget)
     }
 
     fn immutable_named_value(
@@ -7946,9 +7947,16 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             || !call.defaults.is_empty()
             || call.scoped_join.is_some()
             || call.list_arrows.is_some()
-            || syntax[destination].kind != NodeKind::Prefix("&mut")
-            || !matches!(syntax[destination].children.as_slice(), [operand]
-                if syntax[*operand].kind == NodeKind::ValueReference)
+        {
+            return false;
+        }
+        // A written `&mut name`, or (rule R1) the plain name of a destination
+        // whose type holds list element contents.
+        let plain = syntax[destination].kind == NodeKind::ValueReference;
+        if !plain
+            && !(syntax[destination].kind == NodeKind::Prefix("&mut")
+                && matches!(syntax[destination].children.as_slice(), [operand]
+                    if syntax[*operand].kind == NodeKind::ValueReference))
         {
             return false;
         }
@@ -7965,8 +7973,15 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             *slot = Some(&value.ty);
         }
         // The screen reads the type alone: a reference to a record needs
-        // a declaration lookup, so it stays on the old path here.
-        let contents = slots[0].and_then(|ty| retained_contents_type(ty));
+        // a declaration lookup, so it stays on the old path here. A plain
+        // name is admitted for list element contents only.
+        let contents = slots[0].and_then(|ty| {
+            if plain {
+                retained_list_candidate(self.typed, ty)
+            } else {
+                retained_contents_type(ty)
+            }
+        });
         retained_contract_of(
             slots.iter().map(|ty| ty.unwrap()),
             &facts.ty,
@@ -8257,8 +8272,10 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         // from the written types alone, free) admits that reference as a
         // source; the contract check below decides the rest.
         let record_destination = call.arguments.iter().any(|&arg| {
-            self.value(arg)
-                .is_ok_and(|value| retained_record_candidate(&value.ty).is_some())
+            self.value(arg).is_ok_and(|value| {
+                retained_record_candidate(&value.ty).is_some()
+                    || retained_list_candidate(self.typed, &value.ty).is_some()
+            })
         });
         self.budget.reserve(call.arguments.len() + 1)?;
         let mut args = Vec::with_capacity(call.arguments.len());
@@ -8299,6 +8316,10 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 if !piped && destination.replace(position).is_some() {
                     return Err(Stop::Pending(arg));
                 }
+            } else if family_store && retained_list_candidate(self.typed, &ty).is_some() {
+                // The element's record is not one rule R1 admits: the call
+                // stops where it did before the contents were read.
+                return Err(Stop::Pending(node));
             } else if !borrows_record
                 && !self.direct_call_type(&ty)
                 && !tuple_or_leaf_admitted
