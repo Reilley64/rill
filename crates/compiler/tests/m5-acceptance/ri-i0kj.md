@@ -12,7 +12,8 @@ One source change, in `src/analysis/ownership/flow.rs`.
 - Fix: a `Held` for outward contents carries `local_store`, the retaining call that first stored a body-local source into those contents and that source's borrow. A retaining call sets it only when the contents hold no body-local loan yet and its inputs add one; otherwise it keeps the earlier value. `check_retained` reports the loan that `local_store` names, at that call. `origin` and `RetainedAtDelivery::last_store` are unchanged (still the last store). A contents value with a body-local loan and no `local_store` (a strong update through `InstallThrough`) reports as before.
 - `Held` grew from 208 to 232 bytes, which trips `clippy::large_enum_variant` on `State` (the lint fires above a 200-byte gap). `State` carries `#[allow(clippy::large_enum_variant)]`, as other files of the crate allow `too_many_arguments`. Boxing `Held` would touch every state site; sharing the bytes of `origin` would drop `last_store`, which `RetainedAtDelivery` publishes.
 - Which store when there are two: the first. RFC 0007 line 218 has the callee's exit check reject "a body-local source that flows" to `dst`; the earliest store is where the contents first hold one, and the analysis reports one finding per root, so it names one. The related site is that call's own borrow, in either declaration order (`secondThenFirst`).
-- Outcomes: every program stays `SourceRejected` with R0202; only the site moved. No cap moved: every existing pin passed with its caps unchanged (rule 11 does not apply; no old cap needed a `ResourceLimit` assertion).
+- The two scans in `Action::Call` (`old.loans.iter().any(..)` and `loans.iter().find(..)`) carry no `budget.step`. This is deliberate: both read loan sets that `include_loans` and `loan_set` already charged on the same path, and a step would move the caps of every list-retain root and bring in rule 11. `check_retained` charges one step per loan it reads, as before; it reads further only when the loan that `local_store` names is not first in `Loan` order.
+- Outcomes: every program stays `SourceRejected` with R0202; only the site moved. No cap moved in the tests run (listed under Checks): every existing pin passed with its caps unchanged, so rule 11 does not apply and no old cap needed a `ResourceLimit` assertion.
 
 ## Tests
 
@@ -40,10 +41,10 @@ The loop forms already pinned (`loopOwned`, `loopBreak`, `oneBranch`, `r1_loop_b
 
 ## Checks run (targeted; no full suite)
 
-- `cargo test -p compiler --test m5`, selected by name: `list_contents` (25 tests), then `retained::`, `graph::`, `field_routes`, `record_contents`, `legacy_caps`, `tuples`, `patterns`, `propagation` and `rfc_cases::` (333 tests, one failure: `relayTwice`, fixed above; `green-targeted.log`), then `cancellation`, `records`, `scoped_join`, `scoped_jobs` and `captures` (129 tests, all pass; `green-targeted-2.log`), and `retained::` again after the fix (25 pass).
+- `cargo test -p compiler --test m5`, selected by name: `list_contents` (25 tests), then `retained::`, `graph::`, `field_routes`, `record_contents`, `legacy_caps`, `tuples`, `patterns`, `propagation` and `rfc_cases::` (333 tests, one failure: `relayTwice`, fixed above; `green-targeted.log`), then `cancellation`, `records`, `scoped_join`, `scoped_jobs` and `captures` (129 tests, all pass; `green-targeted-2.log`), then `roots::`, `disposers::`, `fresh_result_storage` and the three top-level tests of `m5.rs` that name R0202 roots (`ownership_from_installed_source`, `replacement_keeps_the_declaration_rank`, `installed_multi_module_borrow_join_and_early_exit`; 24 pass; `green-targeted-3.log`), and `retained::` plus `list_contents::r1` again on the final tree (42 pass). Together 486 of the 551 tests of the `m5` binary. Not run: `iteration*`, `o05`, `o15`, `o16` (none names R0202 or a retaining call into a parameter list). No other test file names R0202 (`m4_8_*`, `native_ownership` and the rest were searched).
 - `cargo fmt -p compiler -- --check`, `cargo clippy --locked --no-default-features -p compiler --all-targets -- -D warnings` and `mise run check:docs`: clean on the final tree.
 
 ## Not established
 
-- The remaining `m5` tests, the other test binaries and the hosted matrix did not run locally; CI runs them.
+- The 65 `m5` tests named above as not run, the other test binaries and the hosted matrix did not run locally; CI runs them.
 - Which of several body-local stores the RFC prefers is not stated in it; the first is a choice, recorded above.
