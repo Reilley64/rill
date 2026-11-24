@@ -459,7 +459,7 @@ fn metadata_trigger(root: &Path, profile: &InstalledRequest) {
         ..profile.clone()
     };
     let idle = loader::load_installed(request.clone()).unwrap();
-    assert_eq!(idle.modules().len(), 2, "no trigger or explicit import");
+    assert_eq!(idle.modules().len(), 3, "metadata loads without a trigger");
     fs::write(&request.entry, "enum Local<T> { Some(T), None } function pending(x: Local<bool>): Local<bool> { let _ = x?; return x; }").unwrap();
     let graph = loader::load_installed(request.clone()).unwrap();
     let report = analyze_typed(&graph, AnalysisLimits::default());
