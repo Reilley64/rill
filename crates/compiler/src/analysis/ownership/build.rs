@@ -673,6 +673,9 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             let slot =
                 self.allocate_slot(node, true, StorageCleanup::DisposeListI32(disposal), None)?;
             self.budget.reserve(1)?;
+            // The key ends in the declaration's module path: charge each probe.
+            let probes = 1 + self.locals.len().max(1).ilog2() as usize;
+            graph::charge_key(&parameter.declaration.id.module, probes, self.budget)?;
             self.locals.insert(&parameter.declaration.id, slot);
             return Ok(slot);
         }
@@ -1709,7 +1712,9 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         {
             return Ok(None);
         }
-        self.budget.step(1)?;
+        // The key ends in the declaration's module path: charge each probe.
+        let probes = 1 + self.locals.len().max(1).ilog2() as usize;
+        graph::charge_key(&path.root.module, probes, self.budget)?;
         Ok(Some(
             *self.locals.get(path.root).ok_or(Stop::Pending(node))?,
         ))
