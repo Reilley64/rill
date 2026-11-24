@@ -2958,6 +2958,131 @@ fn o11_unsupported_family_call_siblings_stay_incomplete_at_their_calls() {
     );
 }
 
+/// Rule 1 (review ci-0mdr ST-2): a family call whose selected implementation
+/// takes `&mut` of a record or of an `i32` is refused from the written
+/// argument's type before the family probe, so it keeps the targeted and graph
+/// caps `7002855e` measured, in a `git worktree add` of the parent.
+#[test]
+fn o11_family_view_over_a_non_list_stays_at_its_parent_cap() {
+    installed(
+        "rfc_cases::o11_family_view_over_a_non_list_stays_at_its_parent_cap",
+        |request| {
+            o12::check_cases(
+                &request,
+                &[
+                    o12::Case {
+                        text: r####"
+type Box = { x: i32 };
+function viewOf<L>(item: L): &i32;
+implement viewOf(item: &mut Box): &i32 { while (true) {} }
+function nonList(input: Box): i32 {
+  let mut owned = input;
+  let view = viewOf(&mut owned);
+  return *view;
+}
+"####,
+                        typed_stats: (326415, 47961, 12),
+                        graph: (GraphCompletion::Incomplete, (188604, 4266, 5)),
+                        roots: &[Root {
+                            name: "nonList",
+                            want: Want::Incomplete {
+                                blocker: r####"viewOf(&mut owned)"####,
+                            },
+                            graph: None,
+                            stats: (2625, 165, 3),
+                        }],
+                    },
+                    o12::Case {
+                        text: r####"
+function viewOf<L>(item: L): &i32;
+implement viewOf(item: &mut i32): &i32 { while (true) {} }
+function scalar(input: i32): i32 {
+  let mut owned = input;
+  let view = viewOf(&mut owned);
+  return *view;
+}
+"####,
+                        typed_stats: (325579, 47912, 12),
+                        graph: (GraphCompletion::Incomplete, (187826, 4149, 5)),
+                        roots: &[Root {
+                            name: "scalar",
+                            want: Want::Incomplete {
+                                blocker: r####"viewOf(&mut owned)"####,
+                            },
+                            graph: None,
+                            stats: (1911, 48, 3),
+                        }],
+                    },
+                ],
+            );
+        },
+    );
+}
+
+/// Rule 1 (review ci-0mdr ST-9): an `i32` equality conjunction with a
+/// statically decided operand keeps the caps and the blocker `7002855e`
+/// measured, in a `git worktree add` of the parent. A decided left operand is
+/// refused before the conjunction is lowered (the whole `&&` is not normal), so
+/// it never paid; a decided right operand is lowered only after the left
+/// operand's checks, and a free screen refuses it first.
+#[test]
+fn decided_conjunction_left_keeps_its_parent_cap() {
+    installed(
+        "rfc_cases::decided_conjunction_left_keeps_its_parent_cap",
+        |request| {
+            o12::check_cases(
+                &request,
+                &[o12::Case {
+                    text: r####"
+function stop(): never { while (true) {} }
+function id(x: i32): i32 { return x; }
+function decidedLeft(a: i32, b: i32): bool { return id(if (true) stop() else 1i32) == b && a == b; }
+"####,
+                    typed_stats: (326728, 47883, 12),
+                    graph: (GraphCompletion::Incomplete, (187466, 4246, 5)),
+                    roots: &[Root {
+                        name: "decidedLeft",
+                        want: Want::Incomplete {
+                            blocker: r####"id(if (true) stop() else 1i32) == b && a == b"####,
+                        },
+                        graph: None,
+                        stats: (1897, 42, 3),
+                    }],
+                }],
+            );
+        },
+    );
+}
+
+#[test]
+fn decided_conjunction_right_keeps_its_parent_cap() {
+    installed(
+        "rfc_cases::decided_conjunction_right_keeps_its_parent_cap",
+        |request| {
+            o12::check_cases(
+                &request,
+                &[o12::Case {
+                    text: r####"
+function stop(): never { while (true) {} }
+function id(x: i32): i32 { return x; }
+function decidedRight(a: i32, b: i32): bool { return a == b && id(if (true) stop() else 1i32) == b; }
+"####,
+                    typed_stats: (326736, 47889, 12),
+                    graph: (GraphCompletion::Incomplete, (187466, 4246, 5)),
+                    roots: &[Root {
+                        name: "decidedRight",
+                        want: Want::Incomplete {
+                            blocker: r####"a == b && id(if (true) stop() else 1i32) == b"####,
+                        },
+                        graph: None,
+                        stats: (1897, 42, 3),
+                    }],
+                }],
+            );
+        },
+    );
+}
+
 #[test]
 fn o11_whole_list_uses_before_the_view_ends_do_not_check() {
     run(
