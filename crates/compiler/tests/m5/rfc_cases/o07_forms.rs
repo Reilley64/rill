@@ -643,31 +643,31 @@ function localReferent(): i32 {
 }
 "#,
     typed_stats: (339728, 50254, 12),
-    graph: (GraphCompletion::SourceRejected, (204371, 7771, 6)),
+    graph: (GraphCompletion::SourceRejected, (204376, 7771, 6)),
     roots: &[
         Root {
             name: "replaceMember",
             want: Want::Checked,
             graph: None,
-            stats: (3834, 884, 5),
+            stats: (3835, 884, 5),
         },
         Root {
             name: "replaceNoUse",
             want: Want::Checked,
             graph: None,
-            stats: (3283, 602, 5),
+            stats: (3284, 602, 5),
         },
         Root {
             name: "sameOwnerAgain",
             want: Want::Checked,
             graph: None,
-            stats: (3691, 805, 5),
+            stats: (3692, 805, 5),
         },
         Root {
             name: "sharedReplace",
             want: Want::Checked,
             graph: None,
-            stats: (3906, 898, 5),
+            stats: (3907, 898, 5),
         },
         Root {
             name: "overlapThenUse",
@@ -687,7 +687,7 @@ function localReferent(): i32 {
                 related: r####"&mut c"####,
             },
             graph: None,
-            stats: (3491, 735, 6),
+            stats: (3492, 735, 6),
         },
     ],
     sequences: &[
@@ -769,11 +769,148 @@ function localReferent(): i32 {
     ],
 };
 
+/// Review ci-b4b2 C-4 (ruling 9 condition 1), the admitted forms the first
+/// fix pass measured and did not pin. `exclusiveOverlap` replaces the
+/// exclusive member with a loan of the owner it already borrows while the
+/// shared member borrows another: the store releases the old loan, so it checks.
+/// `blockLocalNoUse` replaces a member with a loan of a block-local owner that
+/// ends with the block while nothing reads the member again, so it checks
+/// (`localReferent` reads it and is R0203). `recordUpdateOverlap` is the
+/// record-update root of the same overlap, `Pair { ...holder, y: &mut a }`
+/// over `x: &mut a`: the update is not lowered, so the root is `Incomplete` at
+/// the update and the graph with it, never `Checked`.
+const MEMBER_REPLACEMENT_SIBLINGS: Form = Form {
+    text: r#"
+type Pair = { x: &mut i32; y: &mut i32 };
+type Holder = { first: &mut i32; second: &i32 };
+function exclusiveOverlap(): i32 {
+  let mut a = 1i32;
+  let b = 2i32;
+  let mut holder = Holder { first: &mut a, second: &b };
+  holder.first = &mut a;
+  return 0i32;
+}
+function blockLocalNoUse(): i32 {
+  let mut a = 1i32;
+  let mut b = 2i32;
+  let mut holder = Pair { x: &mut a, y: &mut b };
+  if (true) { let mut c = 3i32; holder.y = &mut c; }
+  return 0i32;
+}
+function recordUpdateOverlap(): i32 {
+  let mut a = 1i32;
+  let mut b = 2i32;
+  let mut holder = Pair { x: &mut a, y: &mut b };
+  let next = Pair { ...holder, y: &mut a };
+  return 0i32;
+}
+"#,
+    typed_stats: (330429, 48732, 12),
+    graph: (GraphCompletion::Incomplete, (192946, 5221, 6)),
+    roots: &[
+        Root {
+            name: "exclusiveOverlap",
+            want: Want::Checked,
+            graph: None,
+            stats: (2991, 452, 5),
+        },
+        Root {
+            name: "blockLocalNoUse",
+            want: Want::Checked,
+            graph: None,
+            stats: (3233, 589, 6),
+        },
+        Root {
+            name: "recordUpdateOverlap",
+            want: Want::Incomplete {
+                blocker: r####"Pair { ...holder, y: &mut a }"####,
+            },
+            graph: None,
+            stats: (2733, 217, 3),
+        },
+    ],
+    sequences: &[
+        (
+            "exclusiveOverlap",
+            &[
+                "init a",
+                "init b",
+                "borrow mut a -> holder.first",
+                "borrow b -> holder.second",
+                "init holder",
+                "borrow mut a -> &mut a",
+                "replace holder.first <- &mut a",
+                "init 0i32",
+                "export 0i32",
+                "cleanup [end holder.second, end holder.first, end holder, end b, end a]",
+            ],
+        ),
+        (
+            "blockLocalNoUse",
+            &[
+                "init a",
+                "init b",
+                "borrow mut a -> holder.x",
+                "borrow mut b -> holder.y",
+                "init holder",
+                "init c",
+                "borrow mut c -> &mut c",
+                "replace holder.y <- &mut c",
+                "cleanup [end c]",
+                "init 0i32",
+                "export 0i32",
+                "cleanup [end holder.y, end holder.x, end holder, end b, end a]",
+            ],
+        ),
+    ],
+};
+
 #[test]
 fn member_replacement_pins_its_sequence_and_twins() {
     check(
         "rfc_cases::o07_forms::member_replacement_pins_its_sequence_and_twins",
         &MEMBER_REPLACEMENT,
+    );
+    check(
+        "rfc_cases::o07_forms::member_replacement_pins_its_sequence_and_twins",
+        &MEMBER_REPLACEMENT_SIBLINGS,
+    );
+}
+
+/// Metering rule 11 (review ci-b4b2 D-F1, chief rulings 11 Q3 and 18): the
+/// replacement now checks that the incoming value holds no loan on a sibling
+/// member (`member_replacement_overlap` in `flow.rs`), one work unit for the
+/// one loan a stored reference holds. Each root that stores a member and
+/// reaches the check costs one more than at `d87e5dd2`, and the whole graph of
+/// `MEMBER_REPLACEMENT` five more; the old caps below now give
+/// `ResourceLimit`. `overlapThenUse` rejects before the store and keeps its
+/// cap; `recordUpdateOverlap` is not lowered and keeps it too.
+#[test]
+fn member_replacement_pre_sibling_check_caps_now_give_resource_limit() {
+    let test =
+        "rfc_cases::o07_forms::member_replacement_pre_sibling_check_caps_now_give_resource_limit";
+    super::o07::at_parent_caps(
+        test,
+        MEMBER_REPLACEMENT.text,
+        (204371, 7771, 6),
+        &[
+            ("replaceMember", (3834, 884, 5)),
+            ("replaceNoUse", (3283, 602, 5)),
+            ("sameOwnerAgain", (3691, 805, 5)),
+            ("sharedReplace", (3906, 898, 5)),
+            ("localReferent", (3491, 735, 6)),
+        ],
+        super::o07::Parent::Exceeds,
+    );
+    super::o07::at_parent_caps(
+        test,
+        MEMBER_REPLACEMENT_SIBLINGS.text,
+        (192944, 5221, 6),
+        &[
+            ("exclusiveOverlap", (2990, 452, 5)),
+            ("blockLocalNoUse", (3232, 589, 6)),
+        ],
+        super::o07::Parent::Exceeds,
     );
 }
 
