@@ -395,6 +395,76 @@ function loneBeforeLocal(dst: &mut List<&User>): void {
 }
 "####;
 
+const NAMED_BORROW: &str = r####"type T = { name: string; id: i32 };
+function touch(dst: &mut List<&T>): void { }
+function touchTwo(dst: &mut List<&T>, source: &T): void { }
+function touchF<D, S>(dst: D, source: S): void;
+implement touchF(dst: &mut List<&T>, source: &T): void { while (true) {} }
+function touchOne<D>(dst: D): void;
+implement touchOne(dst: &mut List<&T>): void { while (true) {} }
+function f(): void { let a = T { name: "n", id: 1 }; let mut users: List<&T> = [&a]; let r = &mut users; }
+"####;
+
+const NAMED_LONE: &str = r####"type T = { name: string; id: i32 };
+function touch(dst: &mut List<&T>): void { }
+function touchTwo(dst: &mut List<&T>, source: &T): void { }
+function touchF<D, S>(dst: D, source: S): void;
+implement touchF(dst: &mut List<&T>, source: &T): void { while (true) {} }
+function touchOne<D>(dst: D): void;
+implement touchOne(dst: &mut List<&T>): void { while (true) {} }
+function f(dst: &mut List<&T>): void { touchOne(dst); }
+"####;
+
+const NAMED_FORWARDED: &str = r####"type T = { name: string; id: i32 };
+function touch(dst: &mut List<&T>): void { }
+function touchTwo(dst: &mut List<&T>, source: &T): void { }
+function touchF<D, S>(dst: D, source: S): void;
+implement touchF(dst: &mut List<&T>, source: &T): void { while (true) {} }
+function touchOne<D>(dst: D): void;
+implement touchOne(dst: &mut List<&T>): void { while (true) {} }
+function f(dst: &mut List<&T>, s: &T): void { touchF(dst, s); }
+"####;
+
+const NAMED_FORWARDED_PIPE: &str = r####"type T = { name: string; id: i32 };
+function touch(dst: &mut List<&T>): void { }
+function touchTwo(dst: &mut List<&T>, source: &T): void { }
+function touchF<D, S>(dst: D, source: S): void;
+implement touchF(dst: &mut List<&T>, source: &T): void { while (true) {} }
+function touchOne<D>(dst: D): void;
+implement touchOne(dst: &mut List<&T>): void { while (true) {} }
+function f(dst: &mut List<&T>, s: &T): void { dst |> touchF(s); }
+"####;
+
+const NAMED_DIRECT_EMPTY: &str = r####"type T = { name: string; id: i32 };
+function touch(dst: &mut List<&T>): void { }
+function touchTwo(dst: &mut List<&T>, source: &T): void { }
+function touchF<D, S>(dst: D, source: S): void;
+implement touchF(dst: &mut List<&T>, source: &T): void { while (true) {} }
+function touchOne<D>(dst: D): void;
+implement touchOne(dst: &mut List<&T>): void { while (true) {} }
+function f(dst: &mut List<&T>): void { touch(dst); }
+"####;
+
+const NAMED_DIRECT_PAIR: &str = r####"type T = { name: string; id: i32 };
+function touch(dst: &mut List<&T>): void { }
+function touchTwo(dst: &mut List<&T>, source: &T): void { }
+function touchF<D, S>(dst: D, source: S): void;
+implement touchF(dst: &mut List<&T>, source: &T): void { while (true) {} }
+function touchOne<D>(dst: D): void;
+implement touchOne(dst: &mut List<&T>): void { while (true) {} }
+function f(dst: &mut List<&T>, s: &T): void { touchTwo(dst, s); }
+"####;
+
+const NAMED_PIPED_PAIR: &str = r####"type T = { name: string; id: i32 };
+function touch(dst: &mut List<&T>): void { }
+function touchTwo(dst: &mut List<&T>, source: &T): void { }
+function touchF<D, S>(dst: D, source: S): void;
+implement touchF(dst: &mut List<&T>, source: &T): void { while (true) {} }
+function touchOne<D>(dst: D): void;
+implement touchOne(dst: &mut List<&T>): void { while (true) {} }
+function f(dst: &mut List<&T>, s: &T): void { dst |> touchTwo(s); }
+"####;
+
 const R0202_LOCAL: (&str, &str, &str) = ("R0202", "retain(dst, &user)", "&user");
 
 /// R1's known conservative rejection (the chief's condition, ri-ema). The
@@ -774,6 +844,178 @@ fn list_destination_siblings_keep_their_outcomes_and_blockers() {
                     (ENUM, &[("forwarded", (1900, 40, 3))], (188002, 4141, 5)),
                     (FLAG, &[("forwarded", (1917, 49, 3))], (188322, 4150, 5)),
                     (GROUPED, &[("grouped", (1905, 42, 3))], (188126, 4143, 5)),
+                ],
+            );
+        },
+    );
+}
+
+/// Review ci-0mdr, the "Unverified" item of the Standards axis: which
+/// unsupported shapes pay the charged record lookup beyond the siblings of
+/// `list_destination_siblings_keep_their_outcomes_and_blockers`. A record with a
+/// `string` field behind a `&mut List<&R>` parameter pays one lookup per
+/// parameter that reaches the contents screen (70 to 72 work, no entries) in
+/// every body that declares one, `Checked` or not, and one more at each call
+/// that passes it on, direct or piped (`+144` to `+148` work, up to +3 entries
+/// in `f`). Each keeps its outcome and its blocker; each parent cap (`b6c93f30`)
+/// gives `ResourceLimit`. A nested record and an enum cost the same to within
+/// two work, and are recorded in `ri-px1.11.5.md`.
+#[test]
+fn list_parameter_siblings_pay_their_lookup_and_keep_their_outcomes() {
+    installed(
+        "rfc_cases::list_contents::list_parameter_siblings_pay_their_lookup_and_keep_their_outcomes",
+        |request| {
+            check_cases(
+                &request,
+                &[
+                    const {
+                        Case {
+                            text: NAMED_BORROW,
+                            typed_stats: (331201, 48419, 12),
+                            graph: (GraphCompletion::Incomplete, (192013, 4322, 5)),
+                            roots: &[
+                                checked("touch", (2071, 91, 1)),
+                                checked("touchTwo", (2114, 109, 1)),
+                                incomplete("f", "users", (2303, 121, 1)),
+                            ],
+                        }
+                    },
+                    const {
+                        Case {
+                            text: NAMED_LONE,
+                            typed_stats: (331235, 48359, 12),
+                            graph: (GraphCompletion::Incomplete, (191375, 4263, 5)),
+                            roots: &[
+                                checked("touch", (2057, 84, 1)),
+                                checked("touchTwo", (2100, 102, 1)),
+                                incomplete("f", "touchOne(dst)", (2087, 62, 3)),
+                            ],
+                        }
+                    },
+                    const {
+                        Case {
+                            text: NAMED_FORWARDED,
+                            typed_stats: (331483, 48464, 12),
+                            graph: (GraphCompletion::Incomplete, (191571, 4271, 5)),
+                            roots: &[
+                                checked("touch", (2063, 87, 1)),
+                                checked("touchTwo", (2106, 105, 1)),
+                                incomplete("f", "touchF(dst, s)", (2102, 70, 3)),
+                            ],
+                        }
+                    },
+                    const {
+                        Case {
+                            text: NAMED_FORWARDED_PIPE,
+                            typed_stats: (331493, 48468, 12),
+                            graph: (GraphCompletion::Incomplete, (191497, 4268, 5)),
+                            roots: &[
+                                checked("touch", (2063, 87, 1)),
+                                checked("touchTwo", (2106, 105, 1)),
+                                incomplete("f", "dst |> touchF(s)", (2028, 67, 3)),
+                            ],
+                        }
+                    },
+                    const {
+                        Case {
+                            text: NAMED_DIRECT_EMPTY,
+                            typed_stats: (330802, 48270, 12),
+                            graph: (GraphCompletion::Incomplete, (191442, 4264, 5)),
+                            roots: &[
+                                checked("touch", (2059, 85, 1)),
+                                checked("touchTwo", (2102, 103, 1)),
+                                incomplete("f", "dst", (2094, 63, 3)),
+                            ],
+                        }
+                    },
+                    const {
+                        Case {
+                            text: NAMED_DIRECT_PAIR,
+                            typed_stats: (331011, 48324, 12),
+                            graph: (GraphCompletion::Incomplete, (191638, 4272, 5)),
+                            roots: &[
+                                checked("touch", (2065, 88, 1)),
+                                checked("touchTwo", (2108, 106, 1)),
+                                incomplete("f", "dst", (2109, 71, 3)),
+                            ],
+                        }
+                    },
+                    const {
+                        Case {
+                            text: NAMED_PIPED_PAIR,
+                            typed_stats: (331021, 48328, 12),
+                            graph: (GraphCompletion::Incomplete, (191638, 4269, 5)),
+                            roots: &[
+                                checked("touch", (2065, 88, 1)),
+                                checked("touchTwo", (2108, 106, 1)),
+                                incomplete("f", "dst |> touchTwo(s)", (2109, 68, 3)),
+                            ],
+                        }
+                    },
+                ],
+            );
+            old_root_caps(
+                &request,
+                &[
+                    (
+                        NAMED_BORROW,
+                        &[("touch", (1999, 91, 1)), ("touchTwo", (2042, 109, 1))],
+                        (191869, 4322, 5),
+                    ),
+                    (
+                        NAMED_LONE,
+                        &[
+                            ("touch", (1985, 84, 1)),
+                            ("touchTwo", (2028, 102, 1)),
+                            ("f", (1940, 60, 3)),
+                        ],
+                        (191084, 4261, 5),
+                    ),
+                    (
+                        NAMED_FORWARDED,
+                        &[
+                            ("touch", (1991, 87, 1)),
+                            ("touchTwo", (2034, 105, 1)),
+                            ("f", (1954, 67, 3)),
+                        ],
+                        (191279, 4268, 5),
+                    ),
+                    (
+                        NAMED_FORWARDED_PIPE,
+                        &[
+                            ("touch", (1991, 87, 1)),
+                            ("touchTwo", (2034, 105, 1)),
+                            ("f", (1956, 67, 3)),
+                        ],
+                        (191281, 4268, 5),
+                    ),
+                    (
+                        NAMED_DIRECT_EMPTY,
+                        &[
+                            ("touch", (1987, 85, 1)),
+                            ("touchTwo", (2030, 103, 1)),
+                            ("f", (1950, 63, 3)),
+                        ],
+                        (191154, 4264, 5),
+                    ),
+                    (
+                        NAMED_DIRECT_PAIR,
+                        &[
+                            ("touch", (1993, 88, 1)),
+                            ("touchTwo", (2036, 106, 1)),
+                            ("f", (1965, 71, 3)),
+                        ],
+                        (191350, 4272, 5),
+                    ),
+                    (
+                        NAMED_PIPED_PAIR,
+                        &[
+                            ("touch", (1993, 88, 1)),
+                            ("touchTwo", (2036, 106, 1)),
+                            ("f", (1965, 68, 3)),
+                        ],
+                        (191350, 4269, 5),
+                    ),
                 ],
             );
         },
