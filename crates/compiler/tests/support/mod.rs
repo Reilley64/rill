@@ -17,5 +17,13 @@ pub(crate) fn run_copied_probe(command: &mut Command) -> io::Result<Output> {
             .stderr(Stdio::piped())
             .spawn()?
     };
-    child.wait_with_output()
+    let output = child.wait_with_output()?;
+    if output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            stdout.contains("running 1 test\n") && stdout.contains("test result: ok. 1 passed;"),
+            "probe child ran no test or more than one:\n{stdout}"
+        );
+    }
+    Ok(output)
 }
