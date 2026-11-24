@@ -9,7 +9,7 @@
 use super::*;
 use compiler::analysis::Statistics;
 use compiler::analysis::ownership::{
-    GraphCompletion, GraphReport, Mir, Report, Terminator, analyze_ownership, lower_root,
+    GraphCompletion, GraphReport, Mir, Operation, Report, Terminator, analyze_ownership, lower_root,
 };
 use compiler::analysis::scalars::BodyOwner;
 use compiler::loader::DeclarationKind;
@@ -55,6 +55,9 @@ struct Admitted {
     completion: &'static str,
     targeted: (usize, usize, usize),
     graph: (usize, usize, usize),
+    /// The whole MIR of `f`, targeted and graph root alike: every block in
+    /// index order as (operation and next block, site). Empty when rejected.
+    sequence: &'static [(&'static str, &'static str)],
 }
 
 const SIBLINGS: &[Sibling] = &[
@@ -207,6 +210,32 @@ const ADMITTED: &[Admitted] = &[
         completion: "Checked",
         targeted: (3205, 594, 6),
         graph: (225819, 25606, 10),
+        sequence: &[
+            ("Copy goto 1", "pair[0]"),
+            ("Initialize goto 2", "13i32"),
+            ("EqualI32 goto 3", "pair[0] == 13i32"),
+            ("None branch 4 5", "pair[0] == 13i32"),
+            ("None goto 6", "pair[0] == 13i32 && pair[1] == 29i32"),
+            ("None goto 7", "pair[0] == 13i32 && pair[1] == 29i32"),
+            ("Copy goto 8", "pair[1]"),
+            ("Initialize goto 9", "pair[0] == 13i32 && pair[1] == 29i32"),
+            ("Initialize goto 10", "29i32"),
+            (
+                "Cleanup goto 11",
+                "{ let ok = pair[0] == 13i32 && pair[1] == 29i32; }",
+            ),
+            ("EqualI32 goto 9", "pair[1] == 29i32"),
+            ("Initialize goto 12", "true"),
+            ("Export goto 13", "return true;"),
+            (
+                "Cleanup goto 14",
+                "{ { let ok = pair[0] == 13i32 && pair[1] == 29i32; } return true; }",
+            ),
+            (
+                "None return",
+                "{ { let ok = pair[0] == 13i32 && pair[1] == 29i32; } return true; }",
+            ),
+        ],
     },
     Admitted {
         label: "let-and",
@@ -214,6 +243,32 @@ const ADMITTED: &[Admitted] = &[
         completion: "Checked",
         targeted: (3218, 596, 5),
         graph: (225772, 25608, 10),
+        sequence: &[
+            ("Copy goto 1", "pair[0]"),
+            ("Initialize goto 2", "13i32"),
+            ("EqualI32 goto 3", "pair[0] == 13i32"),
+            ("None branch 4 5", "pair[0] == 13i32"),
+            ("None goto 6", "pair[0] == 13i32 && pair[1] == 29i32"),
+            ("None goto 7", "pair[0] == 13i32 && pair[1] == 29i32"),
+            ("Copy goto 8", "pair[1]"),
+            ("Initialize goto 9", "pair[0] == 13i32 && pair[1] == 29i32"),
+            ("Initialize goto 10", "29i32"),
+            ("Copy goto 11", "ok"),
+            ("EqualI32 goto 9", "pair[1] == 29i32"),
+            ("Export goto 12", "return ok;"),
+            (
+                "Cleanup goto 13",
+                "{ let ok = pair[0] == 13i32 && pair[1] == 29i32; return ok; }",
+            ),
+            (
+                "Cleanup goto 14",
+                "{ let ok = pair[0] == 13i32 && pair[1] == 29i32; return ok; }",
+            ),
+            (
+                "None return",
+                "{ let ok = pair[0] == 13i32 && pair[1] == 29i32; return ok; }",
+            ),
+        ],
     },
     Admitted {
         label: "param-pair",
@@ -221,6 +276,30 @@ const ADMITTED: &[Admitted] = &[
         completion: "Checked",
         targeted: (3031, 495, 5),
         graph: (225464, 25507, 10),
+        sequence: &[
+            ("Copy goto 1", "pair[0]"),
+            ("Initialize goto 2", "13i32"),
+            ("EqualI32 goto 3", "pair[0] == 13i32"),
+            ("None branch 4 5", "pair[0] == 13i32"),
+            ("None goto 6", "pair[0] == 13i32 && pair[1] == 29i32"),
+            ("None goto 7", "pair[0] == 13i32 && pair[1] == 29i32"),
+            ("Copy goto 8", "pair[1]"),
+            ("Initialize goto 9", "pair[0] == 13i32 && pair[1] == 29i32"),
+            ("Initialize goto 10", "29i32"),
+            (
+                "Export goto 11",
+                "return pair[0] == 13i32 && pair[1] == 29i32;",
+            ),
+            ("EqualI32 goto 9", "pair[1] == 29i32"),
+            (
+                "Cleanup goto 12",
+                "{ return pair[0] == 13i32 && pair[1] == 29i32; }",
+            ),
+            (
+                "None return",
+                "{ return pair[0] == 13i32 && pair[1] == 29i32; }",
+            ),
+        ],
     },
     Admitted {
         label: "param-pair-eq",
@@ -228,6 +307,14 @@ const ADMITTED: &[Admitted] = &[
         completion: "Checked",
         targeted: (2589, 248, 4),
         graph: (224722, 25260, 10),
+        sequence: &[
+            ("Copy goto 1", "pair[0]"),
+            ("Initialize goto 2", "13i32"),
+            ("EqualI32 goto 3", "pair[0] == 13i32"),
+            ("Export goto 4", "return pair[0] == 13i32;"),
+            ("Cleanup goto 5", "{ return pair[0] == 13i32; }"),
+            ("None return", "{ return pair[0] == 13i32; }"),
+        ],
     },
     Admitted {
         label: "reversed",
@@ -235,6 +322,30 @@ const ADMITTED: &[Admitted] = &[
         completion: "Checked",
         targeted: (3039, 497, 5),
         graph: (225472, 25509, 10),
+        sequence: &[
+            ("Initialize goto 1", "13i32"),
+            ("Copy goto 2", "pair[0]"),
+            ("EqualI32 goto 3", "13i32 == pair[0]"),
+            ("None branch 4 5", "13i32 == pair[0]"),
+            ("None goto 6", "13i32 == pair[0] && 29i32 == pair[1]"),
+            ("None goto 7", "13i32 == pair[0] && 29i32 == pair[1]"),
+            ("Initialize goto 8", "29i32"),
+            ("Initialize goto 9", "13i32 == pair[0] && 29i32 == pair[1]"),
+            ("Copy goto 10", "pair[1]"),
+            (
+                "Export goto 11",
+                "return 13i32 == pair[0] && 29i32 == pair[1];",
+            ),
+            ("EqualI32 goto 9", "29i32 == pair[1]"),
+            (
+                "Cleanup goto 12",
+                "{ return 13i32 == pair[0] && 29i32 == pair[1]; }",
+            ),
+            (
+                "None return",
+                "{ return 13i32 == pair[0] && 29i32 == pair[1]; }",
+            ),
+        ],
     },
     Admitted {
         label: "grouped",
@@ -242,6 +353,39 @@ const ADMITTED: &[Admitted] = &[
         completion: "Checked",
         targeted: (3047, 499, 7),
         graph: (225720, 25511, 10),
+        sequence: &[
+            ("Copy goto 1", "pair[0]"),
+            ("Initialize goto 2", "13i32"),
+            ("EqualI32 goto 3", "pair[0] == 13i32"),
+            ("None branch 4 5", "((pair[0] == 13i32))"),
+            (
+                "None goto 6",
+                "((pair[0] == 13i32)) && ((pair[1] == 29i32))",
+            ),
+            (
+                "None goto 7",
+                "((pair[0] == 13i32)) && ((pair[1] == 29i32))",
+            ),
+            ("Copy goto 8", "pair[1]"),
+            (
+                "Initialize goto 9",
+                "((pair[0] == 13i32)) && ((pair[1] == 29i32))",
+            ),
+            ("Initialize goto 10", "29i32"),
+            (
+                "Export goto 11",
+                "return ((pair[0] == 13i32)) && ((pair[1] == 29i32));",
+            ),
+            ("EqualI32 goto 9", "pair[1] == 29i32"),
+            (
+                "Cleanup goto 12",
+                "{ return ((pair[0] == 13i32)) && ((pair[1] == 29i32)); }",
+            ),
+            (
+                "None return",
+                "{ return ((pair[0] == 13i32)) && ((pair[1] == 29i32)); }",
+            ),
+        ],
     },
     Admitted {
         label: "grouped-op",
@@ -249,6 +393,39 @@ const ADMITTED: &[Admitted] = &[
         completion: "Checked",
         targeted: (3047, 499, 6),
         graph: (225720, 25511, 10),
+        sequence: &[
+            ("Copy goto 1", "pair[0]"),
+            ("Initialize goto 2", "13i32"),
+            ("EqualI32 goto 3", "(pair[0]) == (13i32)"),
+            ("None branch 4 5", "(pair[0]) == (13i32)"),
+            (
+                "None goto 6",
+                "(pair[0]) == (13i32) && (pair[1]) == (29i32)",
+            ),
+            (
+                "None goto 7",
+                "(pair[0]) == (13i32) && (pair[1]) == (29i32)",
+            ),
+            ("Copy goto 8", "pair[1]"),
+            (
+                "Initialize goto 9",
+                "(pair[0]) == (13i32) && (pair[1]) == (29i32)",
+            ),
+            ("Initialize goto 10", "29i32"),
+            (
+                "Export goto 11",
+                "return (pair[0]) == (13i32) && (pair[1]) == (29i32);",
+            ),
+            ("EqualI32 goto 9", "(pair[1]) == (29i32)"),
+            (
+                "Cleanup goto 12",
+                "{ return (pair[0]) == (13i32) && (pair[1]) == (29i32); }",
+            ),
+            (
+                "None return",
+                "{ return (pair[0]) == (13i32) && (pair[1]) == (29i32); }",
+            ),
+        ],
     },
     Admitted {
         label: "mut-pair",
@@ -256,6 +433,26 @@ const ADMITTED: &[Admitted] = &[
         completion: "Checked",
         targeted: (2878, 408, 4),
         graph: (225491, 25420, 10),
+        sequence: &[
+            ("Initialize goto 1", "1i32"),
+            ("Initialize goto 2", "2i32"),
+            ("Initialize goto 3", "[1i32, 2i32]"),
+            ("Initialize goto 4", "5i32"),
+            ("None goto 5", "pair[0] = 5i32;"),
+            ("Install goto 6", "pair[0] = 5i32;"),
+            ("Copy goto 7", "pair[0]"),
+            ("Initialize goto 8", "13i32"),
+            ("EqualI32 goto 9", "pair[0] == 13i32"),
+            ("Export goto 10", "return pair[0] == 13i32;"),
+            (
+                "Cleanup goto 11",
+                "{ let mut pair: [i32, i32] = [1i32, 2i32]; pair[0] = 5i32; return pair[0] == 13i32; }",
+            ),
+            (
+                "None return",
+                "{ let mut pair: [i32, i32] = [1i32, 2i32]; pair[0] = 5i32; return pair[0] == 13i32; }",
+            ),
+        ],
     },
     Admitted {
         label: "sum-and",
@@ -263,6 +460,24 @@ const ADMITTED: &[Admitted] = &[
         completion: "Checked",
         targeted: (2721, 415, 6),
         graph: (225215, 25427, 10),
+        sequence: &[
+            ("CheckedI32Add goto 1", "a + b"),
+            ("Initialize goto 2", "13i32"),
+            ("EqualI32 goto 3", "a + b == 13i32"),
+            ("None branch 4 5", "a + b == 13i32"),
+            ("None goto 6", "a + b == 13i32 && a * 2i32 == b"),
+            ("None goto 7", "a + b == 13i32 && a * 2i32 == b"),
+            ("CheckedI32Multiply goto 8", "a * 2i32"),
+            ("Initialize goto 9", "a + b == 13i32 && a * 2i32 == b"),
+            ("Copy goto 10", "b"),
+            ("Export goto 11", "return a + b == 13i32 && a * 2i32 == b;"),
+            ("EqualI32 goto 9", "a * 2i32 == b"),
+            (
+                "Cleanup goto 12",
+                "{ return a + b == 13i32 && a * 2i32 == b; }",
+            ),
+            ("None return", "{ return a + b == 13i32 && a * 2i32 == b; }"),
+        ],
     },
     Admitted {
         label: "calls-and",
@@ -270,6 +485,26 @@ const ADMITTED: &[Admitted] = &[
         completion: "Checked",
         targeted: (4456, 392, 5),
         graph: (225258, 25366, 10),
+        sequence: &[
+            ("Call goto 1", "seven()"),
+            ("Initialize goto 2", "7i32"),
+            ("EqualI32 goto 3", "seven() == 7i32"),
+            ("None branch 4 5", "seven() == 7i32"),
+            ("None goto 6", "seven() == 7i32 && seven() == 8i32"),
+            ("None goto 7", "seven() == 7i32 && seven() == 8i32"),
+            ("Call goto 8", "seven()"),
+            ("Initialize goto 9", "seven() == 7i32 && seven() == 8i32"),
+            ("Initialize goto 10", "8i32"),
+            (
+                "Export goto 11",
+                "return seven() == 7i32 && seven() == 8i32;",
+            ),
+            ("EqualI32 goto 9", "seven() == 8i32"),
+            (
+                "None return",
+                "{ return seven() == 7i32 && seven() == 8i32; }",
+            ),
+        ],
     },
     Admitted {
         label: "lit-one",
@@ -277,6 +512,23 @@ const ADMITTED: &[Admitted] = &[
         completion: "Checked",
         targeted: (2307, 212, 5),
         graph: (224621, 25225, 10),
+        sequence: &[
+            ("Initialize goto 1", "13i32"),
+            ("CommitListI32 goto 2", "[13i32]"),
+            ("Cleanup goto 3", "dispose(input)"),
+            ("Initialize goto 4", "dispose(input)"),
+            ("None goto 5", "dispose(input);"),
+            ("Initialize goto 6", "true"),
+            ("Export goto 7", "return true;"),
+            (
+                "Cleanup goto 8",
+                "{ let input: List<i32> = [13i32]; dispose(input); return true; }",
+            ),
+            (
+                "None return",
+                "{ let input: List<i32> = [13i32]; dispose(input); return true; }",
+            ),
+        ],
     },
     Admitted {
         label: "lit-two",
@@ -284,6 +536,24 @@ const ADMITTED: &[Admitted] = &[
         completion: "Checked",
         targeted: (2384, 255, 5),
         graph: (224758, 25268, 10),
+        sequence: &[
+            ("Initialize goto 1", "13i32"),
+            ("Initialize goto 2", "29i32"),
+            ("CommitListI32 goto 3", "[13i32, 29i32]"),
+            ("Cleanup goto 4", "dispose(input)"),
+            ("Initialize goto 5", "dispose(input)"),
+            ("None goto 6", "dispose(input);"),
+            ("Initialize goto 7", "true"),
+            ("Export goto 8", "return true;"),
+            (
+                "Cleanup goto 9",
+                "{ let input: List<i32> = [13i32, 29i32]; dispose(input); return true; }",
+            ),
+            (
+                "None return",
+                "{ let input: List<i32> = [13i32, 29i32]; dispose(input); return true; }",
+            ),
+        ],
     },
     Admitted {
         label: "lit-leak",
@@ -291,6 +561,21 @@ const ADMITTED: &[Admitted] = &[
         completion: "Checked",
         targeted: (2225, 181, 4),
         graph: (224359, 25194, 10),
+        sequence: &[
+            ("Initialize goto 1", "13i32"),
+            ("Initialize goto 2", "29i32"),
+            ("CommitListI32 goto 3", "[13i32, 29i32]"),
+            ("Initialize goto 4", "true"),
+            ("Export goto 5", "return true;"),
+            (
+                "Cleanup goto 6",
+                "{ let input: List<i32> = [13i32, 29i32]; return true; }",
+            ),
+            (
+                "None return",
+                "{ let input: List<i32> = [13i32, 29i32]; return true; }",
+            ),
+        ],
     },
     Admitted {
         label: "lit-mut",
@@ -298,6 +583,24 @@ const ADMITTED: &[Admitted] = &[
         completion: "Checked",
         targeted: (2384, 255, 5),
         graph: (224758, 25268, 10),
+        sequence: &[
+            ("Initialize goto 1", "13i32"),
+            ("Initialize goto 2", "29i32"),
+            ("CommitListI32 goto 3", "[13i32, 29i32]"),
+            ("Cleanup goto 4", "dispose(input)"),
+            ("Initialize goto 5", "dispose(input)"),
+            ("None goto 6", "dispose(input);"),
+            ("Initialize goto 7", "true"),
+            ("Export goto 8", "return true;"),
+            (
+                "Cleanup goto 9",
+                "{ let mut input: List<i32> = [13i32, 29i32]; dispose(input); return true; }",
+            ),
+            (
+                "None return",
+                "{ let mut input: List<i32> = [13i32, 29i32]; dispose(input); return true; }",
+            ),
+        ],
     },
     Admitted {
         label: "lit-scoped",
@@ -305,6 +608,24 @@ const ADMITTED: &[Admitted] = &[
         completion: "Checked",
         targeted: (2388, 256, 6),
         graph: (224822, 25269, 10),
+        sequence: &[
+            ("Initialize goto 1", "13i32"),
+            ("Initialize goto 2", "29i32"),
+            ("CommitListI32 goto 3", "[13i32, 29i32]"),
+            ("Cleanup goto 4", "dispose(input)"),
+            ("Initialize goto 5", "dispose(input)"),
+            ("None goto 6", "dispose(input);"),
+            (
+                "Cleanup goto 7",
+                "{ let input: List<i32> = [13i32, 29i32]; dispose(input); }",
+            ),
+            ("Initialize goto 8", "true"),
+            ("Export goto 9", "return true;"),
+            (
+                "None return",
+                "{ { let input: List<i32> = [13i32, 29i32]; dispose(input); } return true; }",
+            ),
+        ],
     },
     Admitted {
         label: "lit-loop",
@@ -312,6 +633,34 @@ const ADMITTED: &[Admitted] = &[
         completion: "Checked",
         targeted: (2661, 407, 7),
         graph: (225276, 25420, 10),
+        sequence: &[
+            ("Copy goto 1", "again"),
+            ("None branch 2 3", "again"),
+            ("Initialize goto 4", "13i32"),
+            ("Initialize goto 5", "true"),
+            ("Initialize goto 6", "29i32"),
+            ("Export goto 7", "return true;"),
+            ("CommitListI32 goto 8", "[13i32, 29i32]"),
+            (
+                "Cleanup goto 9",
+                "{ while (again) { let input: List<i32> = [13i32, 29i32]; dispose(input); } return true; }",
+            ),
+            ("Cleanup goto 10", "dispose(input)"),
+            (
+                "None return",
+                "{ while (again) { let input: List<i32> = [13i32, 29i32]; dispose(input); } return true; }",
+            ),
+            ("Initialize goto 11", "dispose(input)"),
+            ("None goto 12", "dispose(input);"),
+            (
+                "Cleanup goto 13",
+                "{ let input: List<i32> = [13i32, 29i32]; dispose(input); }",
+            ),
+            (
+                "None goto 0",
+                "while (again) { let input: List<i32> = [13i32, 29i32]; dispose(input); }",
+            ),
+        ],
     },
     Admitted {
         label: "lit-arg",
@@ -319,6 +668,14 @@ const ADMITTED: &[Admitted] = &[
         completion: "Checked",
         targeted: (4326, 278, 6),
         graph: (225055, 25247, 10),
+        sequence: &[
+            ("Initialize goto 1", "13i32"),
+            ("Initialize goto 2", "29i32"),
+            ("CommitListI32 goto 3", "[13i32, 29i32]"),
+            ("Call goto 4", "g([13i32, 29i32])"),
+            ("None goto 5", "g([13i32, 29i32]);"),
+            ("None return", "{ g([13i32, 29i32]); }"),
+        ],
     },
     Admitted {
         label: "lit-moved-twice",
@@ -326,6 +683,7 @@ const ADMITTED: &[Admitted] = &[
         completion: "SourceRejected",
         targeted: (2410, 258, 5),
         graph: (225025, 25271, 10),
+        sequence: &[],
     },
 ];
 
@@ -400,18 +758,44 @@ fn graph_of<'g>(receipt: &TypedReceipt<'_, 'g>) -> GraphReport<'g> {
     analyze_ownership(receipt, AnalysisLimits::default())
 }
 
+fn kind(operation: &Operation<'_>) -> String {
+    format!("{operation:?}")
+        .split(|c: char| !c.is_alphanumeric())
+        .next()
+        .unwrap()
+        .to_string()
+}
+
+/// `(operation name and where control goes next, site text)` for every block
+/// in index order: the whole MIR, branches and loops included (metering rule 9).
+fn blocks(mir: &Mir<'_>) -> Vec<(String, String)> {
+    mir.blocks
+        .iter()
+        .map(|step| {
+            let next = match step.terminator {
+                Terminator::Goto(next) => format!("goto {next}"),
+                Terminator::Branch { yes, no } => format!("branch {yes} {no}"),
+                Terminator::Return => "return".to_string(),
+                other => panic!("unexpected terminator {other:?}"),
+            };
+            (
+                format!("{} {next}", kind(&step.operation)),
+                step.site.span.bytes().escape_ascii().to_string(),
+            )
+        })
+        .collect()
+}
+
 /// `(operation name, site text)` for each block along the straight path from
 /// `block` to a branch or return, with `None` operations kept (they end scratch).
 fn walk(mir: &Mir<'_>, mut block: usize) -> (Vec<(String, String)>, Terminator) {
     let mut path = Vec::new();
     for _ in 0..=mir.blocks.len() {
         let step = &mir.blocks[block];
-        let name = format!("{:?}", step.operation)
-            .split(|c: char| !c.is_alphanumeric())
-            .next()
-            .unwrap()
-            .to_string();
-        path.push((name, step.site.span.bytes().escape_ascii().to_string()));
+        path.push((
+            kind(&step.operation),
+            step.site.span.bytes().escape_ascii().to_string(),
+        ));
         match step.terminator {
             Terminator::Goto(next) => block = next,
             terminator => return (path, terminator),
@@ -726,7 +1110,20 @@ fn admitted_shapes_check_at_exact_caps() {
             match shape.completion {
                 "Checked" => {
                     assert_eq!(target.completion(), Completion::Checked, "{context}");
-                    assert!(target.mir().is_some() && target.findings().is_empty());
+                    assert!(target.findings().is_empty());
+                    let expected = pairs(shape.sequence);
+                    assert_eq!(blocks(target.mir().unwrap()), expected, "{context}");
+                    let whole = graph_of(receipt);
+                    let declaration = decl(module, "f");
+                    let root = whole
+                        .roots()
+                        .iter()
+                        .find(|r| {
+                            r.site().module == &module.key && r.site().node == declaration.node
+                        })
+                        .unwrap();
+                    assert_eq!(root.ordinary_completion(), Completion::Checked, "{context}");
+                    assert_eq!(blocks(root.ordinary_mir().unwrap()), expected, "{context}");
                 }
                 _ => {
                     // A use after the list is disposed is the ordinary finding.
@@ -775,6 +1172,13 @@ fn grouped_operands_add_depth_not_operations() {
                 })
                 .collect();
             let depth = if context.starts_with("bare") { 5 } else { 7 };
+            let admitted = if depth == 5 { "param-pair" } else { "grouped" };
+            let shape = ADMITTED.iter().find(|s| s.label == admitted).unwrap();
+            assert_eq!(
+                blocks(target.mir().unwrap()),
+                pairs(shape.sequence),
+                "{context}"
+            );
             assert_eq!(target.statistics().max_depth, depth, "{context}");
             assert_eq!(
                 names,
