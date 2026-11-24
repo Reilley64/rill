@@ -72,9 +72,34 @@ No rule-1 exception is used and the standing ruling (record or enum field-list l
 
 The full M5 binary and `mise run check` run in hosted CI only.
 
+## Finish pass (city bead ci-81k1, 2026-11-24): the chief's conditions
+
+Chief ruling of 2026-11-24 12:37 AEDT (`chief-rulings-9.md`): the `&mut` member admission is accepted on conditions. All tests are in `m5/rfc_cases/o07_forms.rs`, both installed modes, each root as a targeted query and as the ordinary graph root, exact and one short on each axis (the harness asserts `ResourceLimit` with no MIR and no finding), and each module's typed and whole-graph caps. A `Checked` root also asserts its whole MIR as one ordered list (rule 9; `Operation::None` join fillers are left out). No source change, no existing test or cap moved, no rule-1 exception used.
+
+**Condition 1 and 2, by form** (`work / entries / depth`; sites are the finding's site, then its related site):
+
+| Form | Test | Accepted root, caps | Rejecting twin, caps |
+| --- | --- | --- | --- |
+| `withText`: `Named { first: &mut a, name: "x" }`, then `*holder.first += 1i32` | `o07_forms::with_text_record_pins_its_sequence_and_the_overlap_twin` (typed 327,751 / 48,156 / 12; graph `SourceRejected` 189,430 / 4,774 / 5) | `withText` 3,029 / 486 / 5; MIR: init a, borrow mut a, init name, init holder, deref, add, install, export, `cleanup [drop holder.name, end holder.first, end holder, end a]` | `withTextOverlap` (`Named2 { first: &mut a, second: &a, name: "x" }`) R0201 at `&a`, related `&mut a`, 2,510 / 225 / 5 |
+| the record parameter, read and passed to a call | `o07_forms::record_parameter_pins_its_sequences_and_the_source_use_twins` (typed 335,232 / 49,177 / 12; graph `SourceRejected` 199,346 / 6,361 / 5) | `readFirst` 2,532 / 236 / 3 (`*h.first`), `readSecond` 2,533 / 236 / 3 (`*h.second`), `forward` 5,524 / 585 / 5 (moves `h` into `readFirst(h)`), `callRead` 5,906 / 771 / 5 (builds the record from `&mut a`, `&b`, passes it; `cleanup [end b, end a]`) | with the record live, `readOwnerWhileLive` (`let seen = a;`) R0201 at `a`, related `&mut a`, 3,239 / 476 / 5; `borrowOwnerWhileLive` (`&a`) R0201 at `&a`, related `&mut a`, 3,241 / 476 / 5; `writeOwnerWhileLive` (`a = 5i32;`) **R0203** at `a = 5i32;`, related `&mut a`, 3,299 / 511 / 5 |
+| the function returning such a record | `o07_forms::returning_function_pins_its_sequence_its_caller_and_the_local_twins` (typed 329,158 / 48,370 / 12; graph `SourceRejected` 191,732 / 4,961 / 5) | `make(p: &mut i32, q: &i32): Holder` 2,556 / 247 / 4 (move `p`, copy `q`, init, export, `cleanup [end q: &i32]`); its caller `useMake` is `Incomplete` at `make(&mut a, &b)`, 2,330 / 136 / 3 | `makeLocalMut` (`&mut` member borrows a body-local) R0202 at the `return`, related `a`, 2,550 / 252 / 5; `makeLocalBound` (the same through `let h`) R0202 at `return h;`, related `a`, 3,047 / 376 / 5 |
+
+Why these codes: a read or a borrow of the owner conflicts with the live exclusive loan, which is the access conflict, R0201 (as for `readOwnerWhileHeld` in `LOANS`). Assigning to the owner replaces a borrowed source, which the existing rules give as R0203 (the write rule, as for any live loan). Returning a loan of a local is R0202.
+
+Every twin was rejected on the first run. No accepted twin, no wrong acceptance. Probed beyond the tests with the same result: `Holder { first: &mut *p, second: &*p }` returned from a function that takes `p: &mut i32` is R0201 at `&*p`, related `&mut *p`; the record is consumed by the call in `callRead`, so a read of `a` after `readFirst(h)` checks.
+
+**Not expressible.** The parameter form has no twin inside the callee: a write through either member of a parameter (`*h.first += 1i32`, `*h.second += 1i32`) is a typed `ReadOnly` finding (the parameter binding is not `mut`), so the typed pass stops it before ownership; probe observation, not a pinned test. The twins for the parameter are therefore the caller's, above.
+
+**Condition 3** (both `Incomplete`, so a later change that admits them fails these tests):
+
+| Shape | Test | Outcome and caps |
+| --- | --- | --- |
+| tuple with an `&mut` element, `[&mut a, &b]` | `o07_forms::tuple_with_an_exclusive_element_stays_typed_incomplete` | typed `Incomplete`, ownership never receives it: `finding R0100 @ &b`, `pending TypedInput @ [&mut a, &b]`, `pending Storage @ let t = [&mut a, &b];`; typed 321,947 / 47,478 / 12, exact and one short |
+| nested reference members `&&i32` and `&mut &mut i32`; a record whose member is a record with an `&mut` member, bound (`Wrap { inner: inner, .. }`) or written in place | `o07_forms::nested_reference_shapes_stay_incomplete` (typed 333,580 / 48,935 / 12; graph `Incomplete` 192,245 / 4,517 / 5) | `refToShared` and `refToRef` `Incomplete` at `h`, 2,345 / 146 / 1 each; `nestedHolder` at `outer`, 2,707 / 204 / 1; `nestedLiteral` at `outer`, 2,343 / 142 / 1 |
+
 ## Not established
 
 - No Rill program ran: these are compiler judgments over MIR (M6).
-- Only an `&mut i32` field of a record without a custom disposer is admitted. `&mut bool`, `&mut string`, `&mut i64` and an `&mut` member of a custom-disposer record stay `Incomplete` (pinned at the parent caps). A nested reference was not probed. A tuple with an `&mut` element is typed `Incomplete` (`pending TypedInput`, R0100 on the shared element), so M5 never reaches it: probe observation, not a pinned test.
-- Only `*record.field += literal` writes through the member, on a local binding. `=` and other operators, a grouped target, moving the member out and reborrowing it stay `Incomplete` at the use. Probe observations, not pinned tests: a parameter of record type with an `&mut` member can be read (`*h.first`, `*h.second`) and passed on to a call that reads it, and writing through it is a typed `ReadOnly` finding; a function that returns such a record (`make(p, q): Holder`) checks, and a caller of it stays `Incomplete` at the call.
-- A record holding a `&mut i32` field next to a `string` field checks (`withText`); its cleanup order against the loan is the existing aggregate order, not separately pinned beyond that test.
+- Only an `&mut i32` field of a record without a custom disposer is admitted. `&mut bool`, `&mut string`, `&mut i64` and an `&mut` member of a custom-disposer record stay `Incomplete` (pinned at the parent caps). The tuple and the nested-reference shapes stay `Incomplete` and are pinned by the finish pass (condition 3, above).
+- Only `*record.field += literal` writes through the member, on a local binding. `=` and other operators, a grouped target, moving the member out and reborrowing it stay `Incomplete` at the use (pinned: `assignThrough`, `groupedTarget`, `movedOut`, `reborrowed`).
+- A record holding a `&mut i32` field next to a `string` field checks (`withText`); its cleanup order is the whole list pinned in `o07_forms`.
