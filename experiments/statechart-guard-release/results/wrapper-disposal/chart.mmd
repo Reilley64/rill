@@ -1,0 +1,14 @@
+---
+title: "Disposal of a wrapper that owns a lock guard"
+---
+stateDiagram-v2
+  s0: No disposal in progress
+  s1: Custom disposer running, lock guard field still owned
+  s2: Remaining-field cleanup owes the lock guard release
+  s3: Custom disposer running, it released the lock guard field
+  [*] --> s0
+  s0 --> s1: disposal of a wrapper begins
+  s1 --> s2: the custom disposer returns without touching the field
+  s1 --> s3: the custom disposer disposes the lock guard field
+  s2 --> s0: the canonical provider releases the lock guard
+  s3 --> s0: the custom disposer returns, no field is left to clean

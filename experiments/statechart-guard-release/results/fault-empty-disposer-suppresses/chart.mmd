@@ -1,0 +1,110 @@
+---
+title: "Lock guard release across replacement and cancellation"
+---
+stateDiagram-v2
+  direction LR
+  state "Legend" as legend {
+    lg0: delivery possible
+    lg1: delivery deferred
+    lg2: left
+    lg3: Breaks DeliveredCancellationExitReleasesEachLockGuardOnce or DeliveryAfterInstallationCleansInstalledValueOnce or NoReleaseSuppressedByWrapper or NormalExitReleasesEachLockGuardOnce or PropagationExitReleasesEachLockGuardOnce in some cases
+    lg4: Path to the DeliveredCancellationExitReleasesEachLockGuardOnce or DeliveryAfterInstallationCleansInstalledValueOnce or NoReleaseSuppressedByWrapper or NormalExitReleasesEachLockGuardOnce or PropagationExitReleasesEachLockGuardOnce bug
+  }
+  class lg0 blue
+  class lg1 orange
+  class lg2 teal
+  class lg3 mayBreak
+  class lg4 bugPath
+  state "At the same time" as all {
+    state "Frame" as r0 {
+      s0: Entry budget check
+      s1: Loop, owns both lock guards
+      s2: Cleanup on delivered cancellation exit
+      s3: Old value under disposal
+      s4: Written dispose releases the old lock guard
+      s5: Cleanup on propagation exit
+      s6: Old value gone, replacement not yet installed
+      s7: Loop, old lock guard already released
+      s8: Replacement installed, next budget check
+      s9: Ordinary suffix
+      s10: Cleanup on normal exit
+      s11: Left by delivered cancellation exit
+      s12: Left by propagation exit
+      s13: Left by normal exit
+      [*] --> s0
+      s0 --> s1: the check passes without delivery
+      s1 --> s3: the replacement is complete, delivery is deferred
+      s1 --> s4: the body disposes the old value
+      s1 --> s5: the frame propagates a failure
+      s0 --> s2: the check yields and delivers the cancellation [when Pending]
+      s3 --> s6: the custom disposer returns
+      s4 --> s7: the custom disposer returns
+      s1 --> s2: the loop backedge yields and delivers the cancellation [when Pending]
+      s6 --> s8: the replacement is installed [when Clear]
+      s7 --> s6: the replacement is complete, delivery is deferred
+      s7 --> s5: the frame propagates a failure
+      s8 --> s9: the check passes without delivery
+      s6 --> s2: the replacement is installed, unmasking delivers the cancellation [when Pending]
+      s7 --> s2: the loop backedge yields and delivers the cancellation [when Pending]
+      s9 --> s10: the frame returns
+      s9 --> s5: the frame propagates a failure
+      s8 --> s2: the check yields and delivers the cancellation [when Pending]
+      s2 --> s11: every owned lock guard is released
+      s5 --> s12: every owned lock guard is released
+      s10 --> s13: every owned lock guard is released
+    }
+    --
+    state "Cancellation request" as r1 {
+      s14: Clear
+      s15: Pending
+      s16: Delivered
+      [*] --> s14
+      s14 --> s15: a cancellation request arrives [unless Left by normal exit or Left by propagation exit]
+      s15 --> s16: the check yields and delivers the cancellation [when Entry budget check or Replacement installed, next budget check]
+      s15 --> s16: the loop backedge yields and delivers the cancellation [when Loop, old lock guard already released or Loop, owns both lock guards]
+      s15 --> s16: the replacement is installed, unmasking delivers the cancellation [when Old value gone, replacement not yet installed]
+    }
+  }
+  classDef mayBreak fill:#fff3e6,stroke:#e8730c,stroke-width:2.5px,color:#b85a06
+  class s0 blue
+  class s0 bugPath
+  class s1 blue
+  class s1 bugPath
+  class s2 orange
+  class s2 mayBreak
+  class s2 bugPath
+  class s3 orange
+  class s3 bugPath
+  class s4 orange
+  class s4 bugPath
+  class s5 orange
+  class s5 mayBreak
+  class s5 bugPath
+  class s6 orange
+  class s6 mayBreak
+  class s6 bugPath
+  class s7 blue
+  class s7 mayBreak
+  class s7 bugPath
+  class s8 blue
+  class s8 mayBreak
+  class s8 bugPath
+  class s9 blue
+  class s9 mayBreak
+  class s9 bugPath
+  class s10 orange
+  class s10 mayBreak
+  class s10 bugPath
+  class s11 teal
+  class s11 mayBreak
+  class s11 bugPath
+  class s12 teal
+  class s12 mayBreak
+  class s12 bugPath
+  class s13 teal
+  class s13 mayBreak
+  class s13 bugPath
+  class s14 bugPath
+  class s15 bugPath
+  class s16 mayBreak
+  class s16 bugPath

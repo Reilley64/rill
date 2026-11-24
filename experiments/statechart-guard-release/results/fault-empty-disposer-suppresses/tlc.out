@@ -1,0 +1,70 @@
+TLC2 Version 2.19 of 08 August 2024 (rev: 5a47802)
+Warning: Please run the Java VM which executes TLC with a throughput optimized garbage collector by passing the "-XX:+UseParallelGC" property.
+(Use the -nowarning option to disable this warning.)
+Running breadth-first search Model-Checking with fp 0 and seed 9213652591662153611 with 1 worker on 8 cores with 6144MB heap and 64MB offheap memory [pid: 87879] (Mac OS X 27.0.1 aarch64, Eclipse Adoptium 25.0.5.1 x86_64, MSBDiskFPSet, DiskStateQueue).
+Parsing file /private/tmp/statechart-ri-h4ec/LockGuardRelease.tla
+Parsing file /private/var/folders/7q/50mkmdqd4yj15bn0pf4xqzkw0000gn/T/statechart-4t79tm/statechart-hmsuig/tmp-verdict-1/Naturals.tla
+Semantic processing of module Naturals
+Semantic processing of module LockGuardRelease
+Starting... (2026-11-24 12:42:13)
+Computing initial states...
+Finished computing initial states: 1 distinct state generated at 2026-11-24 12:42:13.
+Error: Invariant NoReleaseSuppressedByWrapper is violated.
+Error: The behavior up to this point is:
+State 1: <Initial predicate>
+/\ releases = [old |-> 0, new |-> 0]
+/\ duringOld = FALSE
+/\ todo = {}
+/\ request = "clear"
+/\ dstep = "idle"
+/\ content = [destination |-> "old", replacement |-> "new"]
+/\ pc = "entry check"
+/\ exit = "none"
+/\ disposing = "none"
+/\ disposed = {}
+/\ deliveredAt = "none"
+
+State 2: <EntryCheckPasses line 142, col 5 to line 144, col 111 of module LockGuardRelease>
+/\ releases = [old |-> 0, new |-> 0]
+/\ duringOld = FALSE
+/\ todo = {}
+/\ request = "clear"
+/\ dstep = "idle"
+/\ content = [destination |-> "old", replacement |-> "new"]
+/\ pc = "loop"
+/\ exit = "none"
+/\ disposing = "none"
+/\ disposed = {}
+/\ deliveredAt = "none"
+
+State 3: <WrittenRelease line 157, col 5 to line 161, col 93 of module LockGuardRelease>
+/\ releases = [old |-> 0, new |-> 0]
+/\ duringOld = FALSE
+/\ todo = {}
+/\ request = "clear"
+/\ dstep = "custom disposer"
+/\ content = [destination |-> "old", replacement |-> "new"]
+/\ pc = "written release"
+/\ exit = "none"
+/\ disposing = "destination"
+/\ disposed = {}
+/\ deliveredAt = "none"
+
+State 4: <EmptyDisposerReturns line 117, col 5 to line 122, col 58 of module LockGuardRelease>
+/\ releases = [old |-> 0, new |-> 0]
+/\ duringOld = FALSE
+/\ todo = {}
+/\ request = "clear"
+/\ dstep = "idle"
+/\ content = [destination |-> "vacant", replacement |-> "new"]
+/\ pc = "loop"
+/\ exit = "none"
+/\ disposing = "none"
+/\ disposed = {"old"}
+/\ deliveredAt = "none"
+
+17 states generated, 15 distinct states found, 8 states left on queue.
+The depth of the complete state graph search is 4.
+The average outdegree of the complete state graph is 2 (minimum is 1, the maximum 4 and the 95th percentile is 4).
+Finished in 00s at (2026-11-24 12:42:13)
+

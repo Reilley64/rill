@@ -1,0 +1,63 @@
+---
+title: "Lock guard release across replacement and cancellation"
+---
+stateDiagram-v2
+  direction LR
+  state "Legend" as legend {
+    lg0: delivery possible
+    lg1: delivery deferred
+    lg2: left
+  }
+  class lg0 blue
+  class lg1 orange
+  class lg2 teal
+  state "At the same time" as all {
+    state "Frame" as r0 {
+      s0: Entry budget check
+      s1: Loop, owns both lock guards
+      s2: Old value under disposal
+      s3: Written dispose releases the old lock guard
+      s4: Cleanup on propagation exit
+      s5: Old value gone, replacement not yet installed
+      s6: Loop, old lock guard already released
+      s7: Replacement installed, next budget check
+      s8: Ordinary suffix
+      s9: Cleanup on normal exit
+      s10: Left by propagation exit
+      s11: Left by normal exit
+      [*] --> s0
+      s0 --> s1: the check passes without delivery
+      s1 --> s2: the replacement is complete, delivery is deferred
+      s1 --> s3: the body disposes the old value
+      s1 --> s4: the frame propagates a failure
+      s2 --> s5: the lock guard is released
+      s3 --> s6: the lock guard is released
+      s5 --> s7: the replacement is installed
+      s6 --> s5: the replacement is complete, delivery is deferred
+      s6 --> s4: the frame propagates a failure
+      s7 --> s8: the check passes without delivery
+      s8 --> s9: the frame returns
+      s8 --> s4: the frame propagates a failure
+      s4 --> s10: every owned lock guard is released
+      s9 --> s11: every owned lock guard is released
+    }
+    --
+    state "Cancellation request" as r1 {
+      s12: Clear
+      s13: Pending
+      [*] --> s12
+      s12 --> s13: a cancellation request arrives [unless Left by normal exit or Left by propagation exit]
+    }
+  }
+  class s0 blue
+  class s1 blue
+  class s2 orange
+  class s3 orange
+  class s4 orange
+  class s5 orange
+  class s6 blue
+  class s7 blue
+  class s8 blue
+  class s9 orange
+  class s10 teal
+  class s11 teal
