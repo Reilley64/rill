@@ -108,12 +108,7 @@ impl<'g> ResultUseReport<'g> {
         Ok(())
     }
 
-    pub(super) fn attach_consumed_receivers(
-        &mut self,
-        bodies: &mut GenericReport<'g>,
-        budget: &mut Budget,
-    ) -> Work<()> {
-        budget.step(self.consumed_receivers.len())?;
+    pub(super) fn attach_consumed_receivers(&mut self, bodies: &mut GenericReport<'g>) {
         for index in std::mem::take(&mut self.consumed_receivers) {
             let invocation = bodies
                 .typed_node_mut(index)
@@ -123,7 +118,6 @@ impl<'g> ResultUseReport<'g> {
                 .expect("checked invocation");
             invocation.consumed_receiver = true;
         }
-        Ok(())
     }
 
     pub(super) fn attach_option_iterators(

@@ -10,8 +10,8 @@ alias	normal	main.rill#Expectation@1858	1ac2f2c93fc1f130
 alias	normal	main.rill#Expectation@2303	45782bd224cf2a3b
 alias	normal	main.rill#Function:convertAndShow	b43bef2b271c9980
 alias	normal	main.rill#Function:inspectMapped	9a7639a3a27fddfc
-alias	normal	main.rill#Function:joined	87b26b5d65c10966
-alias	normal	main.rill#Function:joinedOrder	70cd72270e873a4c
+alias	normal	main.rill#Function:joined	acfd6cf7c66f2cfe
+alias	normal	main.rill#Function:joinedOrder	e8954deded9ab28c
 alias	normal	main.rill#Function:listLifecycle	1bfca46da86210da
 alias	normal	main.rill#Function:mapSuccess	1d8ac3633d07335b
 alias	normal	main.rill#Function:parse	5135b0a27032022d
@@ -34,8 +34,8 @@ alias	test	main.rill#Expectation@1858	1ac2f2c93fc1f130
 alias	test	main.rill#Expectation@2303	45782bd224cf2a3b
 alias	test	main.rill#Function:convertAndShow	b43bef2b271c9980
 alias	test	main.rill#Function:inspectMapped	9a7639a3a27fddfc
-alias	test	main.rill#Function:joined	87b26b5d65c10966
-alias	test	main.rill#Function:joinedOrder	70cd72270e873a4c
+alias	test	main.rill#Function:joined	acfd6cf7c66f2cfe
+alias	test	main.rill#Function:joinedOrder	e8954deded9ab28c
 alias	test	main.rill#Function:listLifecycle	1bfca46da86210da
 alias	test	main.rill#Function:mapSuccess	1d8ac3633d07335b
 alias	test	main.rill#Function:parse	5135b0a27032022d
@@ -231,7 +231,7 @@ disjoint-dead	normal	main.rill#Expectation@1831	5bb6b5b11fd96728
 disjoint-dead	normal	main.rill#Expectation@1858	1ac2f2c93fc1f130
 disjoint-dead	normal	main.rill#Function:convertAndShow	b43bef2b271c9980
 disjoint-dead	normal	main.rill#Function:inspectMapped	9a7639a3a27fddfc
-disjoint-dead	normal	main.rill#Function:joined	d1ab67498636a263
+disjoint-dead	normal	main.rill#Function:joined	0378e5c6df74ef2b
 disjoint-dead	normal	main.rill#Function:listLifecycle	1bfca46da86210da
 disjoint-dead	normal	main.rill#Function:mapSuccess	1d8ac3633d07335b
 disjoint-dead	normal	main.rill#Function:parse	5135b0a27032022d
@@ -253,7 +253,7 @@ disjoint-dead	test	main.rill#Expectation@1831	5bb6b5b11fd96728
 disjoint-dead	test	main.rill#Expectation@1858	1ac2f2c93fc1f130
 disjoint-dead	test	main.rill#Function:convertAndShow	b43bef2b271c9980
 disjoint-dead	test	main.rill#Function:inspectMapped	9a7639a3a27fddfc
-disjoint-dead	test	main.rill#Function:joined	d1ab67498636a263
+disjoint-dead	test	main.rill#Function:joined	0378e5c6df74ef2b
 disjoint-dead	test	main.rill#Function:listLifecycle	1bfca46da86210da
 disjoint-dead	test	main.rill#Function:mapSuccess	1d8ac3633d07335b
 disjoint-dead	test	main.rill#Function:parse	5135b0a27032022d
@@ -360,7 +360,7 @@ escape	test	main.rill#Startup	32abebb794772179
 escape	test	standard	ca20b1a5eb342a66
 fixed-list	normal	graph	0ef716632ef088a3
 fixed-list	normal	main.rill#Function:across	2146dff6eb0b7895
-fixed-list	normal	main.rill#Function:entryOnly	ded2b96a00345ee9
+fixed-list	normal	main.rill#Function:entryOnly	dd1eb4f0920463fd
 fixed-list	normal	main.rill#Function:impossible	9df379bbdec3a898
 fixed-list	normal	main.rill#Function:nested	26747bd4ed192642
 fixed-list	normal	main.rill#Function:noop	c7f459a17d733c66
@@ -369,7 +369,7 @@ fixed-list	normal	main.rill#Startup	832e672d5a06d71b
 fixed-list	normal	standard	e2d2b3fc838a0373
 fixed-list	test	graph	0ef716632ef088a3
 fixed-list	test	main.rill#Function:across	2146dff6eb0b7895
-fixed-list	test	main.rill#Function:entryOnly	ded2b96a00345ee9
+fixed-list	test	main.rill#Function:entryOnly	dd1eb4f0920463fd
 fixed-list	test	main.rill#Function:impossible	9df379bbdec3a898
 fixed-list	test	main.rill#Function:nested	26747bd4ed192642
 fixed-list	test	main.rill#Function:noop	c7f459a17d733c66
@@ -518,12 +518,12 @@ job-no-borrow-canary	normal	-	no-receipt
 job-no-borrow-canary	test	-	no-receipt
 live-parent-err	normal	graph	0ef716632ef088a3
 live-parent-err	normal	main.rill#Function:liveParentError	9b7fd8bee7091756
-live-parent-err	normal	main.rill#Function:retiredParentError	ace4ec19dfc3def4
+live-parent-err	normal	main.rill#Function:retiredParentError	97493fa30cb82e38
 live-parent-err	normal	main.rill#Startup	9609ded1308db0bd
 live-parent-err	normal	standard	ca20b1a5eb342a66
 live-parent-err	test	graph	0ef716632ef088a3
 live-parent-err	test	main.rill#Function:liveParentError	9b7fd8bee7091756
-live-parent-err	test	main.rill#Function:retiredParentError	ace4ec19dfc3def4
+live-parent-err	test	main.rill#Function:retiredParentError	97493fa30cb82e38
 live-parent-err	test	main.rill#Startup	9609ded1308db0bd
 live-parent-err	test	standard	ca20b1a5eb342a66
 old-computed-result	normal	-	no-receipt
@@ -641,7 +641,7 @@ result-order	normal	main.rill#Function:convertAndShow	b43bef2b271c9980
 result-order	normal	main.rill#Function:inspectMapped	9a7639a3a27fddfc
 result-order	normal	main.rill#Function:listLifecycle	1bfca46da86210da
 result-order	normal	main.rill#Function:mapSuccess	1d8ac3633d07335b
-result-order	normal	main.rill#Function:ordered	aa20de9e0c270dd7
+result-order	normal	main.rill#Function:ordered	ba9bb3b2f32a3ff7
 result-order	normal	main.rill#Function:parse	5135b0a27032022d
 result-order	normal	main.rill#Function:releaseNative	7d6be5b82d8431f8
 result-order	normal	main.rill#Function:render	9333b7c89f818484
@@ -663,7 +663,7 @@ result-order	test	main.rill#Function:convertAndShow	b43bef2b271c9980
 result-order	test	main.rill#Function:inspectMapped	9a7639a3a27fddfc
 result-order	test	main.rill#Function:listLifecycle	1bfca46da86210da
 result-order	test	main.rill#Function:mapSuccess	1d8ac3633d07335b
-result-order	test	main.rill#Function:ordered	aa20de9e0c270dd7
+result-order	test	main.rill#Function:ordered	ba9bb3b2f32a3ff7
 result-order	test	main.rill#Function:parse	5135b0a27032022d
 result-order	test	main.rill#Function:releaseNative	7d6be5b82d8431f8
 result-order	test	main.rill#Function:render	9333b7c89f818484
@@ -774,8 +774,8 @@ shared	normal	main.rill#Expectation@1858	1ac2f2c93fc1f130
 shared	normal	main.rill#Expectation@2279	7314ced735c1c7b8
 shared	normal	main.rill#Function:convertAndShow	b43bef2b271c9980
 shared	normal	main.rill#Function:inspectMapped	9a7639a3a27fddfc
-shared	normal	main.rill#Function:joined	8bf74d387f9bcb67
-shared	normal	main.rill#Function:joinedOrder	24857c06658aca0b
+shared	normal	main.rill#Function:joined	7e055595516ca53b
+shared	normal	main.rill#Function:joinedOrder	e3022a9a4813fdcb
 shared	normal	main.rill#Function:listLifecycle	1bfca46da86210da
 shared	normal	main.rill#Function:mapSuccess	1d8ac3633d07335b
 shared	normal	main.rill#Function:parse	5135b0a27032022d
@@ -798,8 +798,8 @@ shared	test	main.rill#Expectation@1858	1ac2f2c93fc1f130
 shared	test	main.rill#Expectation@2279	7314ced735c1c7b8
 shared	test	main.rill#Function:convertAndShow	b43bef2b271c9980
 shared	test	main.rill#Function:inspectMapped	9a7639a3a27fddfc
-shared	test	main.rill#Function:joined	8bf74d387f9bcb67
-shared	test	main.rill#Function:joinedOrder	24857c06658aca0b
+shared	test	main.rill#Function:joined	7e055595516ca53b
+shared	test	main.rill#Function:joinedOrder	e3022a9a4813fdcb
 shared	test	main.rill#Function:listLifecycle	1bfca46da86210da
 shared	test	main.rill#Function:mapSuccess	1d8ac3633d07335b
 shared	test	main.rill#Function:parse	5135b0a27032022d

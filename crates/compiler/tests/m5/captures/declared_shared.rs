@@ -313,14 +313,6 @@ fn declared_shared_siblings_keep_their_parent_caps() {
             },
         );
     }
-    // Generic `&local` calls with a receipt that are not this frame. A plain
-    // borrowed formal is screened without charge and keeps its a95e04e8 caps.
-    // A `callable` wrapper that never invokes its formal is told apart only by
-    // its body: one charged ordered-declaration probe (+5 work) rejects it
-    // before the keyed header lookup. At a95e04e8 it stopped at the same site
-    // at 1,917/55/3 (graph 187,611/4,040/3); neither cap was published. Rule 1
-    // exception (chief of staff, 2026-11-23, ri-2s0.10): no paid fact tells the
-    // sibling apart before that charge, so each parent cap gives `ResourceLimit`.
     probe(
         "captures::declared_shared::declared_shared_siblings_keep_their_parent_caps",
         "function same<T>(x: &T): bool { return true; }\nfunction plain(flag: bool): bool { return same(&flag); }\nfunction skip<F>(job: &F): bool where callable(F, [], bool) { return true; }\nfunction ignored(flag: bool): bool { let f: () => bool = () => flag; return skip(&f); }\n",
@@ -328,30 +320,16 @@ fn declared_shared_siblings_keep_their_parent_caps() {
             let graph = analyze_ownership(receipt, AnalysisLimits::default());
             for (name, at, caps) in [
                 ("plain", "same(&flag)", (1_907, 46, 3)),
-                ("ignored", "skip(&f)", (1_922, 55, 3)),
+                ("ignored", "skip(&f)", (1_917, 55, 3)),
             ] {
                 check_capture_blocker(module, receipt, &graph, name, at);
                 assert_incomplete_at_caps(module, receipt, name, at, caps);
             }
-            let ignored = capture_declaration(module, "ignored");
-            let old = AnalysisLimits {
-                max_work: 1_917,
-                max_entries: 55,
-                max_depth: 3,
-            };
-            let limited = lower_body(receipt, module, &ignored.id, old).unwrap();
-            crate::limit::assert_body_limit(&limited);
             assert_parent_graph_cap(receipt, (187_611, 4_040, 3));
             assert_pre_equality_graph_cap(receipt, (187_616, 4_040, 3));
-            assert_graph_incomplete_at_caps(receipt, &graph, (187_932, 4_174, 5));
+            assert_graph_incomplete_at_caps(receipt, &graph, (187_927, 4_174, 5));
         },
     );
-    // The lent wrapper whose body invokes another function, not its formal
-    // (ri-785.7 #1, rule 1 exception of 2026-11-23, ri-2s0.10). The wrapper's
-    // body is found only by the charged ordered-declaration probe, and telling
-    // `other()` from `job()` needs a charged header or node-fact probe. At
-    // a95e04e8 it stopped at the same site at 1,899/46/3 (graph
-    // 186,959/4,049/3); neither cap was published.
     probe(
         "captures::declared_shared::declared_shared_siblings_keep_their_parent_caps",
         "function other(): bool { return true; }\nfunction skipOther<F>(job: &F): bool where callable(F, [], bool) { return other(); }\nfunction ignoredOther(flag: bool): bool { let f: () => bool = () => flag; return skipOther(&f); }\n",
@@ -363,18 +341,10 @@ fn declared_shared_siblings_keep_their_parent_caps() {
                 receipt,
                 "ignoredOther",
                 "skipOther(&f)",
-                (2_395, 46, 3),
+                (1_899, 46, 3),
             );
-            let ignored = capture_declaration(module, "ignoredOther");
-            let old = AnalysisLimits {
-                max_work: 1_899,
-                max_entries: 46,
-                max_depth: 3,
-            };
-            let limited = lower_body(receipt, module, &ignored.id, old).unwrap();
-            crate::limit::assert_body_limit(&limited);
             assert_parent_graph_cap(receipt, (186_959, 4_049, 3));
-            assert_graph_incomplete_at_caps(receipt, &graph, (187_771, 4_183, 5));
+            assert_graph_incomplete_at_caps(receipt, &graph, (187_275, 4_183, 5));
         },
     );
     // Local invocations of a one-capture arrow are not frames: `f()` and

@@ -167,7 +167,9 @@ fn stable(debug: &str, installs: &[String; 2]) -> String {
         rest = rest[end..].strip_prefix(", ").unwrap();
     }
     text.push_str(rest);
-    for install in installs {
+    let mut longest_first = installs.each_ref();
+    longest_first.sort_by_key(|install| std::cmp::Reverse(install.len()));
+    for install in longest_first {
         text = text.replace(install.as_str(), "<install>");
     }
     for (what, needle) in [
