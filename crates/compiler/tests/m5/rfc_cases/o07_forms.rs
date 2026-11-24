@@ -7,13 +7,13 @@
 use super::*;
 use compiler::analysis::ownership::{Cleanup, Mir, Operation};
 
-struct Form {
-    text: &'static str,
-    typed_stats: Triple,
-    graph: (GraphCompletion, Triple),
-    roots: &'static [Root],
+pub(super) struct Form {
+    pub(super) text: &'static str,
+    pub(super) typed_stats: Triple,
+    pub(super) graph: (GraphCompletion, Triple),
+    pub(super) roots: &'static [Root],
     /// The whole MIR of a `Checked` root, in order (rule 9).
-    sequences: &'static [(&'static str, &'static [&'static str])],
+    pub(super) sequences: &'static [(&'static str, &'static [&'static str])],
 }
 
 fn place(place: &Place<'_>) -> String {
@@ -87,7 +87,7 @@ fn sequence(module: &loader::Module, mir: &Mir<'_>) -> Vec<String> {
     found
 }
 
-fn check(test: &str, form: &Form) {
+pub(super) fn check(test: &str, form: &Form) {
     installed(test, |request| {
         fs::write(&request.entry, format!("{IMPORTS}\n{}", form.text)).unwrap();
         for test_mode in [false, true] {
