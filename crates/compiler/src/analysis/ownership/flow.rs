@@ -436,7 +436,9 @@ fn liveness(
 /// through a call's result) carries a loan on that member's slot. It is the
 /// sibling's loan reborrowed, so the borrow check at its creation does not see
 /// an overlap: the store does. A reborrow of the replaced member itself is not
-/// one.
+/// one. Only a sibling reference member counts: a value member cannot point at
+/// the same place as the replaced reference, and a whole-record use rejects
+/// such a loan later (`record_borrows_itself`, `conflict`).
 fn member_replacement_overlap(
     slots: &[Local<'_>],
     state: &[State],
@@ -455,12 +457,49 @@ fn member_replacement_overlap(
     budget.step(staged.loans.len())?;
     let siblings = owner + 1..owner + 1 + slots[owner].members;
     for &loan in staged.loans.iter() {
-        if loan.source != target && siblings.contains(&loan.source) {
+        if loan.source != target
+            && siblings.contains(&loan.source)
+            && slots[loan.source].reference_member
+        {
             return Err(Stop::Rejected {
                 site,
                 related: loan.site,
                 kind: Conflict::Access,
             });
+        }
+    }
+    Ok(())
+}
+
+/// A copy of a whole record whose reference member holds a loan on the
+/// record's own storage (`h.r = &h.v;`) rejects like moving a borrowed local:
+/// the copy would carry a reference into the original, not into itself. A
+/// record that moves already reaches this through `conflict`, which sees the
+/// member's loan overlap the moved storage.
+fn record_borrows_itself(
+    slots: &[Local<'_>],
+    state: &[State],
+    from: Slot,
+    site: NodeId,
+    budget: &mut Budget,
+) -> ResultOf<()> {
+    let region = slots[from].storage(from);
+    for member in region.clone() {
+        if !slots[member].reference_member {
+            continue;
+        }
+        let State::Initialized(held) = &state[member] else {
+            continue;
+        };
+        budget.step(held.loans.len())?;
+        for &loan in held.loans.iter() {
+            if loan.kind.borrows_local_storage() && region.contains(&loan.source) {
+                return Err(Stop::Rejected {
+                    site,
+                    related: loan.site,
+                    kind: Conflict::Release,
+                });
+            }
         }
     }
     Ok(())
@@ -2948,6 +2987,13 @@ pub(super) fn run<'a, 'g>(
                     };
                     let region = slots[from].storage(from);
                     budget.step(region.len())?;
+                    // A copy that is the returned value is exported next, and
+                    // the export rejects it as an escape (R0202).
+                    let exported = matches!(edges, Edges::Next(next)
+                        if matches!(code[next].action, Action::Export(slot) if Some(slot) == into));
+                    if !moves && !exported && slots[from].members != 0 {
+                        record_borrows_itself(&slots, &state, from, node, budget)?;
+                    }
                     for member in region {
                         let mut held = if moves {
                             std::mem::replace(&mut state[member], State::Moved(node))

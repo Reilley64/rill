@@ -973,3 +973,721 @@ fn unsupported_reference_members_keep_their_parent_caps() {
         &SIBLINGS,
     );
 }
+
+// ---------------------------------------------------------------------------
+// ri-px1.11.16 (C19, chief rulings 21 and 22): a whole-record use whose
+// reference member holds a loan on the record's own storage.
+// ---------------------------------------------------------------------------
+
+/// C19, the wrong acceptance. `h.r = &h.v;` leaves a member of `h` borrowing
+/// another member of `h`. A whole-record use of such a record, whether `h`
+/// moves or copies, rejects R0203 at the use (the moved operand `h`), related
+/// the borrow `&h.v`, as `sharedWholeMove` in `records.rs` rejects moving a
+/// record whose member a local loan covers. The forms: a call argument
+/// (`moveCall`), a `let` binding (`moveLet`, and `moveLetRead` that reads
+/// through the copy), a branch, a reassignment, a loop and a call in a loop.
+/// `moveReturn` is the existing neighbour: the returned value escapes, R0202 at
+/// `return h;`, and stays so. `moveWrite` is the writing twin: a write to `h.v`
+/// while `h.r` is live, R0203 at the write. `Own2` has only copyable members, so
+/// its whole-record use is a copy, not a move; the rule is the same.
+const SELF_BORROW_COPY: Case = Case {
+    text: r#"
+type Own2 = { v: i32; r: &i32 };
+type Wrap = { o: Own2 };
+function take2(o: Own2): i32 { return 0i32; }
+
+function moveCall(): i32 {
+  let e = 5i32; let mut h = Own2 { v: 1i32, r: &e }; h.r = &h.v;
+  return take2(h);
+}
+function moveLet(): i32 {
+  let e = 5i32; let mut h = Own2 { v: 1i32, r: &e }; h.r = &h.v;
+  let g = h; return 0i32;
+}
+function moveLetRead(): i32 {
+  let e = 5i32; let mut h = Own2 { v: 1i32, r: &e }; h.r = &h.v;
+  let g = h; return *g.r;
+}
+function moveBranch(): i32 {
+  let e = 5i32; let mut h = Own2 { v: 1i32, r: &e }; h.r = &h.v;
+  if (true) { let g = h; } return 0i32;
+}
+function moveAssign(): i32 {
+  let e = 5i32; let mut h = Own2 { v: 1i32, r: &e }; h.r = &h.v;
+  let mut g = Own2 { v: 3i32, r: &e }; g = h; return 0i32;
+}
+function moveLoop(): i32 {
+  let e = 5i32; let mut h = Own2 { v: 1i32, r: &e }; h.r = &h.v;
+  let mut again = true; while (again) { let g = h; again = false; } return 0i32;
+}
+function moveLoopCall(): i32 {
+  let e = 5i32; let mut h = Own2 { v: 1i32, r: &e }; h.r = &h.v;
+  let mut again = true; while (again) { let n = take2(h); again = false; } return 0i32;
+}
+function moveReturn(): Own2 {
+  let e = 5i32; let mut h = Own2 { v: 1i32, r: &e }; h.r = &h.v;
+  return h;
+}
+function moveWrite(): i32 {
+  let e = 5i32; let mut h = Own2 { v: 1i32, r: &e }; h.r = &h.v;
+  h.v = 2i32; let n = *h.r; return n;
+}
+"#,
+    typed_stats: (348956, 51350, 12),
+    graph: (GraphCompletion::SourceRejected, (213177, 8919, 7)),
+    roots: &[
+        Root {
+            name: "take2",
+            want: Want::Checked,
+            graph: None,
+            stats: (2750, 349, 3),
+        },
+        Root {
+            name: "moveCall",
+            want: Want::Rejected {
+                code: "R0203",
+                site: r####"h"####,
+                related: r####"&h.v"####,
+            },
+            graph: None,
+            stats: (3519, 615, 5),
+        },
+        Root {
+            name: "moveLet",
+            want: Want::Rejected {
+                code: "R0203",
+                site: r####"h"####,
+                related: r####"&h.v"####,
+            },
+            graph: None,
+            stats: (3509, 613, 5),
+        },
+        Root {
+            name: "moveLetRead",
+            want: Want::Rejected {
+                code: "R0203",
+                site: r####"h"####,
+                related: r####"&h.v"####,
+            },
+            graph: None,
+            stats: (3532, 617, 5),
+        },
+        Root {
+            name: "moveBranch",
+            want: Want::Rejected {
+                code: "R0203",
+                site: r####"h"####,
+                related: r####"&h.v"####,
+            },
+            graph: None,
+            stats: (3628, 683, 5),
+        },
+        Root {
+            name: "moveAssign",
+            want: Want::Rejected {
+                code: "R0203",
+                site: r####"h"####,
+                related: r####"&h.v"####,
+            },
+            graph: None,
+            stats: (4223, 855, 5),
+        },
+        Root {
+            name: "moveLoop",
+            want: Want::Rejected {
+                code: "R0203",
+                site: r####"h"####,
+                related: r####"&h.v"####,
+            },
+            graph: None,
+            stats: (3959, 867, 5),
+        },
+        Root {
+            name: "moveLoopCall",
+            want: Want::Rejected {
+                code: "R0203",
+                site: r####"h"####,
+                related: r####"&h.v"####,
+            },
+            graph: None,
+            stats: (4044, 909, 7),
+        },
+        Root {
+            name: "moveReturn",
+            want: Want::Rejected {
+                code: "R0202",
+                site: r####"return h;"####,
+                related: r####"&h.v"####,
+            },
+            graph: None,
+            stats: (3505, 606, 5),
+        },
+        Root {
+            name: "moveWrite",
+            want: Want::Rejected {
+                code: "R0203",
+                site: r####"h.v = 2i32;"####,
+                related: r####"&h.v"####,
+            },
+            graph: None,
+            stats: (3219, 582, 5),
+        },
+    ],
+};
+
+#[test]
+fn a_whole_record_use_with_a_self_borrowing_member_rejects_r0203() {
+    check(
+        "rfc_cases::o07::a_whole_record_use_with_a_self_borrowing_member_rejects_r0203",
+        &SELF_BORROW_COPY,
+    );
+}
+
+/// The old caps of the seven forms that were `Checked` at `2e13bc6e`: the
+/// rejection is cheaper than the acceptance was, so those caps still hold and
+/// now reject (`take2`, `moveReturn` and `moveWrite` did not change).
+#[test]
+fn self_borrowing_record_forms_keep_their_old_caps_and_now_reject() {
+    at_parent_caps(
+        "rfc_cases::o07::self_borrowing_record_forms_keep_their_old_caps_and_now_reject",
+        SELF_BORROW_COPY.text,
+        (215532, 9926, 7),
+        &[
+            ("moveCall", (6465, 1052, 5)),
+            ("moveLet", (3722, 705, 5)),
+            ("moveLetRead", (3749, 709, 5)),
+            ("moveBranch", (3883, 795, 5)),
+            ("moveAssign", (4612, 1028, 5)),
+            ("moveLoop", (4416, 1074, 5)),
+            ("moveLoopCall", (7312, 1506, 7)),
+        ],
+        Parent::Rejects("R0203"),
+    );
+}
+
+/// C19 valid twins, `Checked`. `deadLoan` is the chief's twin: `k` borrows
+/// `h.v` but is dead before `take2(h)`, and `h.r` borrows nothing of `h`.
+/// `plainCopy` and `plainLet` copy a record whose reference member borrows a
+/// local outside it. The rule costs one work unit on each whole-record read of a
+/// record whose reference member holds a loan (`h.r` holds the loan on `e`), so
+/// each root and the whole graph cost 1 and 3 more than at `2e13bc6e`.
+const SELF_BORROW_TWINS: Case = Case {
+    text: r#"
+type Own2 = { v: i32; r: &i32 };
+type Wrap = { o: Own2 };
+function take2(o: Own2): i32 { return 0i32; }
+
+function deadLoan(): i32 {
+  let e = 5i32; let mut h = Own2 { v: 1i32, r: &e };
+  let k = &h.v; return take2(h);
+}
+function plainCopy(): i32 {
+  let e = 5i32; let mut h = Own2 { v: 1i32, r: &e };
+  return take2(h);
+}
+function plainLet(): i32 {
+  let e = 5i32; let mut h = Own2 { v: 1i32, r: &e };
+  let g = h; return *g.r;
+}
+"#,
+    typed_stats: (330595, 48481, 12),
+    graph: (GraphCompletion::Incomplete, (193546, 5512, 5)),
+    roots: &[
+        Root {
+            name: "take2",
+            want: Want::Checked,
+            graph: None,
+            stats: (2432, 190, 3),
+        },
+        Root {
+            name: "deadLoan",
+            want: Want::Checked,
+            graph: None,
+            stats: (5734, 685, 5),
+        },
+        Root {
+            name: "plainCopy",
+            want: Want::Checked,
+            graph: None,
+            stats: (5608, 627, 5),
+        },
+        Root {
+            name: "plainLet",
+            want: Want::Checked,
+            graph: None,
+            stats: (3210, 443, 5),
+        },
+    ],
+};
+
+#[test]
+fn copying_a_record_that_borrows_nothing_of_itself_stays_checked() {
+    check(
+        "rfc_cases::o07::copying_a_record_that_borrows_nothing_of_itself_stays_checked",
+        &SELF_BORROW_TWINS,
+    );
+}
+
+/// Metering rule 11, third case of chief ruling 22: the one work unit above.
+/// The caps `2e13bc6e` measured now give `ResourceLimit`.
+#[test]
+fn self_borrow_twin_parent_caps_now_give_resource_limit() {
+    at_parent_caps(
+        "rfc_cases::o07::self_borrow_twin_parent_caps_now_give_resource_limit",
+        SELF_BORROW_TWINS.text,
+        (193543, 5512, 5),
+        &[
+            ("deadLoan", (5733, 685, 5)),
+            ("plainCopy", (5607, 627, 5)),
+            ("plainLet", (3209, 443, 5)),
+        ],
+        Parent::Exceeds,
+    );
+}
+
+/// C19, the other whole-value move paths. Each stops before a move that could
+/// be accepted: a struct-literal field, a member store, a record update, a
+/// tuple element, a list element, a return through a tuple, list, `Option` or
+/// `Result`, a `let` of `Option.Some(h)`, a `match` scrutinee (`h`, `take2(h)` or
+/// `Option.Some(h)`) and an arrow body. Each is `Incomplete` at the
+/// blocker named, not an acceptance. They were the same at `2e13bc6e` (same
+/// caps, same blockers).
+const SELF_BORROW_UNREACHED: Case = Case {
+    text: r#"
+type Own2 = { v: i32; r: &i32 };
+type Wrap = { o: Own2 };
+function take2(o: Own2): i32 { return 0i32; }
+
+function moveStructField(): i32 {
+  let e = 5i32; let mut h = Own2 { v: 1i32, r: &e }; h.r = &h.v;
+  let w = Wrap { o: h }; return 0i32;
+}
+function moveStructReturn(): Wrap {
+  let e = 5i32; let mut h = Own2 { v: 1i32, r: &e }; h.r = &h.v;
+  return Wrap { o: h };
+}
+function moveMemberStore(): i32 {
+  let e = 5i32; let mut h = Own2 { v: 1i32, r: &e }; h.r = &h.v;
+  let mut w = Wrap { o: Own2 { v: 3i32, r: &e } }; w.o = h; return 0i32;
+}
+function moveRecordUpdate(): i32 {
+  let e = 5i32; let mut h = Own2 { v: 1i32, r: &e }; h.r = &h.v;
+  let g = Own2 { ...h, v: 2i32 }; return 0i32;
+}
+function moveTuple(): i32 {
+  let e = 5i32; let mut h = Own2 { v: 1i32, r: &e }; h.r = &h.v;
+  let t: [Own2, i32] = [h, 1i32]; return 0i32;
+}
+function moveTupleReturn(): [Own2, i32] {
+  let e = 5i32; let mut h = Own2 { v: 1i32, r: &e }; h.r = &h.v;
+  return [h, 1i32];
+}
+function moveList(): i32 {
+  let e = 5i32; let mut h = Own2 { v: 1i32, r: &e }; h.r = &h.v;
+  let l: List<Own2> = [h]; return 0i32;
+}
+function moveListReturn(): List<Own2> {
+  let e = 5i32; let mut h = Own2 { v: 1i32, r: &e }; h.r = &h.v;
+  return [h];
+}
+function moveWrapperReturn(): Option<Own2> {
+  let e = 5i32; let mut h = Own2 { v: 1i32, r: &e }; h.r = &h.v;
+  return Option.Some(h);
+}
+function moveResultReturn(): Result<Own2, i32> {
+  let e = 5i32; let mut h = Own2 { v: 1i32, r: &e }; h.r = &h.v;
+  return Result.Ok(h);
+}
+function moveMatch(): i32 {
+  let e = 5i32; let mut h = Own2 { v: 1i32, r: &e }; h.r = &h.v;
+  let n = match (h) { x => 0i32 }; return n;
+}
+function moveMatchCall(): i32 {
+  let e = 5i32; let mut h = Own2 { v: 1i32, r: &e }; h.r = &h.v;
+  let n = match (take2(h)) { 0i32 => 0i32, _ => 1i32 }; return n;
+}
+function moveArrowCall(): i32 {
+  let e = 5i32; let mut h = Own2 { v: 1i32, r: &e }; h.r = &h.v;
+  let f: () => i32 = () => h.v; return f();
+}
+function moveWrapperLet(): i32 {
+  let e = 5i32; let mut h = Own2 { v: 1i32, r: &e }; h.r = &h.v;
+  let o = Option.Some(h); return 0i32;
+}
+function moveMatchWrapper(): i32 {
+  let e = 5i32; let mut h = Own2 { v: 1i32, r: &e }; h.r = &h.v;
+  let n = match (Option.Some(h)) { Option.Some(x) => 0i32, Option.None => 1i32 }; return n;
+}
+"#,
+    typed_stats: (365714, 54164, 12),
+    graph: (GraphCompletion::Incomplete, (216715, 6116, 5)),
+    roots: &[
+        Root {
+            name: "take2",
+            want: Want::Checked,
+            graph: None,
+            stats: (2998, 473, 3),
+        },
+        Root {
+            name: "moveStructField",
+            want: Want::Incomplete {
+                blocker: r####"w"####,
+            },
+            graph: None,
+            stats: (3226, 462, 1),
+        },
+        Root {
+            name: "moveStructReturn",
+            want: Want::Incomplete {
+                blocker: r####"Wrap { o: h }"####,
+            },
+            graph: None,
+            stats: (3229, 471, 2),
+        },
+        Root {
+            name: "moveMemberStore",
+            want: Want::Incomplete {
+                blocker: r####"w"####,
+            },
+            graph: None,
+            stats: (3226, 462, 1),
+        },
+        Root {
+            name: "moveRecordUpdate",
+            want: Want::Incomplete {
+                blocker: r####"Own2 { ...h, v: 2i32 }"####,
+            },
+            graph: None,
+            stats: (3262, 479, 3),
+        },
+        Root {
+            name: "moveTuple",
+            want: Want::Incomplete {
+                blocker: r####"t"####,
+            },
+            graph: None,
+            stats: (3230, 469, 2),
+        },
+        Root {
+            name: "moveTupleReturn",
+            want: Want::Incomplete {
+                blocker: r####"[h, 1i32]"####,
+            },
+            graph: None,
+            stats: (3239, 477, 2),
+        },
+        Root {
+            name: "moveList",
+            want: Want::Incomplete {
+                blocker: r####"l"####,
+            },
+            graph: None,
+            stats: (2866, 404, 1),
+        },
+        Root {
+            name: "moveListReturn",
+            want: Want::Incomplete {
+                blocker: r####"[h]"####,
+            },
+            graph: None,
+            stats: (2875, 412, 2),
+        },
+        Root {
+            name: "moveWrapperReturn",
+            want: Want::Incomplete {
+                blocker: r####"Option.Some(h)"####,
+            },
+            graph: None,
+            stats: (2875, 412, 2),
+        },
+        Root {
+            name: "moveResultReturn",
+            want: Want::Incomplete {
+                blocker: r####"Result.Ok(h)"####,
+            },
+            graph: None,
+            stats: (2875, 412, 2),
+        },
+        Root {
+            name: "moveMatch",
+            want: Want::Incomplete {
+                blocker: r####"match (h) { x => 0i32 }"####,
+            },
+            graph: None,
+            stats: (2897, 420, 3),
+        },
+        Root {
+            name: "moveMatchCall",
+            want: Want::Incomplete {
+                blocker: r####"match (take2(h)) { 0i32 => 0i32, _ => 1i32 }"####,
+            },
+            graph: None,
+            stats: (2897, 420, 3),
+        },
+        Root {
+            name: "moveArrowCall",
+            want: Want::Incomplete {
+                blocker: r####"f()"####,
+            },
+            graph: None,
+            stats: (2887, 419, 3),
+        },
+        Root {
+            name: "moveWrapperLet",
+            want: Want::Incomplete {
+                blocker: r####"o"####,
+            },
+            graph: None,
+            stats: (2866, 404, 1),
+        },
+        Root {
+            name: "moveMatchWrapper",
+            want: Want::Incomplete {
+                blocker: r####"match (Option.Some(h)) { Option.Some(x) => 0i32, Option.None => 1i32 }"####,
+            },
+            graph: None,
+            stats: (2897, 420, 3),
+        },
+    ],
+};
+
+#[test]
+fn other_whole_value_paths_of_a_self_borrowing_record_stay_incomplete() {
+    check(
+        "rfc_cases::o07::other_whole_value_paths_of_a_self_borrowing_record_stay_incomplete",
+        &SELF_BORROW_UNREACHED,
+    );
+}
+
+/// Ruling 21 (2), 2C-F2. The member-replacement check covers only a loan
+/// through a sibling reference member. `Own` (`h.r = &h.v`, with an `&mut`
+/// member beside) and `Own2` are `Checked` again, and `OwnM` (`h.m = &mut h.v`)
+/// is `Incomplete` at its block, as at `d87e5dd2`. The twins reject while
+/// `h.r` is live: writing `h.v` (R0203 at the write), moving `h` into a call,
+/// returning it and copying it to a local (R0203 at `h`, related `&h.v`). The
+/// `&mut` self-borrow `ownMTake` and `ownMutMember` rejects at the move too.
+const SELF_BORROW_MEMBERS: Case = Case {
+    text: r#"
+type Own2 = { v: i32; r: &i32 };
+type Own = { v: i32; r: &i32; m: &mut i32 };
+type OwnM = { v: i32; m: &mut i32 };
+
+function take2(o: Own2): i32 { return 0i32; }
+function takeOwn(o: Own): i32 { return 0i32; }
+function takeOwnM(o: OwnM): i32 { return 0i32; }
+function replaceOwn(): i32 {
+  let mut a = 1i32; let e = 5i32; let mut h = Own { v: 1i32, r: &e, m: &mut a }; h.r = &h.v;
+  return 0i32;
+}
+function replaceOwn2(): i32 {
+  let e = 5i32; let mut h = Own2 { v: 1i32, r: &e }; h.r = &h.v;
+  return 0i32;
+}
+function replaceOwnM(): i32 {
+  let mut a = 1i32; let mut h = OwnM { v: 1i32, m: &mut a }; h.m = &mut h.v;
+  return 0i32;
+}
+function ownWrite(): i32 {
+  let mut a = 1i32; let e = 5i32; let mut h = Own { v: 1i32, r: &e, m: &mut a }; h.r = &h.v;
+  h.v = 2i32; let n = *h.r; return n;
+}
+function ownReturn(): Own {
+  let mut a = 1i32; let e = 5i32; let mut h = Own { v: 1i32, r: &e, m: &mut a }; h.r = &h.v;
+  return h;
+}
+function ownTake(): i32 {
+  let mut a = 1i32; let e = 5i32; let mut h = Own { v: 1i32, r: &e, m: &mut a }; h.r = &h.v;
+  return takeOwn(h);
+}
+function ownLet(): i32 {
+  let mut a = 1i32; let e = 5i32; let mut h = Own { v: 1i32, r: &e, m: &mut a }; h.r = &h.v;
+  let g = h; return *g.r;
+}
+function ownMTake(): i32 {
+  let mut a = 1i32; let mut h = OwnM { v: 1i32, m: &mut a }; h.m = &mut h.v;
+  return takeOwnM(h);
+}
+function ownMutMember(): i32 {
+  let mut a = 1i32; let e = 5i32; let mut h = Own { v: 1i32, r: &e, m: &mut a };
+  h.m = &mut h.v; return takeOwn(h);
+}
+"#,
+    typed_stats: (353793, 51619, 12),
+    graph: (GraphCompletion::SourceRejected, (213613, 8865, 5)),
+    roots: &[
+        Root {
+            name: "take2",
+            want: Want::Checked,
+            graph: None,
+            stats: (2766, 357, 3),
+        },
+        Root {
+            name: "takeOwn",
+            want: Want::Checked,
+            graph: None,
+            stats: (2790, 368, 3),
+        },
+        Root {
+            name: "takeOwnM",
+            want: Want::Checked,
+            graph: None,
+            stats: (2766, 357, 3),
+        },
+        Root {
+            name: "replaceOwn",
+            want: Want::Checked,
+            graph: None,
+            stats: (3411, 658, 5),
+        },
+        Root {
+            name: "replaceOwn2",
+            want: Want::Checked,
+            graph: None,
+            stats: (3147, 541, 5),
+        },
+        Root {
+            name: "replaceOwnM",
+            want: Want::Incomplete {
+                blocker: r####"{\n  let mut a = 1i32; let mut h = OwnM { v: 1i32, m: &mut a }; h.m = &mut h.v;\n  return 0i32;\n}"####,
+            },
+            graph: None,
+            stats: (3107, 527, 5),
+        },
+        Root {
+            name: "ownWrite",
+            want: Want::Rejected {
+                code: "R0203",
+                site: r####"h.v = 2i32;"####,
+                related: r####"&h.v"####,
+            },
+            graph: None,
+            stats: (3494, 708, 5),
+        },
+        Root {
+            name: "ownReturn",
+            want: Want::Rejected {
+                code: "R0203",
+                site: r####"h"####,
+                related: r####"&h.v"####,
+            },
+            graph: None,
+            stats: (3756, 729, 5),
+        },
+        Root {
+            name: "ownTake",
+            want: Want::Rejected {
+                code: "R0203",
+                site: r####"h"####,
+                related: r####"&h.v"####,
+            },
+            graph: None,
+            stats: (3812, 760, 5),
+        },
+        Root {
+            name: "ownLet",
+            want: Want::Rejected {
+                code: "R0203",
+                site: r####"h"####,
+                related: r####"&h.v"####,
+            },
+            graph: None,
+            stats: (3825, 762, 5),
+        },
+        Root {
+            name: "ownMTake",
+            want: Want::Rejected {
+                code: "R0203",
+                site: r####"h"####,
+                related: r####"&mut h.v"####,
+            },
+            graph: None,
+            stats: (3541, 624, 5),
+        },
+        Root {
+            name: "ownMutMember",
+            want: Want::Rejected {
+                code: "R0203",
+                site: r####"h"####,
+                related: r####"&mut h.v"####,
+            },
+            graph: None,
+            stats: (3815, 760, 5),
+        },
+    ],
+};
+
+#[test]
+fn the_member_replacement_check_covers_only_sibling_reference_members() {
+    check(
+        "rfc_cases::o07::the_member_replacement_check_covers_only_sibling_reference_members",
+        &SELF_BORROW_MEMBERS,
+    );
+}
+
+/// Metering rule 11, third case of chief ruling 22: the replacements that
+/// rejected R0201 at `2e13bc6e` now run on (`Checked`, `Incomplete`, or to the
+/// move that rejects), which costs more, so the old caps give `ResourceLimit`.
+#[test]
+fn self_borrow_member_parent_caps_now_give_resource_limit() {
+    at_parent_caps(
+        "rfc_cases::o07::self_borrow_member_parent_caps_now_give_resource_limit",
+        SELF_BORROW_MEMBERS.text,
+        (213012, 8571, 5),
+        &[
+            ("replaceOwn", (3212, 575, 5)),
+            ("replaceOwnM", (3014, 480, 5)),
+            ("ownWrite", (3419, 664, 5)),
+            ("ownReturn", (3709, 705, 5)),
+            ("ownTake", (3762, 734, 5)),
+            ("ownLet", (3775, 736, 5)),
+            ("ownMTake", (3502, 604, 5)),
+            ("ownMutMember", (3763, 734, 5)),
+        ],
+        Parent::Exceeds,
+    );
+}
+
+/// C19 move path that stops in the typed analysis, before any ownership
+/// judgment: an arrow that captures the record. It is `Incomplete` with no
+/// receipt at `2e13bc6e` as now, so it is not an acceptance. The pinned signal
+/// is what the typed report names.
+#[test]
+fn an_arrow_capturing_a_self_borrowing_record_stays_typed_incomplete() {
+    const SOURCE: &str = "type Own2 = { v: i32; r: &i32 };
+function captured(): i32 {
+  let e = 5i32;
+  let mut h = Own2 { v: 1i32, r: &e };
+  h.r = &h.v;
+  let f: () => Own2 = () => h;
+  return 0i32;
+}
+";
+    installed(
+        "rfc_cases::o07::an_arrow_capturing_a_self_borrowing_record_stays_typed_incomplete",
+        |request| {
+            fs::write(&request.entry, format!("{IMPORTS}\n{SOURCE}")).unwrap();
+            for test_mode in [false, true] {
+                let request = InstalledRequest {
+                    test_mode,
+                    ..request.clone()
+                };
+                let graph = loader::load_installed(request).unwrap();
+                let typed = analyze_typed(&graph, AnalysisLimits::default());
+                let module = graph
+                    .modules()
+                    .iter()
+                    .find(|m| m.key.origin == Origin::Application && m.key.path == "main.rill")
+                    .unwrap();
+                check_typed(
+                    &format!("test_mode {test_mode}"),
+                    &graph,
+                    &typed,
+                    module,
+                    TypedCompletion::Incomplete,
+                    &["pending Containment @ () => h"],
+                    (324232, 47806, 12),
+                );
+            }
+        },
+    );
+}
