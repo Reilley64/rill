@@ -1406,17 +1406,23 @@ fn r1_old_contents_survive_a_later_retain() {
     );
 }
 
-/// Review ci-0mdr SP-6. The R0202 for a body-local source stored into `dst` is
-/// reported at the last call that retains into `dst` before the exit, with the
-/// body-local borrow as the related site, not at the call that stored the
-/// local. `paramThenLocal` stores the local last (site `retain(dst, &user)`);
-/// `localThenParam` stores it first and a valid parameter call follows (site
-/// `retain(dst, a)`, the valid call). Both still reject; the rule gives the
-/// exit's last retention as the site, and this pins it.
+/// Review ci-0mdr SP-6, re-review ci-b4b2 C-3. The R0202 for a body-local
+/// source stored into `dst` is reported at the last call that retains into
+/// `dst` before the exit, with the body-local borrow as the related site. It is
+/// not reported at the call that stored the local. `paramThenLocal` stores the
+/// local last (site `retain(dst, &user)`); `localThenParam` stores it first and
+/// a valid parameter call follows, so the site is `retain(dst, a)`, the valid
+/// call. Both still reject.
+///
+/// Stated limit (SP-6, `ri-qlh`): RFC 0007 line 218 has the callee's exit check
+/// reject the body-local source that flows to `dst`, which puts the blocker at
+/// the storing call, `retain(dst, &user)`. The compiler reports the exit's last
+/// retention instead, so `localThenParam` blames a valid call. This test pins
+/// that behaviour, not the RFC's site.
 #[test]
-fn r1_local_then_parameter_reports_the_storing_call() {
+fn r1_blocker_site_is_the_last_retention_not_the_storing_call() {
     installed(
-        "rfc_cases::list_contents::r1_local_then_parameter_reports_the_storing_call",
+        "rfc_cases::list_contents::r1_blocker_site_is_the_last_retention_not_the_storing_call",
         |request| {
             check_cases(
                 &request,

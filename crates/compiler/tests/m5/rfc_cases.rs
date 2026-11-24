@@ -1078,8 +1078,11 @@ function scalar(users: List<&i32>): Option<&i32> {
 ];
 
 /// Rules 1 and 2 (ri-2s0.7.2): lookups the ownership route does not admit keep
-/// their parent caps. Each types `Checked` and stays `Incomplete` in ownership.
-/// Parent `63b9b3e3` (`ri-2s0.7.2.md`).
+/// their outcome and blocker. Each types `Checked` and stays `Incomplete` in
+/// ownership. Parent `63b9b3e3` (`ri-2s0.7.2.md`). Its caps are not all the
+/// parent's: `ri-px1.11.4` (C5) charged the insert probe, `computed` +10
+/// (`ri-px1.11.4.md`), so the test pins the current caps; the parent's give
+/// `ResourceLimit` where they moved.
 const O10_LOOKUP_SIBLINGS: &[Source] = &[Source {
     text: r#"
 import std::collection::{get, first};
@@ -2841,9 +2844,9 @@ fn o10_pre_extraction_typed_cap_now_gives_resource_limit() {
 }
 
 #[test]
-fn o10_lookup_siblings_keep_their_parent_caps() {
+fn o10_lookup_siblings_stay_incomplete_at_their_pinned_caps() {
     run(
-        "rfc_cases::o10_lookup_siblings_keep_their_parent_caps",
+        "rfc_cases::o10_lookup_siblings_stay_incomplete_at_their_pinned_caps",
         O10_LOOKUP_SIBLINGS,
     );
 }
