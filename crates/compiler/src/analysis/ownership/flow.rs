@@ -10,6 +10,7 @@ pub(super) mod scoped_join;
 // Retain distinct continuing states at a join. Every feasible incoming state
 // must authorize a read, and each MIR successor cleans only what it still owns.
 #[derive(Clone, Debug, Eq, PartialEq)]
+#[allow(clippy::large_enum_variant)]
 enum State {
     Vacant,
     Initialized(Held),
@@ -32,6 +33,7 @@ struct Held {
     origin: ValueOrigin,
     /// Identity of the stored descriptor, independent of the access loans.
     exact_target: Option<ExactTarget>,
+    local_store: Option<(NodeId, NodeId)>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -1286,6 +1288,18 @@ fn retire_loans(
     Ok(())
 }
 
+/// The store a strong update makes into caller contents: the assigning node
+/// and the first body-local borrow the installed value holds. The scan reads
+/// the loans of `incoming`, which the action consumes right after, so each loan
+/// set is read once, after it was charged where it was built.
+fn assigned_local_store(value: &Held, node: NodeId) -> Option<(NodeId, NodeId)> {
+    value
+        .loans
+        .iter()
+        .find(|loan| loan.kind.borrows_local_storage())
+        .map(|loan| (node, loan.site))
+}
+
 fn check_retained(
     retained: &BTreeMap<Slot, RetainedContents>,
     state: &[State],
@@ -1300,18 +1314,40 @@ fn check_retained(
             continue;
         };
         let site = value.origin.stored_at().unwrap_or(node);
+        let mut first_local = None;
         for loan in value.loans.iter() {
             budget.step(1)?;
             if loan.kind.borrows_local_storage() {
-                return Err(Stop::Rejected {
-                    site,
-                    related: loan.site,
-                    kind: escape,
-                });
+                match value.local_store {
+                    Some((call, borrow)) if loan.site == borrow => {
+                        return Err(Stop::Rejected {
+                            site: call,
+                            related: borrow,
+                            kind: escape,
+                        });
+                    }
+                    Some(_) => {
+                        first_local.get_or_insert(loan.site);
+                    }
+                    None => {
+                        return Err(Stop::Rejected {
+                            site,
+                            related: loan.site,
+                            kind: escape,
+                        });
+                    }
+                }
             }
             if !retains_exclusive_bool {
                 unhandled_restriction.get_or_insert(site);
             }
+        }
+        if let Some(related) = first_local {
+            return Err(Stop::Rejected {
+                site,
+                related,
+                kind: escape,
+            });
         }
     }
     // Local access restrictions in outward storage need a supported contract.
@@ -3539,9 +3575,30 @@ pub(super) fn run<'a, 'g>(
                             initialized(&state[slot], node)?;
                             include_loans(&mut loans, &state, slots[slot].storage(slot), budget)?;
                         }
+                        let local_store = if matches!(
+                            target,
+                            RetainedPlace::ThroughParameter(_)
+                                | RetainedPlace::ThroughTwoHopParameter { .. }
+                                | RetainedPlace::ThroughParameterAlias { .. }
+                        ) {
+                            match &state[contents] {
+                                State::Initialized(old)
+                                    if old.loans.iter().any(|l| l.kind.borrows_local_storage()) =>
+                                {
+                                    old.local_store
+                                }
+                                _ => loans
+                                    .iter()
+                                    .find(|l| l.kind.borrows_local_storage())
+                                    .map(|l| (node, l.site)),
+                            }
+                        } else {
+                            None
+                        };
                         // The access argument is temporary. It cannot become a
                         // backing source of the very descriptor it gives access to.
                         let held = Held {
+                            local_store,
                             loans: loan_set(loans, budget)?,
                             origin: if matches!(
                                 target,
@@ -4739,6 +4796,11 @@ pub(super) fn run<'a, 'g>(
                     } else {
                         ValueOrigin::Untracked
                     };
+                    value.local_store = if matches!(target, ExactTarget::Caller { .. }) {
+                        assigned_local_store(&value, node)
+                    } else {
+                        None
+                    };
                     state[target.contents_slot()] = State::Initialized(value);
                     state[incoming] = State::Vacant;
                     Operation::InstallThrough {
@@ -4782,6 +4844,7 @@ pub(super) fn run<'a, 'g>(
                         budget,
                     )?;
                     value.origin = ValueOrigin::RetainedStore(node);
+                    value.local_store = assigned_local_store(&value, node);
                     state[route.contents] = State::Initialized(value);
                     state[incoming] = State::Vacant;
                     Operation::InstallThroughTwoHop {

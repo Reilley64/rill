@@ -151,7 +151,7 @@ fn original_two_hop_relay_checks_reached_bodies_and_preserves_backing() {
             for (name, origin, site) in [
                 ("relayBad", "leak", b"**slot = &flag;".as_slice()),
                 ("relayLocal", "relayLocal", b"keep(slot, &flag)"),
-                ("relayTwice", "relayTwice", b"keep(slot, input)"),
+                ("relayTwice", "relayTwice", b"keep(slot, &flag)"),
                 ("early", "early", b"ignore(slot, &flag)"),
             ] {
                 let report = lower(name);
@@ -173,7 +173,10 @@ fn original_two_hop_relay_checks_reached_bodies_and_preserves_backing() {
                     assert!(body.start() <= site.span.start() && site.span.end() <= body.end());
                 }
                 if name == "relayTwice" {
-                    assert!(finding.related.span.end() < finding.site.span.start());
+                    assert!(
+                        finding.site.span.start() < finding.related.span.start()
+                            && finding.related.span.end() < finding.site.span.end()
+                    );
                 }
             }
             for (name, code, site, related) in [
@@ -2855,7 +2858,7 @@ fn moved_incoming_access_keeps_the_original_caller_destination() {
                 assert_eq!(finding.related.span.bytes(), related);
                 if code == "R0202" {
                     let store = if name == "escapeAfterMove" {
-                        b"remember(access, input)".as_slice()
+                        b"*slot = &flag;".as_slice()
                     } else {
                         b"remember(access, &flag)"
                     };
@@ -3978,7 +3981,7 @@ fn retaining_option_call_preserves_old_and_possible_new_backing_in_caller() {
             // returns Some, but neither fact narrows its declared contract.
             for (name, call) in [
                 ("newBacking", b"ignore(slot, &flag, gate)".as_slice()),
-                ("oldBacking", b"ignore(slot, seed, gate)".as_slice()),
+                ("oldBacking", b"*slot = &flag;".as_slice()),
             ] {
                 let report = lower(name);
                 assert_eq!(
