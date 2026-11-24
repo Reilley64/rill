@@ -395,13 +395,15 @@ class WorkflowTests(unittest.TestCase):
 class NativeAcceptanceTests(unittest.TestCase):
     STEP = "Test: Verify native runtime acceptance is unavailable"
 
-    def run_step(self, mise_script):
+    RELEASE_STEP = "Build and test: Verify release acceptance stops at the unavailable build"
+    BUILD_STUB = f'exec "{sys.executable}" tools/unavailable.py build\n'
+
+    def run_step(self, mise_script, step_name=STEP, command="mise run test:runtime"):
         workflow = yaml.load((doctor.ROOT / ".github/workflows/native.yml").read_text(), Loader=yaml.BaseLoader)
         steps = workflow["jobs"]["native"]["steps"]
-        self.assertEqual([step["name"] for step in steps].count(self.STEP), 1)
-        script = next(step["run"] for step in steps if step["name"] == self.STEP)
-        self.assertEqual([step["name"] for step in steps if "mise run test:runtime" in step.get("run", "")],
-                         [self.STEP])
+        self.assertEqual([step["name"] for step in steps].count(step_name), 1)
+        script = next(step["run"] for step in steps if step["name"] == step_name)
+        self.assertEqual([step["name"] for step in steps if command in step.get("run", "")], [step_name])
         with tempfile.TemporaryDirectory() as directory:
             mise = Path(directory) / "mise"
             mise.write_text("#!/bin/sh\n" + mise_script)
@@ -419,6 +421,33 @@ class NativeAcceptanceTests(unittest.TestCase):
                        "echo 'unrelated is not implemented in this scaffold' >&2\nexit 2\n"]:
             with self.subTest(script=script):
                 self.assertNotEqual(self.run_step(script).returncode, 0)
+
+    def run_release(self, mise_script):
+        guard = '[ "$1 $2" != "run verify:release" ] && exit 64\n'
+        return self.run_step(guard + mise_script, self.RELEASE_STEP, "mise run verify:release")
+
+    def test_the_release_step_runs_only_on_dispatch(self):
+        workflow = yaml.load((doctor.ROOT / ".github/workflows/native.yml").read_text(), Loader=yaml.BaseLoader)
+        step = next(step for step in workflow["jobs"]["native"]["steps"] if step["name"] == self.RELEASE_STEP)
+        self.assertEqual(step["if"], "github.event_name == 'workflow_dispatch'")
+
+    def test_the_build_stub_after_passing_checks_is_asserted(self):
+        result = self.run_release("echo 'checks passed'\n" + self.BUILD_STUB)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_a_failing_check_still_fails_the_release_step(self):
+        for script in ["echo 'check failed' >&2\nexit 1\n", "echo 'check failed' >&2\nexit 2\n",
+                       "echo 'build is not implemented in this scaffold' >&2\nexit 1\n"]:
+            with self.subTest(script=script):
+                self.assertNotEqual(self.run_release(script).returncode, 0)
+
+    def test_a_changed_stub_or_a_successful_release_fails_the_release_step(self):
+        for script in ["exit 0\n", "echo 'build exists' >&2\nexit 2\n",
+                       "echo 'unrelated is not implemented in this scaffold' >&2\nexit 2\n"]:
+            with self.subTest(script=script):
+                result = self.run_release(script)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("::error::verify:release no longer stops at the build stub", result.stdout)
 
 
 class TestTaskTests(unittest.TestCase):

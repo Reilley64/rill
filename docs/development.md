@@ -69,7 +69,7 @@ A distribution that claims language server support must also pass `test:lsp-clie
 | `test:llvm` | LLVM C-API compile/link smoke only, not a Rill backend or inkwell integration test. |
 | `experiment:*` | Explicit entry points for existing reproductions, with their original scope and prerequisites. |
 
-`Test: Scaffold checks` configures the LLVM-free checks on four GitHub-hosted OS/architecture profiles. `Test: Native acceptance` runs for native-impacting changes and manual dispatch. It currently fails at `test:runtime` because native acceptance is absent; this is intentional, not a passing native profile. A manual run also requires `verify:release` after native acceptance succeeds. Neither workflow installs LLVM or publishes releases.
+`Test: Scaffold checks` configures the LLVM-free checks on four GitHub-hosted OS/architecture profiles. `Test: Native acceptance` runs for native-impacting changes and manual dispatch. It asserts that `test:runtime` exits 2 with the scaffold message because native acceptance is absent; that is not a passing native profile. A manual run also asserts that `verify:release` passes the repository checks and then stops at the same stub for `build`; replace both assertions when the tasks exist. Neither workflow installs LLVM or publishes releases.
 
 Both workflows use explicit runner-local Cargo and Rustup homes before mise installs tools. Nested mise tasks then retain the same Rustup provider, instead of losing the runner's external provider during tool lookup. Workflow names and YAML layout follow the [GitHub automation guide](../.github/AGENTS.md).
 
