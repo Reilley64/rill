@@ -104,7 +104,7 @@ class CommentCheckSourceTests(unittest.TestCase):
             "SAFETY on an unsafe block": "fn f() {\n    // SAFETY: the pointer is live.\n    unsafe { g() };\n}\n",
             "SAFETY on a let": "fn f() {\n    // SAFETY: held.\n    let x = unsafe { g() };\n}\n",
             "multi-line SAFETY on an unsafe impl": "// SAFETY: the cell is\n// only read here.\nunsafe impl Send for S {}\n",
-            "bead link": "fn f() {}\n// ri-qlh.18.6\n// ci-snb8\n",
+            "bead link": "fn f() {}\n// ri-qlh.18.6\n// ci-snb8\n// ri-abcd12\n",
             "RFC link": "// docs/rfcs/0007-ownership-borrowing-mutation-and-cleanup.md\nfn f() {}\n",
             "RFC link with anchor": "// docs/rfcs/0007-ownership.md#cleanup\nfn f() {}\n",
             "ADR link": "fn f() {} // docs/adr/0001-record.md\n",

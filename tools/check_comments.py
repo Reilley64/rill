@@ -24,7 +24,7 @@ MESSAGE = (
 
 IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 RAW_OPEN = re.compile(r'(#*)"')
-BEAD = r"(?:ri|ci)-[a-z0-9]{3,4}(?:\.\d+)*"
+BEAD = r"(?:ri|ci)-[a-z0-9]{3,8}(?:\.\d+)*"
 DOCUMENT = r"docs/(?:rfcs|adr)/[\w./-]+(?:#[\w-]+)?"
 LINK_ONLY = re.compile(f"(?:{BEAD}|{DOCUMENT})")
 LICENSE = re.compile(r"licen[sc]e|copyright|spdx", re.IGNORECASE)
