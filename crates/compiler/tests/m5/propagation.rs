@@ -4,6 +4,8 @@ use super::*;
 mod closeout;
 #[path = "propagation/exclusive_option_caller.rs"]
 mod exclusive_option_caller;
+#[path = "propagation/guard_release.rs"]
+mod guard_release;
 #[path = "propagation/option_caller.rs"]
 mod option_caller;
 #[path = "propagation/result_text.rs"]
