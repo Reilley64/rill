@@ -131,23 +131,29 @@ impl InstalledProfile {
         self,
     ) -> &'static [(&'static str, &'static str, &'static [&'static str])] {
         match self {
-            Self::Native => &[("std.rill", "output", &["log", "panic"])],
+            Self::Native => &[
+                ("std.rill", "output", &["log", "panic"]),
+                ("string.rill", "stringappend", &["append"]),
+            ],
         }
     }
 
-    pub(super) fn demands(self, import: &Import) -> bool {
+    pub(super) fn demands(self, import: &Import, entry: usize) -> bool {
+        let Some(&(facade, module, names)) = self.on_demand().get(entry) else {
+            return false;
+        };
         let named =
             |name: &str, module: &str, names: &[&str]| name == module || names.contains(&name);
+        let stem = facade.strip_suffix(".rill").unwrap_or(facade);
+        let depth = if stem == "std" { 1 } else { 2 };
         import.path.first().is_some_and(|s| s == "std")
-            && self
-                .on_demand()
-                .iter()
-                .any(|&(_, module, names)| match import.path.get(1) {
-                    Some(name) => named(name, module, names),
-                    None => import.items.as_ref().is_none_or(|items| {
-                        items.iter().any(|item| named(&item.name, module, names))
-                    }),
-                })
+            && (depth == 1 || import.path.get(1).is_some_and(|s| s == stem))
+            && match import.path.get(depth) {
+                Some(name) => named(name, module, names),
+                None => import.items.as_ref().is_some_and(|items| {
+                    items.iter().any(|item| named(&item.name, module, names))
+                }) || (depth == 1 && import.items.is_none()),
+            }
     }
 
     pub(super) fn conversion_metadata(self) -> &'static [&'static str] {
@@ -173,6 +179,9 @@ impl InstalledProfile {
         }
         if path == "output.rill" {
             return Some(include_bytes!("../../../../stdlib/output.rill"));
+        }
+        if path == "stringappend.rill" {
+            return Some(include_bytes!("../../../../stdlib/stringappend.rill"));
         }
         self.sources()
             .iter()

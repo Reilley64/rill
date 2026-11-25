@@ -3693,6 +3693,14 @@ pub(super) fn run<'a, 'g>(
                                 message: local(*argument),
                             }
                         }
+                    } else if matches!(call.result, CallResult::AppendText) {
+                        let [target, text] = call.args.as_slice() else {
+                            return Err(Stop::Pending(node));
+                        };
+                        Operation::AppendText {
+                            target: local(*target),
+                            text: local(*text),
+                        }
                     } else if matches!(call.result, CallResult::ScalarCopy) {
                         let [argument] = call.args.as_slice() else {
                             return Err(Stop::Pending(node));

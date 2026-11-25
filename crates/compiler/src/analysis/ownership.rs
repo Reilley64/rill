@@ -700,6 +700,13 @@ pub enum Operation<'g> {
     Panic {
         message: Place<'g>,
     },
+    /// Append the string a staged shared descriptor refers to to the owned
+    /// string an exclusive descriptor refers to. The call ends both
+    /// descriptors only.
+    AppendText {
+        target: Place<'g>,
+        text: Place<'g>,
+    },
     /// Move a staged pair owner through a closed ordinary specialization, not
     /// an erased invocation or a proof for the callee's open source root.
     CallCallableTransfer {
@@ -2965,6 +2972,7 @@ enum CallResult<'a, 'g> {
     TransfersCallable(&'a DeclarationFacts<'g>),
     WriteLine,
     Panic,
+    AppendText,
 }
 
 #[derive(Clone, Copy)]

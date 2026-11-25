@@ -1,0 +1,4 @@
+// Growth of an owned string. The primitive calls a privately bound compiler operation.
+export function append(target: &mut string, text: &string): void { appendBytes(target, text); }
+
+function appendBytes(target: &mut string, text: &string): void;

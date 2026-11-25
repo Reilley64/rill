@@ -212,6 +212,15 @@ impl<'g> TypedReport<'g> {
             })
     }
 
+    pub(in crate::analysis) fn bridge_count(&self) -> usize {
+        self.core.primitives.bridges.len()
+    }
+
+    /// Whether `bridge` is the private `appendBytes` binding of the pinned append module.
+    pub fn append_bridge(&self, bridge: &crate::loader::DeclarationId) -> bool {
+        self.core.primitives.bridges.get(bridge) == Some(&PrimitiveOperation::AppendText)
+    }
+
     pub fn primitive_protection(&self) -> &[PrimitiveProtection<'g>] {
         &self.core.primitives.protection
     }

@@ -50,6 +50,8 @@ pub enum PrimitiveOperation {
     WriteLine,
     /// End the program, reporting the borrowed text. It never returns.
     Panic,
+    /// Append the borrowed text to the exclusively borrowed owned string.
+    AppendText,
 }
 
 impl PrimitiveOperation {

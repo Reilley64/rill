@@ -365,6 +365,12 @@ impl<'g> PrimitiveCore<'g> {
                 self.output.push((&family.id, operation));
             }
         }
+        if let Some(module) = pinned_module(graph, "stringappend.rill", budget)?
+            && let Some(bridge) = check_append_binding(inventory, module, budget)?
+        {
+            budget.reserve(1)?;
+            self.bridges.insert(&bridge.id, PrimitiveOperation::AppendText);
+        }
         Ok(())
     }
 
@@ -634,6 +640,35 @@ fn check_output_binding<'g>(
             && input_type(&parameter.ty, PrimitiveRole::Show).and_then(primitive_name)
                 == Some("string")
             && primitive_name(actual) == Some(result)
+        {
+            return Ok(Some(declaration));
+        }
+    }
+    Ok(None)
+}
+
+fn check_append_binding<'g>(
+    inventory: &OrdinaryAnalysis<'g>,
+    module: &'g Module,
+    budget: &mut Budget,
+) -> Work<Option<&'g Declaration>> {
+    let text = |ty: &Type<'_>| primitive_name(ty) == Some("string");
+    for declaration in &module.declarations {
+        budget.step(1)?;
+        if !declaration.public
+            && declaration.scope.is_none()
+            && declaration.id.kind == DeclarationKind::Family
+            && declaration.name.as_deref() == Some("appendBytes")
+            && inventory
+                .captured_family(&declaration.id)
+                .is_some_and(|f| f.implementations.is_empty())
+            && let Some(signature) = family_header(inventory, declaration, budget)?
+            && let DeclarationShape::Function { parameters, result } = &signature.shape
+            && signature.binders.is_empty()
+            && let [target, source] = parameters.as_slice()
+            && matches!(target.ty.as_ref(), TypeTerm::Reference { mutable: true, referent } if text(referent))
+            && matches!(source.ty.as_ref(), TypeTerm::Reference { mutable: false, referent } if text(referent))
+            && primitive_name(result) == Some("void")
         {
             return Ok(Some(declaration));
         }

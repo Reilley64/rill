@@ -8187,6 +8187,82 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         self.expression(*argument, Some(stage), call_pc, depth + 1)
     }
 
+    fn call_append(
+        &mut self,
+        node: NodeId,
+        facts: &ExpressionFacts<'g>,
+        call: &CallFacts<'g>,
+        into: Option<Slot>,
+        next: Pc,
+        depth: usize,
+    ) -> ResultOf<Pc> {
+        let pending = || Stop::Pending(node);
+        let [target, text] = call.arguments.as_slice() else {
+            return Err(pending());
+        };
+        let bridge = call.callee.kind == DeclarationKind::Family;
+        if !(bridge || call.callee.kind == DeclarationKind::Function)
+            || !call.substitution.is_empty()
+            || call.selection.is_some()
+            || call.pipe_input.is_some()
+            || !call.defaults.is_empty()
+            || call.scoped_join.is_some()
+            || call.list_arrows.is_some()
+            || !matches!(facts.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "void")
+        {
+            return Err(pending());
+        }
+        let target_ty = self.value(*target)?.ty.clone();
+        let text_ty = self.value(*text)?.ty.clone();
+        let string = |ty: &TypeTerm<'_>| matches!(ty, TypeTerm::Primitive(p) if p.name() == "string");
+        if !matches!(target_ty.as_ref(), TypeTerm::Reference { mutable: true, referent } if string(referent))
+            || !matches!(text_ty.as_ref(), TypeTerm::Reference { mutable: false, referent } if string(referent))
+        {
+            return Err(pending());
+        }
+        if bridge {
+            keyed::charge(&call.callee.module, self.typed.bridge_count(), self.budget)?;
+            if !self.typed.append_bridge(call.callee) {
+                return Err(pending());
+            }
+        }
+        self.budget.reserve(3)?;
+        let target_stage = self.slot(*target, &target_ty)?;
+        let text_stage = self.slot(*text, &text_ty)?;
+        let index = self.calls.len();
+        self.calls.push(Call {
+            callee: call.callee,
+            forwarding_prefix: None,
+            args: vec![target_stage, text_stage],
+            into,
+            result: if bridge {
+                CallResult::AppendText
+            } else {
+                CallResult::Plain
+            },
+            destination: None,
+        });
+        let call_pc = self.emit(node, Action::Call(index), Edges::Next(next))?;
+        let staged_text = self.expression(*text, Some(text_stage), call_pc, depth + 1)?;
+        self.budget.step(1)?;
+        let root = self.ungroup(*target)?;
+        if matches!(self.module.syntax.nodes[root].kind, NodeKind::Prefix("&mut")) {
+            return self.expression(*target, Some(target_stage), staged_text, depth + 1);
+        }
+        self.budget.step(1)?;
+        let parent = self.place(root)?;
+        self.emit(
+            *target,
+            Action::Reborrow {
+                parent,
+                into: target_stage,
+                exclusive: true,
+                suspends: true,
+            },
+            Edges::Next(staged_text),
+        )
+    }
+
     fn call(
         &mut self,
         node: NodeId,
@@ -8305,6 +8381,12 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             && call.callee.module.path == "output.rill"
         {
             return self.call_output(node, facts, call, into, next, depth);
+        }
+        if checked_carrier.is_none()
+            && call.callee.module.origin == Origin::Standard
+            && call.callee.module.path == "stringappend.rill"
+        {
+            return self.call_append(node, facts, call, into, next, depth);
         }
         if checked_carrier.is_none()
             && let Some(join) = call.scoped_join.as_deref()

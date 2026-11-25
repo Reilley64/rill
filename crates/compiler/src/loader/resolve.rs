@@ -206,7 +206,9 @@ impl Engine {
                 self.add_module(Origin::Standard, path)?;
             }
         }
-        let mut demanded = false;
+        let entries = self.installed.map_or(0, |profile| profile.on_demand().len());
+        let mut demanded = vec![false; entries];
+        let mut loaded = vec![false; entries];
         loop {
             while let Some(key) = self.pending.pop_front() {
                 self.host.charge(1)?;
@@ -216,20 +218,30 @@ impl Engine {
                     &mut self.next_ordinal,
                 )?;
                 for import in &mut imports {
-                    demanded |= self
-                        .installed
-                        .is_some_and(|profile| profile.demands(import));
+                    if let Some(profile) = self.installed {
+                        for (entry, demanded) in demanded.iter_mut().enumerate() {
+                            *demanded |= profile.demands(import, entry);
+                        }
+                    }
                     self.discover(import)?;
                 }
                 self.imports.extend(imports);
             }
-            let Some(profile) = self.installed.filter(|_| demanded) else {
+            let Some(profile) = self.installed else {
                 break;
             };
-            demanded = false;
-            for &(facade, module, names) in profile.on_demand() {
+            let mut discovered = false;
+            for (entry, &(facade, module, names)) in profile.on_demand().iter().enumerate() {
+                if !std::mem::take(&mut demanded[entry]) || loaded[entry] {
+                    continue;
+                }
+                loaded[entry] = true;
+                discovered = true;
                 self.host.charge(1 + names.len())?;
                 self.discover_on_demand(facade, module, names)?;
+            }
+            if !discovered {
+                break;
             }
         }
         let metadata = self.capture_installed_metadata(complete)?;
