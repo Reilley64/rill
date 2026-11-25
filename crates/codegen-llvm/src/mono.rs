@@ -25,6 +25,7 @@ pub(crate) fn suffix(substitution: &[Type]) -> String {
         .map(|ty| match ty {
             Type::Owned => "string",
             Type::View => "&string",
+            Type::Exclusive => "&mut string",
         })
         .collect();
     format!("<{}>", arguments.join(","))

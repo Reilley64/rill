@@ -13,7 +13,7 @@ use inkwell::module::{Linkage, Module as LlvmModule};
 use inkwell::targets::{
     CodeModel, FileType, InitializationConfig, RelocMode, Target, TargetMachine,
 };
-use inkwell::types::{BasicMetadataTypeEnum, IntType, PointerType};
+use inkwell::types::{BasicMetadataTypeEnum, IntType, PointerType, StructType};
 use inkwell::values::{
     BasicMetadataValueEnum, FunctionValue, GlobalValue, IntValue, PointerValue, ValueKind,
 };
@@ -43,17 +43,12 @@ enum Value<'ctx> {
         pointer: PointerValue<'ctx>,
         length: IntValue<'ctx>,
     },
-}
-
-impl<'ctx> Value<'ctx> {
-    fn view(self) -> (PointerValue<'ctx>, IntValue<'ctx>) {
-        match self {
-            Self::Owned {
-                pointer, length, ..
-            }
-            | Self::View { pointer, length } => (pointer, length),
-        }
-    }
+    Cell {
+        cell: PointerValue<'ctx>,
+    },
+    Exclusive {
+        cell: PointerValue<'ctx>,
+    },
 }
 
 type Values<'ctx> = BTreeMap<NodeId, Value<'ctx>>;
@@ -258,7 +253,9 @@ impl<'ctx> Emitter<'_, 'ctx> {
         let mut parameters: Vec<BasicMetadataTypeEnum<'ctx>> = Vec::new();
         for (_, ty) in &signature.parameters {
             parameters.push(self.pointer.into());
-            parameters.push(self.word.into());
+            if *ty != Type::Exclusive {
+                parameters.push(self.word.into());
+            }
             if *ty == Type::Owned {
                 parameters.push(self.word.into());
             }
@@ -293,6 +290,10 @@ impl<'ctx> Emitter<'_, 'ctx> {
         };
         for (node, ty) in &signature.parameters {
             let pointer = next()?.into_pointer_value();
+            if *ty == Type::Exclusive {
+                values.insert(*node, Value::Exclusive { cell: pointer });
+                continue;
+            }
             let length = next()?.into_int_value();
             let value = match ty {
                 Type::Owned => Value::Owned {
@@ -301,6 +302,7 @@ impl<'ctx> Emitter<'_, 'ctx> {
                     capacity: next()?.into_int_value(),
                 },
                 Type::View => Value::View { pointer, length },
+                Type::Exclusive => continue,
             };
             values.insert(*node, value);
         }
@@ -371,15 +373,41 @@ impl<'ctx> Emitter<'_, 'ctx> {
                 source,
                 holder,
                 exclusive: false,
+            }
+            | Operation::Reborrow {
+                parent: source,
+                holder,
+                exclusive: false,
             } => {
-                let (pointer, length) = lookup(values, source, site)?.view();
+                let (pointer, length) = self.view_of(values, source, site)?;
                 values.insert(slot(holder, site)?, Value::View { pointer, length });
+            }
+            Operation::Borrow {
+                source,
+                holder,
+                exclusive: true,
+            } => {
+                let cell = self.cell_of(values, source, site)?;
+                values.insert(slot(holder, site)?, Value::Exclusive { cell });
+            }
+            Operation::Reborrow {
+                parent,
+                holder,
+                exclusive: true,
+            } => {
+                let cell = self.cell_of(values, parent, site)?;
+                values.insert(slot(holder, site)?, Value::Exclusive { cell });
+            }
+            Operation::AppendText { target, text } => {
+                let cell = self.cell_of(values, target, site)?;
+                let (pointer, length) = self.view_of(values, text, site)?;
+                self.append_text(cell, pointer, length)?;
             }
             Operation::Copy {
                 from,
                 into: Some(into),
             } => {
-                let value = lookup(values, from, site)?;
+                let value = self.read(values, from, site)?;
                 if !matches!(value, Value::View { .. }) {
                     return Err(BackendError::unsupported(site, "a copy of an owned string"));
                 }
@@ -389,12 +417,12 @@ impl<'ctx> Emitter<'_, 'ctx> {
                 from,
                 into: Some(into),
             } => {
-                let value = lookup(values, from, site)?;
+                let value = self.read(values, from, site)?;
                 values.insert(slot(into, site)?, value);
             }
             Operation::Call(id) => self.call(block, module, id, values)?,
             Operation::WriteLine { text } => {
-                let (pointer, length) = lookup(values, text, site)?.view();
+                let (pointer, length) = self.view_of(values, text, site)?;
                 self.call_runtime(
                     "rill_rt_write_line",
                     self.context
@@ -404,7 +432,7 @@ impl<'ctx> Emitter<'_, 'ctx> {
                 )?;
             }
             Operation::Panic { message } => {
-                let (pointer, length) = lookup(values, message, site)?.view();
+                let (pointer, length) = self.view_of(values, message, site)?;
                 let function = self.runtime(
                     "rill_rt_panic",
                     self.context
@@ -423,13 +451,13 @@ impl<'ctx> Emitter<'_, 'ctx> {
                 emit(self.builder.build_unreachable())?;
                 return Ok(Flow::Diverged);
             }
-            Operation::Drop(place) => self.drop_value(lookup(values, place, site)?, site)?,
+            Operation::Drop(place) => self.drop_value(self.read(values, place, site)?, site)?,
             Operation::Cleanup(actions) => {
                 for action in actions {
                     match action {
                         Cleanup::EndStorage(_) => {}
                         Cleanup::Drop(place) => {
-                            self.drop_value(lookup(values, place, site)?, site)?;
+                            self.drop_value(self.read(values, place, site)?, site)?;
                         }
                         _ => return Err(BackendError::unsupported(site, "this cleanup action")),
                     }
@@ -479,7 +507,12 @@ impl<'ctx> Emitter<'_, 'ctx> {
         }
         let mut words: Vec<BasicMetadataValueEnum<'ctx>> = Vec::new();
         for (&argument, (_, ty)) in arguments.iter().zip(&signature.parameters) {
-            match (ty, argument_value(module, values, argument)?) {
+            let value = argument_value(module, values, argument)?;
+            if let (Type::Exclusive, Value::Exclusive { cell }) = (ty, value) {
+                words.push(cell.into());
+                continue;
+            }
+            match (ty, self.loaded(value)?) {
                 (
                     Type::Owned,
                     Value::Owned {
@@ -505,6 +538,187 @@ impl<'ctx> Emitter<'_, 'ctx> {
             }
         }
         emit(self.builder.build_call(function, &words, ""))?;
+        Ok(())
+    }
+
+    fn cell_type(&self) -> StructType<'ctx> {
+        self.context.struct_type(
+            &[self.pointer.into(), self.word.into(), self.word.into()],
+            false,
+        )
+    }
+
+    fn field(
+        &self,
+        cell: PointerValue<'ctx>,
+        index: u32,
+    ) -> Result<PointerValue<'ctx>, BackendError> {
+        emit(
+            self.builder
+                .build_struct_gep(self.cell_type(), cell, index, "field"),
+        )
+    }
+
+    fn load_pointer(&self, at: PointerValue<'ctx>) -> Result<PointerValue<'ctx>, BackendError> {
+        Ok(emit(self.builder.build_load(self.pointer, at, "pointer"))?.into_pointer_value())
+    }
+
+    fn load_word(&self, at: PointerValue<'ctx>) -> Result<IntValue<'ctx>, BackendError> {
+        Ok(emit(self.builder.build_load(self.word, at, "word"))?.into_int_value())
+    }
+
+    fn loaded(&self, value: Value<'ctx>) -> Result<Value<'ctx>, BackendError> {
+        let (Value::Cell { cell } | Value::Exclusive { cell }) = value else {
+            return Ok(value);
+        };
+        Ok(Value::Owned {
+            pointer: self.load_pointer(self.field(cell, 0)?)?,
+            length: self.load_word(self.field(cell, 1)?)?,
+            capacity: self.load_word(self.field(cell, 2)?)?,
+        })
+    }
+
+    fn read(
+        &self,
+        values: &Values<'ctx>,
+        place: &Place<'_>,
+        site: Site<'_>,
+    ) -> Result<Value<'ctx>, BackendError> {
+        let value = values
+            .get(&slot(place, site)?)
+            .copied()
+            .ok_or_else(|| BackendError::internal("a place read before it was initialized"))?;
+        self.loaded(value)
+    }
+
+    fn view_of(
+        &self,
+        values: &Values<'ctx>,
+        place: &Place<'_>,
+        site: Site<'_>,
+    ) -> Result<(PointerValue<'ctx>, IntValue<'ctx>), BackendError> {
+        match self.read(values, place, site)? {
+            Value::Owned {
+                pointer, length, ..
+            }
+            | Value::View { pointer, length } => Ok((pointer, length)),
+            Value::Cell { .. } | Value::Exclusive { .. } => {
+                Err(BackendError::internal("a cell that was not loaded"))
+            }
+        }
+    }
+
+    fn cell_of(
+        &self,
+        values: &mut Values<'ctx>,
+        place: &Place<'_>,
+        site: Site<'_>,
+    ) -> Result<PointerValue<'ctx>, BackendError> {
+        let at = slot(place, site)?;
+        let value = values
+            .get(&at)
+            .copied()
+            .ok_or_else(|| BackendError::internal("a place borrowed before it was initialized"))?;
+        match value {
+            Value::Cell { cell } | Value::Exclusive { cell } => Ok(cell),
+            Value::Owned {
+                pointer,
+                length,
+                capacity,
+            } => {
+                let cell = emit(self.builder.build_alloca(self.cell_type(), "string"))?;
+                emit(self.builder.build_store(self.field(cell, 0)?, pointer))?;
+                emit(self.builder.build_store(self.field(cell, 1)?, length))?;
+                emit(self.builder.build_store(self.field(cell, 2)?, capacity))?;
+                values.insert(at, Value::Cell { cell });
+                Ok(cell)
+            }
+            Value::View { .. } => Err(BackendError::unsupported(
+                site,
+                "an exclusive borrow of a view",
+            )),
+        }
+    }
+
+    fn append_text(
+        &self,
+        cell: PointerValue<'ctx>,
+        text: PointerValue<'ctx>,
+        text_length: IntValue<'ctx>,
+    ) -> Result<(), BackendError> {
+        let Some(function) = self.builder.get_insert_block().and_then(|b| b.get_parent()) else {
+            return Err(BackendError::internal("an append outside a function"));
+        };
+        let pointer = self.load_pointer(self.field(cell, 0)?)?;
+        let length = self.load_word(self.field(cell, 1)?)?;
+        let capacity = self.load_word(self.field(cell, 2)?)?;
+        let needed = emit(self.builder.build_int_add(length, text_length, "needed"))?;
+        let fits =
+            emit(
+                self.builder
+                    .build_int_compare(IntPredicate::ULE, needed, capacity, "fits"),
+            )?;
+        let current = self.context.append_basic_block(function, "append.current");
+        let grow = self.context.append_basic_block(function, "append.grow");
+        let copy = self.context.append_basic_block(function, "append.copy");
+        emit(self.builder.build_conditional_branch(fits, current, grow))?;
+        self.builder.position_at_end(grow);
+        let doubled = emit(self.builder.build_int_add(capacity, capacity, "doubled"))?;
+        let larger =
+            emit(
+                self.builder
+                    .build_int_compare(IntPredicate::UGT, doubled, needed, "larger"),
+            )?;
+        let grown =
+            emit(self.builder.build_select(larger, doubled, needed, "grown"))?.into_int_value();
+        let one = self.word.const_int(1, false);
+        let function_grow = self.runtime(
+            "rill_rt_grow",
+            self.pointer.fn_type(
+                &[
+                    self.pointer.into(),
+                    self.word.into(),
+                    self.word.into(),
+                    self.word.into(),
+                ],
+                false,
+            ),
+        );
+        let moved = match emit(self.builder.build_call(
+            function_grow,
+            &[pointer.into(), capacity.into(), one.into(), grown.into()],
+            "grown",
+        ))?
+        .try_as_basic_value()
+        {
+            ValueKind::Basic(value) => value.into_pointer_value(),
+            ValueKind::Instruction(_) => {
+                return Err(BackendError::internal("the allocator returned no pointer"));
+            }
+        };
+        emit(self.builder.build_unconditional_branch(copy))?;
+        self.builder.position_at_end(current);
+        emit(self.builder.build_unconditional_branch(copy))?;
+        self.builder.position_at_end(copy);
+        let backing = emit(self.builder.build_phi(self.pointer, "backing"))?;
+        backing.add_incoming(&[(&pointer, current), (&moved, grow)]);
+        let room = emit(self.builder.build_phi(self.word, "room"))?;
+        room.add_incoming(&[(&capacity, current), (&grown, grow)]);
+        let backing = backing.as_basic_value().into_pointer_value();
+        // SAFETY: `backing` holds at least `needed` bytes, so `length` bytes in is in bounds.
+        let at = unsafe {
+            emit(
+                self.builder
+                    .build_gep(self.context.i8_type(), backing, &[length], "end"),
+            )?
+        };
+        emit(self.builder.build_memcpy(at, 1, text, 1, text_length))?;
+        emit(self.builder.build_store(self.field(cell, 0)?, backing))?;
+        emit(self.builder.build_store(self.field(cell, 1)?, needed))?;
+        emit(
+            self.builder
+                .build_store(self.field(cell, 2)?, room.as_basic_value().into_int_value()),
+        )?;
         Ok(())
     }
 
@@ -653,17 +867,6 @@ fn slot(place: &Place<'_>, site: Site<'_>) -> Result<NodeId, BackendError> {
         None => Ok(place.root.node),
         Some(_) => Err(BackendError::unsupported(site, "a projected place")),
     }
-}
-
-fn lookup<'ctx>(
-    values: &Values<'ctx>,
-    place: &Place<'_>,
-    site: Site<'_>,
-) -> Result<Value<'ctx>, BackendError> {
-    values
-        .get(&slot(place, site)?)
-        .copied()
-        .ok_or_else(|| BackendError::internal("a place read before it was initialized"))
 }
 
 fn argument_value<'ctx>(

@@ -7,6 +7,7 @@ use compiler::parser::{Node, NodeId, NodeKind};
 pub(crate) enum Type {
     Owned,
     View,
+    Exclusive,
 }
 
 #[derive(Clone, Debug)]
@@ -129,6 +130,11 @@ fn parameter_type(module: &Module, annotation: NodeId) -> Result<Option<Type>, B
             if self::node(module, *referent)?.span.bytes() == b"string" =>
         {
             Some(Type::View)
+        }
+        (NodeKind::ReferenceType { mutable: true }, [referent])
+            if self::node(module, *referent)?.span.bytes() == b"string" =>
+        {
+            Some(Type::Exclusive)
         }
         _ => None,
     })
