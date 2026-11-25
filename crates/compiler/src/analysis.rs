@@ -1236,6 +1236,11 @@ impl<'g> Analyzer<'g> {
         Ok(())
     }
 }
+impl crate::loader::keyed::Meter for Analyzer<'_> {
+    fn step(&mut self, n: usize) -> Work<()> {
+        Analyzer::step(self, n)
+    }
+}
 
 pub fn analyze_declaration_types(
     graph: &Graph,

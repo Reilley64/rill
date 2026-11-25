@@ -120,7 +120,7 @@ fn record_yield_cleans_the_partial_item_then_the_suffix() {
         SOURCE,
         |request, module, receipt, typed| {
             let capture = loader::load_installed(request.clone()).unwrap();
-            let receipt_stats = stats(384_367, 56_096, 12);
+            let receipt_stats = stats(514_934, 56_114, 12);
             crate::limit::assert_stats(receipt.statistics(), receipt_stats, "");
             let (exact, short) = limits(receipt_stats);
             let at = crate::limit::measured(

@@ -1797,8 +1797,8 @@ fn installed_pair_invocation(request: &InstalledRequest) {
             "analyze_typed",
             "baseline",
             AnalysisLimits {
-                max_work: 372214,
-                max_entries: 54755,
+                max_work: 507785,
+                max_entries: 54774,
                 max_depth: 12,
             },
             |limits| analyze_typed(&graph, limits),

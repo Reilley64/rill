@@ -607,14 +607,18 @@ impl<'a, 'g> Check<'a, 'g> {
         Ok(match tag {
             Constructor::Tuple(_) => ResultComponent::TupleElement(index),
             Constructor::Record(id) => {
-                let DeclarationShape::Record { fields } =
-                    &self.inventory.type_facts().declarations[*id].shape
-                else {
+                let declarations = &self.inventory.type_facts().declarations;
+                keyed::charge(&id.module, declarations.len(), self.budget)?;
+                let DeclarationShape::Record { fields } = &declarations[*id].shape else {
                     unreachable!()
                 };
                 ResultComponent::Field(&fields[index].declaration.id)
             }
-            Constructor::Variant(variant) => match self.variants[variant] {
+            Constructor::Variant(variant) => match self
+                .variants
+                .get(variant, self.budget)?
+                .expect("every constructor variant has a payload")
+            {
                 Payload::Record(fields) => ResultComponent::Field(&fields[index].declaration.id),
                 _ => ResultComponent::VariantPayload { variant, index },
             },

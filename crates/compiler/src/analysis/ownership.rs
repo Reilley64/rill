@@ -2829,18 +2829,18 @@ impl<'a, 'g> BuildFacts<'a, 'g> {
     }
 }
 
-struct OrdinalMap<V>(BTreeMap<DeclarationOrdinal, V>);
+pub(in crate::analysis) struct OrdinalMap<V>(BTreeMap<DeclarationOrdinal, V>);
 
 impl<V> OrdinalMap<V> {
-    fn new() -> Self {
+    pub(in crate::analysis) fn new() -> Self {
         Self(BTreeMap::new())
     }
 
-    fn get(&self, id: &DeclarationId) -> Option<&V> {
+    pub(in crate::analysis) fn get(&self, id: &DeclarationId) -> Option<&V> {
         self.0.get(&id.ordinal)
     }
 
-    fn insert(&mut self, id: &DeclarationId, value: V) -> Option<V> {
+    pub(in crate::analysis) fn insert(&mut self, id: &DeclarationId, value: V) -> Option<V> {
         self.0.insert(id.ordinal, value)
     }
 
