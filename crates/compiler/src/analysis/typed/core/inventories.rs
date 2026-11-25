@@ -24,12 +24,12 @@ impl<'g> InstalledOrdinaryScope<'g> {
     pub(in crate::analysis::typed) fn from_closed_roles(
         graph: &Graph,
         routine: Option<super::routine::RoutineRole<'g>>,
-        output: &[&'g DeclarationId],
+        output: &[(&'g DeclarationId, PrimitiveOperation)],
     ) -> Self {
         Self {
             context: graph.id(),
             routine,
-            output: output.to_vec(),
+            output: output.iter().map(|(family, _)| *family).collect(),
         }
     }
 

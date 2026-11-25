@@ -3684,6 +3684,19 @@ pub(super) fn run<'a, 'g>(
                                 destination,
                             }
                         }
+                    } else if matches!(call.result, CallResult::WriteLine | CallResult::Panic) {
+                        let [argument] = call.args.as_slice() else {
+                            return Err(Stop::Pending(node));
+                        };
+                        if matches!(call.result, CallResult::WriteLine) {
+                            Operation::WriteLine {
+                                text: local(*argument),
+                            }
+                        } else {
+                            Operation::Panic {
+                                message: local(*argument),
+                            }
+                        }
                     } else if matches!(call.result, CallResult::ScalarCopy) {
                         let [argument] = call.args.as_slice() else {
                             return Err(Stop::Pending(node));

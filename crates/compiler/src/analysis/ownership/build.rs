@@ -2638,6 +2638,8 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                     expression_depth,
                 )? {
                     self.lower_propagating_value_call(node, call, None, next, expression_depth)
+                } else if let Some((facts, call)) = self.output_call_statement(expression) {
+                    self.call_output(expression, facts, call, None, next, expression_depth)
                 } else {
                     self.discard(node, value, next, depth + 1)
                 }
@@ -8085,6 +8087,104 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         self.expression(*argument, Some(stage), call_pc, depth + 1)
     }
 
+    /// A statement call into the pinned output module whose result is
+    /// `never`. It does not reach the normal-flow discard, which needs a
+    /// result that flows on. Decided from the written types alone, free.
+    fn output_call_statement(
+        &self,
+        node: NodeId,
+    ) -> Option<(&'a ExpressionFacts<'g>, &'a CallFacts<'g>)> {
+        let facts = self.value(node).ok()?;
+        let call = facts.call.as_deref()?;
+        (matches!(facts.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "never")
+            && call.callee.module.origin == Origin::Standard
+            && call.callee.module.path == "output.rill")
+            .then_some((facts, call))
+    }
+
+    /// A call into the pinned output module: the private `writeLine` and
+    /// `panicText` bindings with one staged `&string`, or `log` with a
+    /// `string` moved in or a `&string` borrowed, calling its selected
+    /// implementation. Every other shape stays at this call.
+    fn call_output(
+        &mut self,
+        node: NodeId,
+        facts: &ExpressionFacts<'g>,
+        call: &CallFacts<'g>,
+        into: Option<Slot>,
+        next: Pc,
+        depth: usize,
+    ) -> ResultOf<Pc> {
+        let pending = || Stop::Pending(node);
+        let [argument] = call.arguments.as_slice() else {
+            return Err(pending());
+        };
+        if call.callee.kind != DeclarationKind::Family
+            || call.pipe_input.is_some()
+            || !call.defaults.is_empty()
+            || call.scoped_join.is_some()
+            || call.list_arrows.is_some()
+        {
+            return Err(pending());
+        }
+        let actual = self.value(*argument)?.ty.clone();
+        let text = |ty: &TypeTerm<'_>| matches!(ty, TypeTerm::Primitive(p) if p.name() == "string");
+        let borrowed = matches!(actual.as_ref(), TypeTerm::Reference { mutable: false, referent }
+            if text(referent));
+        let result_is =
+            |name: &str| matches!(facts.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == name);
+        let (callee, result, shape_ok) = if call.substitution.is_empty() {
+            (
+                call.callee,
+                CallResult::Plain,
+                borrowed && call.selection.is_none(),
+            )
+        } else if let (Some(selection), [substitution]) =
+            (call.selection.as_ref(), call.substitution.as_slice())
+        {
+            (
+                selection.implementation,
+                CallResult::Plain,
+                (borrowed || text(&actual))
+                    && selection.substitution.is_empty()
+                    && selection.implementation.module == call.callee.module
+                    && selection.implementation.kind == DeclarationKind::Implementation
+                    && substitution.argument == actual
+                    && result_is("void"),
+            )
+        } else {
+            return Err(pending());
+        };
+        if !shape_ok {
+            return Err(pending());
+        }
+        graph::charge_key(&call.callee.module, 1, self.budget)?;
+        let result = if call.substitution.is_empty() {
+            match self.typed.output_bridge(call.callee) {
+                Some(PrimitiveOperation::WriteLine) if result_is("void") => CallResult::WriteLine,
+                Some(PrimitiveOperation::Panic) if result_is("never") => CallResult::Panic,
+                _ => return Err(pending()),
+            }
+        } else if self.typed.output_family(call.callee) == Some(PrimitiveOperation::WriteLine) {
+            result
+        } else {
+            return Err(pending());
+        };
+        self.budget.reserve(2)?;
+        let stage = self.slot(*argument, &actual)?;
+        let index = self.calls.len();
+        self.calls.push(Call {
+            callee,
+            forwarding_prefix: None,
+            args: vec![stage],
+            into,
+            result,
+            destination: None,
+        });
+        let call_pc = self.emit(node, Action::Call(index), Edges::Next(next))?;
+        self.expression(*argument, Some(stage), call_pc, depth + 1)
+    }
+
     fn call(
         &mut self,
         node: NodeId,
@@ -8197,6 +8297,12 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 return self.copy_closure(node, facts, call, into, next, depth);
             }
             return self.written_scalar_copy(node, facts, call, into, next, depth);
+        }
+        if checked_carrier.is_none()
+            && call.callee.module.origin == Origin::Standard
+            && call.callee.module.path == "output.rill"
+        {
+            return self.call_output(node, facts, call, into, next, depth);
         }
         if checked_carrier.is_none()
             && let Some(join) = call.scoped_join.as_deref()

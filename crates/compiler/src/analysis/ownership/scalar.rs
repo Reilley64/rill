@@ -8,7 +8,7 @@ use crate::analysis::{
         data::DataExpression,
         generics::{GoalJudgment, GoalState},
     },
-    typed::{Primitive, PrimitiveCoverage, PrimitiveRole},
+    typed::{Primitive, PrimitiveCoverage, PrimitiveOperation, PrimitiveRole},
 };
 use crate::loader::Origin;
 
@@ -17,7 +17,10 @@ pub(super) use compare::{i32_equality_header, lower_i32_equality};
 
 pub(super) fn standard_module(module: &Module) -> bool {
     module.key.origin == Origin::Standard
-        && matches!(module.key.path.as_str(), "core.rill" | "compare.rill")
+        && matches!(
+            module.key.path.as_str(),
+            "core.rill" | "compare.rill" | "output.rill"
+        )
 }
 
 /// Targeted callers share this index across distinct selected scalar widths.
@@ -201,7 +204,7 @@ pub(super) fn implementation_frame<'g>(
         || !std::ptr::eq(body.site.module, &module.key)
         || body.site.node != source.body_node
         || body.flow.pending
-        || body.flow.diverges
+        || (body.flow.diverges && module.key.path != "output.rill")
         || !body.flow.breaks.is_empty()
         || !body.flow.continues.is_empty()
         || !matches!(body.owner, BodyOwner::Declaration(owner) if std::ptr::eq(owner, &declaration.id))
@@ -212,6 +215,9 @@ pub(super) fn implementation_frame<'g>(
     }
     if module.key.path == "compare.rill" {
         return compare::implementation_frame(typed, implementation, body, budget);
+    }
+    if module.key.path == "output.rill" {
+        return output_frame(typed, implementation, body, budget);
     }
     let (role, family) = if let Some(copy) = typed
         .copy_role()
@@ -272,6 +278,56 @@ pub(super) fn implementation_frame<'g>(
         return Err(pending);
     }
     Ok(frame)
+}
+
+/// A `log` or `panic` implementation over its one private output operation:
+/// `string` or `&string` in, `void` (flowing on) or `never` (diverging) out.
+fn output_frame<'g>(
+    typed: &TypedReport<'g>,
+    implementation: &ImplementationFacts<'g>,
+    body: &BodyFacts<'g>,
+    budget: &mut Budget,
+) -> ResultOf<Frame> {
+    let declaration = implementation.header.declaration;
+    let pending = Stop::Pending(declaration.node);
+    let DeclarationShape::Function { parameters, result } = &implementation.header.shape else {
+        return Err(pending);
+    };
+    let [MemberType { ty: input, .. }] = parameters.as_slice() else {
+        return Err(pending);
+    };
+    let text =
+        |ty: &Type<'_>| matches!(ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "string");
+    let screened = text(input)
+        || matches!(input.as_ref(), TypeTerm::Reference { mutable: false, referent } if text(referent));
+    let diverging = body.flow.diverges && !body.flow.normal;
+    if !screened || body.flow.returns || body.flow.diverges == body.flow.normal {
+        return Err(pending);
+    }
+    budget.step(1)?;
+    let expected = match typed.output_family(&implementation.source.family) {
+        Some(PrimitiveOperation::WriteLine) => "void",
+        Some(PrimitiveOperation::Panic) => "never",
+        _ => return Err(pending),
+    };
+    if !matches!(result.as_ref(), TypeTerm::Primitive(p) if p.name() == expected)
+        || diverging != (expected == "never")
+        || body.result.as_ref() != Some(result)
+    {
+        return Err(pending);
+    }
+    budget.step(1)?;
+    if !typed
+        .inventory()
+        .headers()
+        .get(&declaration.id)
+        .is_some_and(|metadata| metadata.defaults.is_empty() && metadata.requirements.is_empty())
+    {
+        return Err(pending);
+    }
+    Ok(Frame::PlainImplementation {
+        body: implementation.source.body_node,
+    })
 }
 
 fn dispose_input(input: &Type<'_>, result: &Type<'_>) -> Option<Primitive> {

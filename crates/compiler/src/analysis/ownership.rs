@@ -686,6 +686,16 @@ pub enum Operation<'g> {
         captures: Vec<CaptureCopyEffect<'g>>,
     },
     Call(&'g DeclarationId),
+    /// Write the string a staged shared descriptor refers to, and one
+    /// newline, to standard output. The call ends the descriptor only.
+    WriteLine {
+        text: Place<'g>,
+    },
+    /// Report the string a staged shared descriptor refers to and end the
+    /// program. It never returns: no successor block is reached.
+    Panic {
+        message: Place<'g>,
+    },
     /// Move a staged pair owner through a closed ordinary specialization, not
     /// an erased invocation or a proof for the callee's open source root.
     CallCallableTransfer {
@@ -2915,6 +2925,10 @@ enum CallResult<'a, 'g> {
     RetainsExclusiveInput,
     RetainsOptionCarrier(&'a DeclarationFacts<'g>),
     TransfersCallable(&'a DeclarationFacts<'g>),
+    /// The private `writeLine` binding: one staged `&string`, `void` result.
+    WriteLine,
+    /// The private `panicText` binding: one staged `&string`, `never` result.
+    Panic,
 }
 
 #[derive(Clone, Copy)]

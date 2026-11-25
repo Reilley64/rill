@@ -70,7 +70,7 @@ pub(in crate::analysis) struct PrimitiveCore<'g> {
     pub protection: Vec<PrimitiveProtection<'g>>,
     pub bridges: std::collections::BTreeMap<&'g DeclarationId, PrimitiveOperation>,
     /// The exported `log` and `panic` families of the pinned output module.
-    pub output: Vec<&'g DeclarationId>,
+    pub output: Vec<(&'g DeclarationId, PrimitiveOperation)>,
 }
 
 impl PrimitiveCore<'_> {
@@ -362,7 +362,7 @@ impl<'g> PrimitiveCore<'g> {
                 };
                 budget.reserve(2)?;
                 self.bridges.insert(&bridge.id, operation);
-                self.output.push(&family.id);
+                self.output.push((&family.id, operation));
             }
         }
         Ok(())
