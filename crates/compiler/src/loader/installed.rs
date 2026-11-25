@@ -9,6 +9,13 @@ pub(super) use collection::CollectionLinks;
 pub(super) const OWNERSHIP_ARCHIVE: Option<&[u8]> =
     Some(include_bytes!(env!("RILL_OWNERSHIP_ARCHIVE")));
 
+/// The ownership archive this toolchain pins. An installation stores exactly
+/// these bytes at `lib/rill/runtime/<target>/librill_ownership.rlib`; the
+/// loader rejects any other bytes there.
+pub fn pinned_ownership_archive() -> &'static [u8] {
+    OWNERSHIP_ARCHIVE.unwrap_or_default()
+}
+
 pub(super) fn is_ownership_source(path: &str) -> bool {
     matches!(path, "shared.rill" | "mutex.rill" | "channel.rill")
 }
