@@ -118,7 +118,7 @@ pub fn emit(test: &str, source: &str) -> Option<Built> {
         panic!("the staged program is not compilable");
     };
     if let Err(error) =
-        codegen_llvm::emit_object(&graph, &program, &root.join("app/program.o"), false)
+        codegen_llvm::emit_object(&graph, &typed, &program, &root.join("app/program.o"), false)
     {
         fs::write(root.join("app/error.txt"), error.to_string()).unwrap();
     }

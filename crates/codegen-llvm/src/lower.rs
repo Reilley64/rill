@@ -1,10 +1,13 @@
 use crate::error::BackendError;
+use crate::facts::{Facts, Signature, callee_substitution};
 use crate::mono::{self, Instance};
-use crate::syntax::{self, Signature, Type};
+use crate::syntax;
+use crate::types::{Shape, Type, kind_tag, origin_tag};
 use compiler::analysis::compilable::{CheckedBody, CompilableProgram};
 use compiler::analysis::ownership::{Block, Cleanup, Operation, Place, Terminator};
 use compiler::analysis::scalars::{BodyOwner, Site};
-use compiler::loader::{DeclarationId, Graph, Module, Origin};
+use compiler::analysis::typed::TypedReport;
+use compiler::loader::{DeclarationId, Graph, Module};
 use compiler::parser::{NodeId, NodeKind};
 use inkwell::attributes::{Attribute, AttributeLoc};
 use inkwell::builder::{Builder, BuilderError};
@@ -103,6 +106,7 @@ fn straight_line<'r, 'g>(body: &CheckedBody<'r, 'g>) -> Result<Vec<&'r Block<'g>
 
 fn callees(
     graph: &Graph,
+    facts: &Facts<'_, '_>,
     bodies: &BTreeMap<Body, &CheckedBody<'_, '_>>,
     instance: &Instance<Body>,
 ) -> Result<Vec<Instance<Body>>, BackendError> {
@@ -118,8 +122,17 @@ fn callees(
                     "a called body the program does not carry",
                 ));
             }
-            syntax::signature(graph, id)?;
-            callees.push(Instance::plain(callee));
+            let module = syntax::module(graph, block.site.module)?;
+            let substitution = callee_substitution(
+                facts.call(module, block.site.node)?,
+                id,
+                &instance.substitution,
+                block.site,
+            )?;
+            callees.push(Instance {
+                body: callee,
+                substitution,
+            });
         }
     }
     Ok(callees)
@@ -137,28 +150,19 @@ fn encode(path: &str) -> String {
 }
 
 fn symbol(id: &DeclarationId, substitution: &[Type]) -> String {
-    let origin = match id.module.origin {
-        Origin::Application => "app",
-        Origin::Standard => "std",
-    };
     format!(
-        "rill.{origin}.{}.{}.{}{}",
+        "rill.{}.{}.{}.{}{}",
+        origin_tag(id.module.origin),
         encode(&id.module.path),
         id.start,
-        format!("{:?}", id.kind).to_lowercase(),
+        kind_tag(id.kind),
         mono::suffix(substitution)
     )
 }
 
-fn operation_name(operation: &Operation<'_>) -> String {
-    format!("{operation:?}")
-        .chars()
-        .take_while(|c| c.is_alphanumeric())
-        .collect()
-}
-
 pub(crate) fn emit_object(
     graph: &Graph,
+    typed: &TypedReport<'_>,
     program: &CompilableProgram<'_, '_>,
     object: &Path,
     check_allocations: bool,
@@ -174,7 +178,10 @@ pub(crate) fn emit_object(
     for body in program.functions() {
         bodies.insert(body_key(body), body);
     }
-    let instances = mono::collect(Body::Startup, |instance| callees(graph, &bodies, instance))?;
+    let facts = Facts::new(graph, typed);
+    let instances = mono::collect(Body::Startup, |instance| {
+        callees(graph, &facts, &bodies, instance)
+    })?;
 
     Target::initialize_native(&InitializationConfig::default()).map_err(BackendError::Target)?;
     let triple = TargetMachine::get_default_triple();
@@ -198,6 +205,7 @@ pub(crate) fn emit_object(
     module.set_data_layout(&layout.get_data_layout());
     let mut emitter = Emitter {
         graph,
+        facts,
         context: &context,
         module,
         builder: context.create_builder(),
@@ -227,8 +235,9 @@ pub(crate) fn emit_object(
         .map_err(|error| BackendError::Target(error.to_string()))
 }
 
-struct Emitter<'a, 'ctx> {
+struct Emitter<'a, 'g, 'ctx> {
     graph: &'a Graph,
+    facts: Facts<'a, 'g>,
     context: &'ctx Context,
     module: LlvmModule<'ctx>,
     builder: Builder<'ctx>,
@@ -238,7 +247,7 @@ struct Emitter<'a, 'ctx> {
     functions: BTreeMap<Instance<Body>, (FunctionValue<'ctx>, Signature)>,
 }
 
-impl<'ctx> Emitter<'_, 'ctx> {
+impl<'ctx> Emitter<'_, '_, 'ctx> {
     fn declare(&mut self, instance: &Instance<Body>) -> Result<(), BackendError> {
         let (name, linkage, signature) = match &instance.body {
             Body::Startup => (
@@ -252,14 +261,14 @@ impl<'ctx> Emitter<'_, 'ctx> {
             Body::Declaration(id) => (
                 symbol(id, &instance.substitution),
                 Some(Linkage::Internal),
-                syntax::signature(self.graph, id)?,
+                self.facts.signature(id, &instance.substitution)?,
             ),
         };
         let mut parameters: Vec<BasicMetadataTypeEnum<'ctx>> = Vec::new();
-        for (_, ty) in &signature.parameters {
+        for parameter in &signature.parameters {
             parameters.push(self.pointer.into());
             parameters.push(self.word.into());
-            if *ty == Type::Owned {
+            if parameter.shape == Shape::Owned {
                 parameters.push(self.word.into());
             }
         }
@@ -291,21 +300,21 @@ impl<'ctx> Emitter<'_, 'ctx> {
             raw.next()
                 .ok_or_else(|| BackendError::internal("a missing parameter word"))
         };
-        for (node, ty) in &signature.parameters {
+        for parameter in &signature.parameters {
             let pointer = next()?.into_pointer_value();
             let length = next()?.into_int_value();
-            let value = match ty {
-                Type::Owned => Value::Owned {
+            let value = match parameter.shape {
+                Shape::Owned => Value::Owned {
                     pointer,
                     length,
                     capacity: next()?.into_int_value(),
                 },
-                Type::View => Value::View { pointer, length },
+                Shape::View => Value::View { pointer, length },
             };
-            values.insert(*node, value);
+            values.insert(parameter.node, value);
         }
         for block in straight_line(body)? {
-            if let Flow::Diverged = self.operation(block, &mut values)? {
+            if let Flow::Diverged = self.operation(block, &mut values, &instance.substitution)? {
                 return Ok(());
             }
         }
@@ -340,13 +349,14 @@ impl<'ctx> Emitter<'_, 'ctx> {
         &mut self,
         block: &Block<'_>,
         values: &mut Values<'ctx>,
+        caller: &[Type],
     ) -> Result<Flow, BackendError> {
         let site = block.site;
         let module = syntax::module(self.graph, site.module)?;
         match &block.operation {
             Operation::None => {}
             Operation::Initialize(place) => {
-                let bytes = syntax::string_literal(module, site.node)?.ok_or_else(|| {
+                let bytes = self.facts.literal(module, site.node)?.ok_or_else(|| {
                     BackendError::unsupported(site, "an initialization other than a string literal")
                 })?;
                 let value = self.owned_literal(&bytes)?;
@@ -354,7 +364,7 @@ impl<'ctx> Emitter<'_, 'ctx> {
             }
             Operation::BorrowStatic { holder } => {
                 let literal = match syntax::node(module, site.node)?.children.as_slice() {
-                    [literal] => syntax::string_literal(module, *literal)?,
+                    [literal] => self.facts.literal(module, *literal)?,
                     _ => None,
                 };
                 let bytes = literal.ok_or_else(|| {
@@ -392,7 +402,7 @@ impl<'ctx> Emitter<'_, 'ctx> {
                 let value = lookup(values, from, site)?;
                 values.insert(slot(into, site)?, value);
             }
-            Operation::Call(id) => self.call(block, module, id, values)?,
+            Operation::Call(id) => self.call(block, module, id, caller, values)?,
             Operation::WriteLine { text } => {
                 let (pointer, length) = lookup(values, text, site)?.view();
                 self.call_runtime(
@@ -435,10 +445,10 @@ impl<'ctx> Emitter<'_, 'ctx> {
                     }
                 }
             }
-            other => {
+            _ => {
                 return Err(BackendError::unsupported(
                     site,
-                    format!("the {} operation", operation_name(other)),
+                    "an operation with no lowering yet",
                 ));
             }
         }
@@ -450,38 +460,31 @@ impl<'ctx> Emitter<'_, 'ctx> {
         block: &Block<'_>,
         module: &Module,
         id: &DeclarationId,
+        caller: &[Type],
         values: &Values<'ctx>,
     ) -> Result<(), BackendError> {
         let site = block.site;
-        let call = syntax::node(module, site.node)?;
-        let [_, arguments @ ..] = call.children.as_slice() else {
-            return Err(BackendError::unsupported(
-                site,
-                "a call written without a callee",
-            ));
+        let call = self.facts.call(module, site.node)?;
+        let callee = Instance {
+            body: Body::Declaration(id.clone()),
+            substitution: callee_substitution(call, id, caller, site)?,
         };
-        if call.kind != NodeKind::Call {
-            return Err(BackendError::unsupported(
-                site,
-                "a call that is not written as a call",
-            ));
-        }
         let (function, signature) = self
             .functions
-            .get(&Instance::plain(Body::Declaration(id.clone())))
+            .get(&callee)
             .cloned()
             .ok_or_else(|| BackendError::internal("a callee that was never declared"))?;
-        if arguments.len() != signature.parameters.len() {
+        if call.arguments.len() != signature.parameters.len() {
             return Err(BackendError::unsupported(
                 site,
                 "a call whose arguments do not match its parameters",
             ));
         }
         let mut words: Vec<BasicMetadataValueEnum<'ctx>> = Vec::new();
-        for (&argument, (_, ty)) in arguments.iter().zip(&signature.parameters) {
-            match (ty, argument_value(module, values, argument)?) {
+        for (&argument, parameter) in call.arguments.iter().zip(&signature.parameters) {
+            match (parameter.shape, argument_value(module, values, argument)?) {
                 (
-                    Type::Owned,
+                    Shape::Owned,
                     Value::Owned {
                         pointer,
                         length,
@@ -492,7 +495,7 @@ impl<'ctx> Emitter<'_, 'ctx> {
                     words.push(length.into());
                     words.push(capacity.into());
                 }
-                (Type::View, Value::View { pointer, length }) => {
+                (Shape::View, Value::View { pointer, length }) => {
                     words.push(pointer.into());
                     words.push(length.into());
                 }
