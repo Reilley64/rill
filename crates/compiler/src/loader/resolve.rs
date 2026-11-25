@@ -199,17 +199,40 @@ impl Engine {
                 self.add_module(Origin::Standard, path)?;
             }
         }
-        while let Some(key) = self.pending.pop_front() {
-            self.host.charge(1)?;
-            let mut imports = collect::collect(
-                self.modules.get_mut(&key).unwrap(),
-                &mut self.host,
-                &mut self.next_ordinal,
-            )?;
-            for import in &mut imports {
-                self.discover(import)?;
+        let mut deferred = Vec::new();
+        let mut demanded = false;
+        loop {
+            while let Some(key) = self.pending.pop_front() {
+                self.host.charge(1)?;
+                let imports = collect::collect(
+                    self.modules.get_mut(&key).unwrap(),
+                    &mut self.host,
+                    &mut self.next_ordinal,
+                )?;
+                for mut import in imports {
+                    if self
+                        .installed
+                        .is_some_and(|profile| profile.defers(&import))
+                    {
+                        deferred.push(import);
+                        continue;
+                    }
+                    demanded |= self
+                        .installed
+                        .is_some_and(|profile| profile.demands(&import));
+                    self.discover(&mut import)?;
+                    self.imports.push(import);
+                }
             }
-            self.imports.extend(imports);
+            if !demanded {
+                break;
+            }
+            demanded = false;
+            for mut import in deferred.drain(..) {
+                self.host.charge(1)?;
+                self.discover(&mut import)?;
+                self.imports.push(import);
+            }
         }
         let metadata = self.capture_installed_metadata(complete)?;
         self.imports

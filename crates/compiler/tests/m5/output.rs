@@ -428,3 +428,66 @@ fn grouped_and_scoped_log_calls_add_depth_once_per_layer_and_keep_their_receipt(
         },
     );
 }
+
+fn loads_output(graph: &loader::Graph) -> bool {
+    graph
+        .modules()
+        .iter()
+        .any(|m| m.key.origin == Origin::Standard && m.key.path == "output.rill")
+}
+
+#[test]
+fn output_rill_loads_only_when_a_program_imports_log_or_panic() {
+    const CASES: [(&str, bool); 9] = [
+        ("", false),
+        ("import std::{Result};\n", false),
+        ("import std::{Option, Result};\n", false),
+        ("import std::option;\n", false),
+        ("import std::log;\n", true),
+        ("import std::panic;\n", true),
+        ("import std::{log, panic};\n", true),
+        ("import std::{Result, log};\n", true),
+        ("import std;\n", true),
+    ];
+    installed(
+        "output::output_rill_loads_only_when_a_program_imports_log_or_panic",
+        |request| {
+            for (source, loads) in CASES {
+                fs::write(&request.entry, source).unwrap();
+                for test_mode in [false, true] {
+                    let request = InstalledRequest {
+                        test_mode,
+                        ..request.clone()
+                    };
+                    let graph = loader::load_installed(request).unwrap();
+                    assert_eq!(
+                        loads_output(&graph),
+                        loads,
+                        "{source:?} test_mode {test_mode}"
+                    );
+                    let standard = graph
+                        .modules()
+                        .iter()
+                        .filter(|m| m.key.origin == Origin::Standard)
+                        .count();
+                    assert_eq!(standard, 17 + usize::from(loads), "{source:?}");
+                }
+            }
+        },
+    );
+}
+
+#[test]
+fn importing_log_adds_exactly_the_declarations_of_output_rill() {
+    installed(
+        "output::importing_log_adds_exactly_the_declarations_of_output_rill",
+        |request| {
+            fs::write(&request.entry, "").unwrap();
+            let graph = loader::load_installed(request.clone()).unwrap();
+            let without = graph.declaration_count();
+            fs::write(&request.entry, "import std::log;\n").unwrap();
+            let graph = loader::load_installed(request).unwrap();
+            assert_eq!(graph.declaration_count() - without, 18);
+        },
+    );
+}
