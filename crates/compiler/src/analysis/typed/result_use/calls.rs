@@ -409,7 +409,7 @@ impl<'a, 'g> Check<'a, 'g> {
                     if value.component.is_empty() && matches!(value.content, Content::ConsumedPair))
             {
                 self.budget.reserve(1)?;
-                if let Some(&(index, _)) = self.nodes.get(&(&self.module.key, node)) {
+                if let Some(&(index, _)) = self.table.get(&node) {
                     self.report.consumed_receivers.insert(index);
                 }
                 repeated.push(state);

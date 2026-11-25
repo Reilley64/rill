@@ -576,7 +576,7 @@ function probe(flag: bool): void {
   else { if (!copy) { let _ = debt; } }
 }
 ",
-            (426696, 48863, 12),
+            (425881, 48863, 12),
             checked as fn(&TypedReport<'_>),
         ),
         (
@@ -593,7 +593,7 @@ function probe(flag: bool, outer: bool): void {
   } };
 }
 ",
-            (427764, 49046, 16),
+            (426948, 49046, 16),
             checked,
         ),
         (
@@ -607,7 +607,7 @@ function probe(flag: bool, gate: bool): void {
     else { if (!copy) { let _ = debt; } }
 }
 ",
-            (428401, 49120, 12),
+            (427575, 49120, 12),
             checked,
         ),
         (
@@ -616,7 +616,7 @@ function probe(flag: bool, gate: bool): void {
 import std::routine::join;
 function probe(flag: bool): void { let debt = Err<bool,i32>(61i32); let before = flag; let copy = match (flag) { _ => before }; if (flag) { if (copy) { let _ = debt; } } else { if (!copy) { let _ = debt; } } }
 ",
-            (426895, 48892, 12),
+            (426077, 48892, 12),
             checked,
         ),
         (
@@ -625,7 +625,7 @@ function probe(flag: bool): void { let debt = Err<bool,i32>(61i32); let before =
 import std::routine::join;
 function probe(flag: bool, gate: bool): void { let debt = Err<bool,i32>(61i32); match (*(if (gate) &flag else &flag)) { true if flag => { let _ = debt; }, false if !flag => { let _ = debt; }, _ => {} }; }
 ",
-            (427988, 49104, 12),
+            (427159, 49104, 12),
             checked,
         ),
     ] {
@@ -651,22 +651,22 @@ function probe(flag: bool, gate: bool): void { let debt = Err<bool,i32>(61i32); 
         (
             "pre: bare control",
             pre("let before = flag;", "before"),
-            (324672, 48105, 12),
+            (323854, 48105, 12),
         ),
         (
             "pre: grouped initializer",
             pre("let before = (flag);", "before"),
-            (324704, 48117, 12),
+            (323886, 48117, 12),
         ),
         (
             "pre: grouped binder",
             pre("let (before) = flag;", "before"),
-            (324698, 48117, 12),
+            (323879, 48117, 12),
         ),
         (
             "pre: grouped arm body",
             pre("let before = flag;", "(before)"),
-            (324742, 48122, 12),
+            (323924, 48122, 12),
         ),
         (
             "computed: grouped scrutinee",
@@ -674,7 +674,7 @@ function probe(flag: bool, gate: bool): void { let debt = Err<bool,i32>(61i32); 
                 "match (*(if (gate) &flag else &flag))",
                 "match (((*(if (gate) &flag else &flag))))",
             ),
-            (325778, 48356, 12),
+            (324947, 48356, 12),
         ),
     ] {
         installed(&probe, name, &source, None, |report| {
@@ -727,13 +727,13 @@ function probe(flag: bool, gate: bool): void { let debt = Err<bool,i32>(61i32); 
             "pre: immutable local source reassigned after the copy",
             "let before = current; current = !flag;",
             b"current = !flag;".as_slice(),
-            (324920, 48237, 12),
+            (324072, 48237, 12),
         ),
         (
             "pre: immutable local source, its parameter written after the copy",
             "let before = current; flag = !flag;",
             b"flag = !flag;".as_slice(),
-            (324753, 48171, 12),
+            (323905, 48171, 12),
         ),
     ] {
         let source = MUTABLE_SOURCE
@@ -789,7 +789,7 @@ fn boolean_copy_cells() -> Vec<Cell<Outcome>> {
             at: &["parameter", "mutable", "none", "none"],
             source: pre("let mut before = flag;", "before"),
             parent: Some((324709, 48123, 12)),
-            exact: (324714, 48105, 12),
+            exact: (323896, 48105, 12),
             outcome: Outcome::Checked,
         },
         Cell {
@@ -797,7 +797,7 @@ fn boolean_copy_cells() -> Vec<Cell<Outcome>> {
             at: &["mutable local", "immutable", "none", "none"],
             source: MUTABLE_SOURCE.to_owned(),
             parent: Some((324529, 48133, 12)),
-            exact: (324568, 48115, 12),
+            exact: (323748, 48115, 12),
             outcome: Outcome::Checked,
         },
         Cell {
@@ -805,23 +805,23 @@ fn boolean_copy_cells() -> Vec<Cell<Outcome>> {
             at: &["immutable local", "immutable", "none", "none"],
             source: MUTABLE_SOURCE.replace("let mut current", "let current"),
             parent: Some((324529, 48133, 12)),
-            exact: (324518, 48115, 12),
+            exact: (323698, 48115, 12),
             outcome: Outcome::Checked,
         },
         Cell {
             name: "pre: copy of another parameter",
             at: &["other parameter", "immutable", "none", "none"],
             source: pre("let before = other;", "before"),
-            parent: Some((324698, 48123, 12)),
-            exact: (324698, 48123, 12),
+            parent: Some((323881, 48123, 12)),
+            exact: (323881, 48123, 12),
             outcome: Outcome::Unpaid,
         },
         Cell {
             name: "pre: mutable binder reassigned before the match",
             at: &["parameter", "mutable", "write copy", "none"],
             source: pre("let mut before = flag; before = !flag;", "before"),
-            parent: Some((325493, 48441, 12)),
-            exact: (325493, 48441, 12),
+            parent: Some((324649, 48441, 12)),
+            exact: (324649, 48441, 12),
             outcome: Outcome::Unpaid,
         },
         Cell {
@@ -831,8 +831,8 @@ fn boolean_copy_cells() -> Vec<Cell<Outcome>> {
                 "let before = current;",
                 "let before = current; current = !flag;",
             ),
-            parent: Some((325403, 48455, 12)),
-            exact: (325403, 48455, 12),
+            parent: Some((324557, 48455, 12)),
+            exact: (324557, 48455, 12),
             outcome: Outcome::Unpaid,
         },
         Cell {
@@ -842,8 +842,8 @@ fn boolean_copy_cells() -> Vec<Cell<Outcome>> {
                 "let before = current;",
                 "let mut before = current; let r = &mut before;",
             ),
-            parent: Some((324747, 48205, 12)),
-            exact: (324747, 48205, 12),
+            parent: Some((323925, 48205, 12)),
+            exact: (323925, 48205, 12),
             outcome: Outcome::Unpaid,
         },
         Cell {
@@ -853,8 +853,8 @@ fn boolean_copy_cells() -> Vec<Cell<Outcome>> {
                 "let before = current;",
                 "let before = current; current = !flag; let mut z = flag; z = !flag;",
             ),
-            parent: Some((326097, 48707, 12)),
-            exact: (326097, 48707, 12),
+            parent: Some((325237, 48707, 12)),
+            exact: (325237, 48707, 12),
             outcome: Outcome::Unpaid,
         },
         Cell {
@@ -864,8 +864,8 @@ fn boolean_copy_cells() -> Vec<Cell<Outcome>> {
                 "let before = current;",
                 "let before = current; current = !flag; let mut z = flag; let w = &mut z;",
             ),
-            parent: Some((326044, 48695, 12)),
-            exact: (326044, 48695, 12),
+            parent: Some((325188, 48695, 12)),
+            exact: (325188, 48695, 12),
             outcome: Outcome::Unpaid,
         },
         Cell {
@@ -875,8 +875,8 @@ fn boolean_copy_cells() -> Vec<Cell<Outcome>> {
                 "let before = current;",
                 "let before = current; let r = &mut current; let mut z = flag; z = !flag;",
             ),
-            parent: Some((326063, 48685, 12)),
-            exact: (326063, 48685, 12),
+            parent: Some((325212, 48685, 12)),
+            exact: (325212, 48685, 12),
             outcome: Outcome::Unpaid,
         },
         Cell {
@@ -886,8 +886,8 @@ fn boolean_copy_cells() -> Vec<Cell<Outcome>> {
                 "let before = current;",
                 "let mut before = current; let r = &mut before; let mut z = flag; z = !flag;",
             ),
-            parent: Some((326063, 48685, 12)),
-            exact: (326063, 48685, 12),
+            parent: Some((325212, 48685, 12)),
+            exact: (325212, 48685, 12),
             outcome: Outcome::Unpaid,
         },
         Cell {
@@ -895,7 +895,7 @@ fn boolean_copy_cells() -> Vec<Cell<Outcome>> {
             at: &["computed alias to other place", "immutable", "none", "none"],
             source: COMPUTED.replace("&flag else &flag", "&flag else &other"),
             parent: Some((325928, 48413, 12)),
-            exact: (325886, 48394, 12),
+            exact: (325057, 48394, 12),
             outcome: Outcome::Unpaid,
         },
         Cell {
@@ -906,7 +906,7 @@ fn boolean_copy_cells() -> Vec<Cell<Outcome>> {
                 pre("let mut before = flag; flip(&mut before);", "before")
             ),
             parent: None,
-            exact: (325874, 48178, 12),
+            exact: (325047, 48178, 12),
             outcome: Outcome::Storage,
         },
         Cell {
@@ -920,7 +920,7 @@ fn boolean_copy_cells() -> Vec<Cell<Outcome>> {
                 )
             ),
             parent: None,
-            exact: (325702, 48188, 12),
+            exact: (324873, 48188, 12),
             outcome: Outcome::Storage,
         },
         Cell {
@@ -933,8 +933,8 @@ fn boolean_copy_cells() -> Vec<Cell<Outcome>> {
                     "let before = current; current = !flag; let mut z = flag; flip(&mut z);"
                 )
             ),
-            parent: Some((326822, 48582, 12)),
-            exact: (326822, 48582, 12),
+            parent: Some((325958, 48582, 12)),
+            exact: (325958, 48582, 12),
             outcome: Outcome::Storage,
         },
     ]

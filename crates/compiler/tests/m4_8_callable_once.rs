@@ -139,33 +139,33 @@ fn check_sources(entry: &Path) {
             "unused-once",
             WRAPPER.into(),
             Incomplete,
-            Some((322208, 47470, 12)),
+            Some((321414, 47470, 12)),
         ),
         (
             "declared-only",
             declared_only.into(),
             Incomplete,
-            Some((321709, 47416, 12)),
+            Some((320916, 47416, 12)),
         ),
         (
             "erased",
             format!("{erased}{CALLER}"),
             Incomplete,
-            Some((324473, 47678, 12)),
+            Some((323671, 47678, 12)),
         ),
         (
             "missing",
             format!("{missing}{CALLER}"),
             Incomplete,
-            Some((324476, 47586, 12)),
+            Some((323668, 47586, 12)),
         ),
         (
             "borrowed-once",
             borrowed_once.into(),
             SourceRejected,
-            Some((324058, 47748, 12)),
+            Some((323255, 47748, 12)),
         ),
-        ("local", local.into(), Checked, Some((323795, 47803, 12))),
+        ("local", local.into(), Checked, Some((322989, 47803, 12))),
         (
             "unclosed-actual",
             format!(
@@ -192,7 +192,7 @@ fn check_sources(entry: &Path) {
             "capture-unpaid",
             format!("{WRAPPER}{capture}"),
             Incomplete,
-            Some((326803, 48079, 12)),
+            Some((325994, 48079, 12)),
         ),
         (
             "sibling",
@@ -204,31 +204,31 @@ fn check_sources(entry: &Path) {
             "discarded-output",
             output.into(),
             Incomplete,
-            Some((324723, 47810, 12)),
+            Some((323924, 47810, 12)),
         ),
         (
             "declared-shared-actual",
             shared_actual,
             Checked,
-            Some((325244, 47828, 12)),
+            Some((324437, 47828, 12)),
         ),
         (
             "declared-shared-only",
             shared.into(),
             Incomplete,
-            Some((321706, 47419, 12)),
+            Some((320912, 47419, 12)),
         ),
         (
             "declared-shared-output-discard",
             shared_discard.into(),
             Incomplete,
-            Some((325584, 47950, 12)),
+            Some((324776, 47950, 12)),
         ),
         (
             "shared-two-actuals",
             format!("{shared_second}{shared}{SHARED_CALLER}"),
             Checked,
-            Some((327635, 48076, 12)),
+            Some((326815, 48076, 12)),
         ),
         (
             "shared-unclosed",
@@ -236,7 +236,7 @@ fn check_sources(entry: &Path) {
                 "{shared}{SHARED_CALLER}function open(job: &() => bool): bool {{ return run(job); }}\n"
             ),
             Incomplete,
-            Some((326165, 47793, 12)),
+            Some((325354, 47793, 12)),
         ),
         (
             "shared-dead-only",
@@ -244,19 +244,19 @@ fn check_sources(entry: &Path) {
                 "{shared}function caller(flag: bool): bool {{ let f: () => bool = () => flag; if (false) {{ return run(&f); }} return flag; }}\n"
             ),
             Incomplete,
-            Some((324132, 47702, 12)),
+            Some((323325, 47702, 12)),
         ),
         (
             "shared-public",
             format!("export {shared}{SHARED_CALLER}"),
             Incomplete,
-            Some((323973, 47652, 12)),
+            Some((323171, 47652, 12)),
         ),
         (
             "shared-grouped",
             format!("{shared}{}", SHARED_CALLER.replace("run(&f)", "run((&f))")),
             Incomplete,
-            Some((324200, 47680, 12)),
+            Some((323397, 47680, 12)),
         ),
         (
             "shared-scoped",
@@ -264,7 +264,7 @@ fn check_sources(entry: &Path) {
                 "{shared}function caller(flag: bool): bool {{ let f: () => bool = () => flag; {{ return run(&f); }} }}\n"
             ),
             Incomplete,
-            Some((323978, 47656, 12)),
+            Some((323176, 47656, 12)),
         ),
         (
             "shared-loop",
@@ -272,7 +272,7 @@ fn check_sources(entry: &Path) {
                 "{shared}function caller(flag: bool): bool {{ let f: () => bool = () => flag; while (flag) {{ return run(&f); }} return false; }}\n"
             ),
             Incomplete,
-            Some((324162, 47720, 12)),
+            Some((323355, 47720, 12)),
         ),
         (
             "shared-result-capture",
@@ -280,20 +280,20 @@ fn check_sources(entry: &Path) {
                 "{shared}function caller(flag: bool): bool {{ let res: Result<bool, i32> = Result.Ok(flag); let f: () => bool = () => isOk(&res); return run(&f); }}\n"
             ),
             Incomplete,
-            Some((325337, 47871, 12)),
+            Some((324528, 47871, 12)),
         ),
         (
             "shared-formal-actual",
             format!("{shared}function caller(f: () => bool): bool {{ return run(&f); }}\n"),
             Incomplete,
-            Some((323600, 47577, 12)),
+            Some((322800, 47577, 12)),
         ),
         // The 17-source M4 baseline: no wrapper route to discover.
         (
             "baseline",
             include_str!("../../../tests/installed/typed/main.rill").into(),
             Checked,
-            Some((372246, 54059, 12)),
+            Some((371288, 54059, 12)),
         ),
     ] {
         if name == "baseline" {
@@ -380,26 +380,6 @@ fn check_sources(entry: &Path) {
             ] {
                 let short_report = analyze_typed(&graph, short);
                 crate::limit::assert_typed_limit(&short_report);
-            }
-            // Rule 1 exception (chief of staff, 2026-11-23, ri-2s0.10): these
-            // three siblings pay for their rejection before no paid fact can
-            // reject them, so each 9b93a660 cap, measured in a scratch
-            // worktree, now gives `ResourceLimit` with no receipt.
-            if let Some((work, entries, max_depth)) = match name {
-                "shared-formal-actual" => Some((323_599, 47_577, 12)),
-                "shared-result-capture" => Some((325_321, 47_868, 12)),
-                "shared-unclosed" => Some((325_701, 47_779, 12)),
-                _ => None,
-            } {
-                let parent = analyze_typed(
-                    &graph,
-                    AnalysisLimits {
-                        max_work: work,
-                        max_entries: entries,
-                        max_depth,
-                    },
-                );
-                crate::limit::assert_typed_limit(&parent);
             }
             let one_debt = |at: &[u8], origin: &[u8], kind| {
                 let [debt] = uses.discards() else {

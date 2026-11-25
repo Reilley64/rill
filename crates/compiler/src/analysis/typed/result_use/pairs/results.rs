@@ -55,7 +55,7 @@ impl<'a, 'g> Check<'a, 'g> {
         forwarded: &mut Alternatives<'g>,
     ) -> Work<()> {
         self.budget.step(self.module.key.path.len() + 2)?;
-        let index = self.nodes[&(&self.module.key, call)].0;
+        let index = self.nodes.get(&self.module.key, call).unwrap().0;
         let CheckedTransfer::Scoped(join) = &self.report.pair_calls[&index] else {
             unreachable!()
         };
@@ -205,7 +205,7 @@ impl<'a, 'g> Check<'a, 'g> {
         }
         // Reuse the expression's own construction and outcome tag. Seeding
         // from the return type would invent a new occurrence at the join.
-        let mut proof = self.callable_check(self.module)?;
+        let mut proof = self.callable_check(self.module, self.table)?;
         let mut alternatives = proof.expression(plan.expression, environment, plan.depth)?;
         let [state] = alternatives.as_mut_slice() else {
             return Ok(None);
