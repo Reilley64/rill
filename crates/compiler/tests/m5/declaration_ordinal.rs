@@ -1,4 +1,6 @@
 use super::*;
+use compiler::analysis::Statistics;
+use compiler::analysis::typed::TypedCompletion;
 
 type Placed = (loader::ModuleKey, usize, loader::DeclarationKind, usize);
 
@@ -63,6 +65,58 @@ fn declaration_ordinals_are_dense_and_equal_in_both_load_modes() {
             ordinals.sort_unstable();
             assert_eq!(ordinals, (0..*count).collect::<Vec<_>>());
             assert!(*count > 100);
+        },
+    );
+}
+
+#[test]
+fn the_declaration_table_charges_one_work_and_one_entry_per_declaration() {
+    const TEXT: &str = r####"
+type Named = { x: i32; label: string };
+function named(): Named { return Named { x: 1, label: "a" }; }
+function textRead(): i32 { return (&named()).x; }
+function textBind(): void { let view = &named(); }
+"####;
+    installed(
+        "declaration_ordinal::the_declaration_table_charges_one_work_and_one_entry_per_declaration",
+        |request| {
+            fs::write(&request.entry, format!("{IMPORTS}\n{TEXT}")).unwrap();
+            for test_mode in [false, true] {
+                let graph = loader::load_installed(InstalledRequest {
+                    test_mode,
+                    ..request.clone()
+                })
+                .unwrap();
+                let (work, entries, max_depth) = (326067, 48483, 12);
+                let at = |max_work, max_entries| {
+                    analyze_typed(
+                        &graph,
+                        AnalysisLimits {
+                            max_work,
+                            max_entries,
+                            max_depth,
+                        },
+                    )
+                };
+                let exact = at(work, entries);
+                assert_eq!(exact.completion(), TypedCompletion::Checked);
+                assert_eq!(
+                    exact.statistics(),
+                    Statistics {
+                        work,
+                        entries,
+                        max_depth
+                    }
+                );
+                let count = graph.declaration_count();
+                for limited in [
+                    at(work - count, entries),
+                    at(work, entries - count),
+                    at(work - count, entries - count),
+                ] {
+                    crate::limit::assert_typed_limit(&limited);
+                }
+            }
         },
     );
 }
