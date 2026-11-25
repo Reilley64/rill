@@ -25,6 +25,10 @@ The ri-qlh record names no rejected alternative for Q33 or Q20. These are what t
 - **A user-replaceable allocator in M6.** Q33 limits M6 to the system allocator.
 - **Live-allocation counts reported only by an external tool such as a platform leak checker.** Q20 puts the check in the runtime, so the same test runs on all four platforms.
 
+## Built in slice 1
+
+Ri-qlh.22.9 chose, as planner rulings and not owner decisions: the hidden build-time option `--check-allocations` of `rill build` and `rill run`, written before the entry and listed in no help text; generated code always defines the one-byte constant `rill_check_allocations` (1 with the option, 0 without), which the runtime reads, so nothing reads an environment variable at run time; and the report, exactly `live allocations: <N>` and a newline on standard error after startup cleanup, or after the panic line. Allocations the runtime makes before startup are not counted. Without the option nothing is counted or written. See [`runtime/README.md`](../../runtime/README.md).
+
 ## Open
 
 The owner did not decide these. Nothing above decides them.
@@ -32,6 +36,5 @@ The owner did not decide these. Nothing above decides them.
 - The exact parameters of each function, such as whether grow takes the old size, and the C names of all three. The runtime documents its symbols.
 - What a zero size does, which alignments are valid, and what size limit counts as failure.
 - Whether grow may extend in place, and what release may assume about the pointer's origin.
-- The flag's name, the report's format and where the flag is set (a Cargo feature, an environment variable or a build profile).
-- Whether the list backing in `runtime/collection` passes through the three functions. Q24 links that crate unchanged, and it allocates through Rust's own allocator. If it does not pass through them, the checking allocator cannot see list allocations, and "zero live allocations" would hold for strings only.
+- Whether the list backing in `runtime/collection` passes through the three functions. Q24 links that crate unchanged, and it allocates through Rust's own allocator. If it does not pass through them, the checking allocator cannot see list allocations, and "zero live allocations" would hold for strings only. Ri-qlh.22.9 answers it for the count: `rill-runtime` installs a global allocator that forwards to the system allocator and counts through the same counter as the three functions.
 - Whether a later milestone lets a program choose its allocator.

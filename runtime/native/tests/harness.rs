@@ -1,6 +1,7 @@
 use std::ffi::OsString;
 use std::fs;
 use std::os::unix::ffi::OsStringExt;
+use std::os::unix::process::ExitStatusExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::OnceLock;
@@ -8,7 +9,16 @@ use std::sync::OnceLock;
 const STARTUP: &str = r#"
 #include <stddef.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <string.h>
+
+#ifdef CHECK_ALLOCATIONS
+const uint8_t rill_check_allocations = 1;
+#else
+const uint8_t rill_check_allocations = 0;
+#endif
+
+void rill_rt_entry_stack_region(uintptr_t *low, uintptr_t *high);
 
 void rill_rt_write_line(const uint8_t *ptr, size_t len);
 _Noreturn void rill_rt_panic(const uint8_t *ptr, size_t len);
@@ -21,6 +31,18 @@ size_t rill_rt_env_count(void);
 const uint8_t *rill_rt_env(size_t index, size_t *len);
 
 #define LINE(text) rill_rt_write_line((const uint8_t *)(text), strlen(text))
+
+static volatile uint8_t sink;
+
+static void describe_stack(const char *label) {
+    volatile uint8_t local = 0;
+    uintptr_t low, high;
+    rill_rt_entry_stack_region(&low, &high);
+    uintptr_t at = (uintptr_t)&local;
+    char text[128];
+    snprintf(text, sizeof text, "%s %s %zu", label, at >= low && at < high ? "inside" : "outside", (size_t)(high - low));
+    LINE(text);
+}
 
 static int mode_is(const char *name) {
     size_t len;
@@ -47,6 +69,35 @@ void rill_startup(void) {
             const uint8_t *entry = rill_rt_env(i, &len);
             rill_rt_write_line(entry, len);
         }
+    } else if (mode_is("stack")) {
+        describe_stack("startup");
+        volatile uint8_t buffer[900 * 1024];
+        for (size_t i = 0; i < sizeof buffer; i += 4096) {
+            buffer[i] = 1;
+        }
+        uintptr_t low, high;
+        rill_rt_entry_stack_region(&low, &high);
+        uintptr_t first = (uintptr_t)&buffer[0];
+        LINE(first >= low && first + sizeof buffer <= high ? "buffer inside" : "buffer outside");
+        sink = buffer[0];
+    } else if (mode_is("below")) {
+        uintptr_t low, high;
+        rill_rt_entry_stack_region(&low, &high);
+        sink = *(volatile uint8_t *)low;
+        LINE("lowest byte readable");
+        sink = *(volatile uint8_t *)(low - 1);
+        LINE("guard readable");
+    } else if (mode_is("leak")) {
+        uint8_t *block = rill_rt_allocate(16, 8);
+        block = rill_rt_grow(block, 16, 8, 4096);
+        uint8_t *other = rill_rt_allocate(32, 8);
+        rill_rt_release(other, 32, 8);
+        block[0] = 1;
+    } else if (mode_is("leak-panic")) {
+        uint8_t *block = rill_rt_allocate(16, 8);
+        block[0] = 1;
+        const char *message = "holding an allocation";
+        rill_rt_panic((const uint8_t *)message, strlen(message));
     } else if (mode_is("alloc")) {
         uint8_t *block = rill_rt_allocate(16, 8);
         memcpy(block, "0123456789abcdef", 16);
@@ -61,12 +112,15 @@ void rill_startup(void) {
 }
 
 void rill_startup_cleanup(void) {
+    if (mode_is("stack")) {
+        describe_stack("cleanup");
+    }
     LINE("cleanup");
 }
 "#;
 
 #[cfg(target_os = "macos")]
-const NATIVE_LIBS: &[&str] = &["-lSystem", "-lc", "-lm"];
+const NATIVE_LIBS: &[&str] = &["-liconv", "-lSystem", "-lc", "-lm"];
 #[cfg(target_os = "linux")]
 const NATIVE_LIBS: &[&str] = &[
     "-lgcc_s",
@@ -105,33 +159,49 @@ fn static_library() -> PathBuf {
     archive
 }
 
+fn build_executable(name: &str, defines: &[&str]) -> PathBuf {
+    let directory = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("harness");
+    fs::create_dir_all(&directory).unwrap();
+    let source = directory.join("startup.c");
+    fs::write(&source, STARTUP).unwrap();
+    let program = directory.join(name);
+    let output = Command::new("cc")
+        .args(defines)
+        .arg("-o")
+        .arg(&program)
+        .arg(&source)
+        .arg(static_library())
+        .args(NATIVE_LIBS)
+        .output()
+        .expect("host cc");
+    assert!(
+        output.status.success(),
+        "cc failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    program
+}
+
 fn executable() -> &'static Path {
     static EXECUTABLE: OnceLock<PathBuf> = OnceLock::new();
-    EXECUTABLE.get_or_init(|| {
-        let directory = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("harness");
-        fs::create_dir_all(&directory).unwrap();
-        let source = directory.join("startup.c");
-        fs::write(&source, STARTUP).unwrap();
-        let program = directory.join("startup");
-        let output = Command::new("cc")
-            .arg("-o")
-            .arg(&program)
-            .arg(&source)
-            .arg(static_library())
-            .args(NATIVE_LIBS)
-            .output()
-            .expect("host cc");
-        assert!(
-            output.status.success(),
-            "cc failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        program
-    })
+    EXECUTABLE.get_or_init(|| build_executable("startup", &[]))
+}
+
+fn checking_executable() -> &'static Path {
+    static EXECUTABLE: OnceLock<PathBuf> = OnceLock::new();
+    EXECUTABLE.get_or_init(|| build_executable("checking", &["-DCHECK_ALLOCATIONS"]))
 }
 
 fn run(arguments: Vec<OsString>) -> Output {
     Command::new(executable())
+        .args(arguments)
+        .env_clear()
+        .output()
+        .unwrap()
+}
+
+fn run_checking(arguments: Vec<OsString>) -> Output {
+    Command::new(checking_executable())
         .args(arguments)
         .env_clear()
         .output()
@@ -227,4 +297,72 @@ fn allocator_functions_allocate_grow_and_release() {
     assert_eq!(output.stdout, b"kept\naligned\ncleanup\n");
     assert_eq!(output.stderr, b"");
     assert_eq!(output.status.code(), Some(0));
+}
+
+#[test]
+fn startup_and_cleanup_run_inside_a_one_mebibyte_region() {
+    let output = run(mode("stack"));
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "startup inside 1048576\nbuffer inside\ncleanup inside 1048576\ncleanup\n"
+    );
+    assert_eq!(output.stderr, b"");
+    assert_eq!(output.status.code(), Some(0));
+}
+
+#[test]
+fn the_byte_below_the_region_cannot_be_read() {
+    let output = run(mode("below"));
+    assert_eq!(output.stdout, b"lowest byte readable\n");
+    let signal = output.status.signal();
+    assert!(
+        signal == Some(libc::SIGSEGV) || signal == Some(libc::SIGBUS),
+        "{:?}",
+        output.status
+    );
+}
+
+#[test]
+fn without_the_flag_nothing_is_reported_even_with_a_live_allocation() {
+    let output = run(mode("leak"));
+    assert_eq!(output.stdout, b"cleanup\n");
+    assert_eq!(output.stderr, b"");
+    assert_eq!(output.status.code(), Some(0));
+    let output = run(mode("leak-panic"));
+    assert_eq!(output.stderr, b"panic: holding an allocation\n");
+    assert_eq!(output.status.code(), Some(101));
+}
+
+#[test]
+fn the_checking_allocator_reports_zero_after_every_block_is_released() {
+    for arguments in [mode("write"), mode("alloc"), mode("stack")] {
+        let output = run_checking(arguments);
+        assert_eq!(output.stderr, b"live allocations: 0\n");
+        assert_eq!(output.status.code(), Some(0));
+    }
+}
+
+#[test]
+fn the_checking_allocator_counts_a_grown_block_once() {
+    let output = run_checking(mode("leak"));
+    assert_eq!(output.stdout, b"cleanup\n");
+    assert_eq!(output.stderr, b"live allocations: 1\n");
+    assert_eq!(output.status.code(), Some(0));
+}
+
+#[test]
+fn the_checking_allocator_reports_after_the_panic_line() {
+    let output = run_checking(mode("leak-panic"));
+    assert_eq!(
+        output.stderr,
+        b"panic: holding an allocation\nlive allocations: 1\n"
+    );
+    assert_eq!(output.stdout, b"");
+    assert_eq!(output.status.code(), Some(101));
+    let output = run_checking(mode("panic"));
+    assert_eq!(
+        output.stderr,
+        b"panic: something went wrong\nlive allocations: 0\n"
+    );
+    assert_eq!(output.status.code(), Some(101));
 }

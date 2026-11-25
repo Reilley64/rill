@@ -12,7 +12,7 @@ pub const TARGET: &str = env!("RILL_HOST_TARGET");
 const PROBE_ROOT: &str = "RILL_PROBE_ROOT";
 
 #[cfg(target_os = "macos")]
-const NATIVE_LIBS: &[&str] = &["-lSystem", "-lc", "-lm"];
+const NATIVE_LIBS: &[&str] = &["-liconv", "-lSystem", "-lc", "-lm"];
 #[cfg(target_os = "linux")]
 const NATIVE_LIBS: &[&str] = &[
     "-lgcc_s",
@@ -117,7 +117,9 @@ pub fn emit(test: &str, source: &str) -> Option<Built> {
     let Compilability::Compilable(program) = analysis.compilability() else {
         panic!("the staged program is not compilable");
     };
-    if let Err(error) = codegen_llvm::emit_object(&graph, &program, &root.join("app/program.o")) {
+    if let Err(error) =
+        codegen_llvm::emit_object(&graph, &program, &root.join("app/program.o"), false)
+    {
         fs::write(root.join("app/error.txt"), error.to_string()).unwrap();
     }
     None

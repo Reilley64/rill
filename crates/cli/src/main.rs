@@ -96,15 +96,25 @@ failure. The driver contract also defines interruption (130).
 fn main() -> ExitCode {
     let raw: Vec<OsString> = env::args_os().skip(1).collect();
     let program_arguments = cfg!(feature = "llvm") && raw.first().is_some_and(|arg| arg == "run");
+    let takes_flag = cfg!(feature = "llvm")
+        && raw
+            .first()
+            .is_some_and(|arg| arg == "build" || arg == "run");
+    let check_allocations =
+        takes_flag && raw.get(1).is_some_and(|arg| arg == "--check-allocations");
+    let entry_at = 1 + usize::from(check_allocations);
     let checked = if program_arguments {
-        raw.len().min(2)
+        raw.len().min(entry_at + 1)
     } else {
         raw.len()
     };
     let args: Option<Vec<_>> = raw[..checked].iter().map(|arg| arg.to_str()).collect();
-    let Some(args) = args else {
+    let Some(mut args) = args else {
         return fail("arguments must be valid UTF-8");
     };
+    if check_allocations {
+        args.remove(1);
+    }
 
     let Some(command) = args.first().copied() else {
         return fail("expected a command; use 'rill --help'");
@@ -135,9 +145,11 @@ fn main() -> ExitCode {
                 ("check", Some(entry)) => check::run(entry),
                 ("check", None) => fail("check expects an entry path; use 'rill --help'"),
                 #[cfg(feature = "llvm")]
-                ("build", Some(entry)) => build(entry, &rest[1..]),
+                ("build", Some(entry)) => build(entry, &rest[1..], check_allocations),
                 #[cfg(feature = "llvm")]
-                ("run", Some(entry)) => compile::run(entry, &raw[2..]),
+                ("run", Some(entry)) => {
+                    compile::run(entry, &raw[entry_at + 1..], check_allocations)
+                }
                 #[cfg(feature = "llvm")]
                 ("build" | "run", None) => fail(&format!(
                     "{command} expects an entry path; use 'rill --help'"
@@ -156,10 +168,10 @@ fn main() -> ExitCode {
 }
 
 #[cfg(feature = "llvm")]
-fn build(entry: &str, options: &[&str]) -> ExitCode {
+fn build(entry: &str, options: &[&str], check_allocations: bool) -> ExitCode {
     match options {
-        [] => compile::build(entry, None),
-        ["-o", path] => compile::build(entry, Some(path)),
+        [] => compile::build(entry, None, check_allocations),
+        ["-o", path] => compile::build(entry, Some(path), check_allocations),
         ["-o"] => fail("-o expects an output path; use 'rill --help'"),
         _ => fail("build accepts only -o <path> after the entry; use 'rill --help'"),
     }
