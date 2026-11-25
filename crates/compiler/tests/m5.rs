@@ -973,7 +973,9 @@ fn installed(test: &str, check: impl FnOnce(InstalledRequest)) {
     for name in include_str!("../../../tests/installed/typed/stdlib-sources.txt")
         .lines()
         .chain(include_str!("../../../tests/installed/typed/routine-sources.txt").lines())
+        .chain(include_str!("../../../tests/installed/typed/append-sources.txt").lines())
     {
+        fs::create_dir_all(stdlib.join(name).parent().unwrap()).unwrap();
         fs::copy(repo.join("stdlib").join(name), stdlib.join(name)).unwrap();
     }
     fs::copy(

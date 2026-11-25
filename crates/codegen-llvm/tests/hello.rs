@@ -62,6 +62,38 @@ fn a_view_of_a_literal_crosses_a_user_function_into_log() {
     assert_eq!(output.status.code(), Some(0));
 }
 
+const APPEND: &str = "import std::string::append::append;\n";
+
+#[test]
+fn an_exclusive_string_grows_through_append_past_its_first_capacity() {
+    let Some(output) = run(
+        "an_exclusive_string_grows_through_append_past_its_first_capacity",
+        &format!(
+            "{LOG}{APPEND}let mut s = \"\";\nappend(&mut s, &\"a\");\nappend(&mut s, &\"bcdefgh\");\nappend(&mut s, &\"\");\nappend(&mut s, &\"ijklmnop\");\nlog(&s);\n"
+        ),
+    ) else {
+        return;
+    };
+    assert_eq!(output.stdout, b"abcdefghijklmnop\n");
+    assert_eq!(output.stderr, b"");
+    assert_eq!(output.status.code(), Some(0));
+}
+
+#[test]
+fn an_exclusive_string_crosses_a_user_function_into_append() {
+    let Some(output) = run(
+        "an_exclusive_string_crosses_a_user_function_into_append",
+        &format!(
+            "{LOG}{APPEND}function twice(target: &mut string, text: &string): void {{ append(target, text); append(target, text); }}\nlet mut s = \"ab\";\ntwice(&mut s, &\"cd\");\nlog(&s);\nlet moved = s;\nlog(moved);\n"
+        ),
+    ) else {
+        return;
+    };
+    assert_eq!(output.stdout, b"abcdcd\nabcdcd\n");
+    assert_eq!(output.stderr, b"");
+    assert_eq!(output.status.code(), Some(0));
+}
+
 #[test]
 fn a_void_value_bound_to_a_name_lowers_to_nothing() {
     let Some(output) = run(

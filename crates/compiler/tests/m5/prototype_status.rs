@@ -10,6 +10,9 @@ use std::{
 
 const COMMITTED: &str = include_str!("prototype-status.tsv");
 const HELLO_WORLD: &str = "import std::log;\n\nlog(\"hello world\");\n";
+const STRING_APPEND: &str = include_str!("../../../../tests/prototypes/string-append.rill");
+const STRING_APPEND_GROWTH: &str =
+    include_str!("../../../../tests/prototypes/string-append-growth.rill");
 const HEADER: &str = "# Prototype status: one row per program and installed load mode, regenerated through the public pipeline by prototype_status::committed_table_matches_the_pipeline (`mise run status:prototypes`).\n\
 # Columns: program, mode (run, test), load (ok, or the first failure as kind:code:message:source text), typed (typed completion, - without one), then the application roots of the ownership graph by completion (checked counts roots with MIR; - without a receipt).\n\
 program\tmode\tload\ttyped\tchecked\tincomplete\tsource_rejected\tresource_limit\n";
@@ -58,13 +61,22 @@ fn programs(prototypes: &Path) -> Vec<Program> {
         }
     }
     found.sort_by(|a, b| a.name.cmp(&b.name));
-    found.insert(
-        0,
-        Program {
-            name: "hello-world".into(),
-            source: Source::Text(HELLO_WORLD.into()),
-        },
-    );
+    for (index, (name, text)) in [
+        ("hello-world", HELLO_WORLD),
+        ("string-append", STRING_APPEND),
+        ("string-append-growth", STRING_APPEND_GROWTH),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        found.insert(
+            index,
+            Program {
+                name: name.into(),
+                source: Source::Text(text.into()),
+            },
+        );
+    }
     found
 }
 

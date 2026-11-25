@@ -13,6 +13,10 @@ use support::{Installation, TARGET};
 const PREFIX_VARIABLE: &str = "RILL_PROTOTYPES_PREFIX";
 const HELLO: &str = include_str!("../../../tests/prototypes/hello-world.rill");
 const HELLO_OUTPUT: &[u8] = b"hello world\n";
+const APPEND: &str = include_str!("../../../tests/prototypes/string-append.rill");
+const APPEND_OUTPUT: &[u8] = b"Hello Ada\n";
+const APPEND_GROWTH: &str = include_str!("../../../tests/prototypes/string-append-growth.rill");
+const APPEND_GROWTH_OUTPUT: &[u8] = b"abcdefghijklmnopqrstuvwxyz0123456789!\n";
 
 struct Workspace {
     rill: PathBuf,
@@ -162,6 +166,43 @@ fn assert_checked_hello(output: &Output) {
     assert_eq!(output.status.code(), Some(0), "{}", stderr(output));
     assert_eq!(output.stdout, HELLO_OUTPUT);
     assert_eq!(stderr(output), "live allocations: 0\n");
+}
+
+fn assert_appended(output: &Output, expected: &[u8], checked: bool) {
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(output));
+    assert_eq!(output.stdout, expected);
+    let report = if checked { "live allocations: 0\n" } else { "" };
+    assert_eq!(stderr(output), report);
+}
+
+#[test]
+fn run_appends_to_an_owned_string() {
+    let workspace = Workspace::new("append-run");
+    let entry = workspace.entry("string-append.rill", APPEND);
+    assert_appended(&workspace.rill(&["run", &entry]), APPEND_OUTPUT, false);
+    assert_appended(
+        &workspace.rill(&["run", "--check-allocations", &entry]),
+        APPEND_OUTPUT,
+        true,
+    );
+    workspace.assert_no_scratch();
+}
+
+#[test]
+fn run_appends_past_the_first_capacity_with_no_live_allocation_left() {
+    let workspace = Workspace::new("append-growth");
+    let entry = workspace.entry("string-append-growth.rill", APPEND_GROWTH);
+    assert_appended(
+        &workspace.rill(&["run", &entry]),
+        APPEND_GROWTH_OUTPUT,
+        false,
+    );
+    assert_appended(
+        &workspace.rill(&["run", "--check-allocations", &entry]),
+        APPEND_GROWTH_OUTPUT,
+        true,
+    );
+    workspace.assert_no_scratch();
 }
 
 #[test]

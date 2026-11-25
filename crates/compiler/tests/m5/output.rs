@@ -72,6 +72,16 @@ fn sequence(report: &GraphReport<'_>, mir: &Mir<'_>) -> Vec<String> {
                 events.push(format!("write-line {}", text(place)))
             }
             Operation::Panic { message } => events.push(format!("panic {}", text(message))),
+            Operation::BorrowStatic { holder } => {
+                events.push(format!("borrow-static in {}", text(holder)))
+            }
+            Operation::Reborrow { parent, holder, .. } => {
+                events.push(format!("reborrow {} in {}", text(parent), text(holder)))
+            }
+            Operation::AppendText {
+                target,
+                text: source,
+            } => events.push(format!("append {} to {}", text(source), text(target))),
             Operation::Cleanup(actions) => {
                 for action in actions {
                     events.push(match action {
@@ -488,6 +498,158 @@ fn importing_log_adds_exactly_the_declarations_of_output_rill() {
             fs::write(&request.entry, "import std::log;\n").unwrap();
             let graph = loader::load_installed(request).unwrap();
             assert_eq!(graph.declaration_count() - without, 18);
+        },
+    );
+}
+
+const APPEND_IMPORTS: &str = "import std::log;\nimport std::string::append::append;\n";
+const APPEND_HELLO: &str = "let mut s = \"Hello \";\nappend(&mut s, &\"Ada\");\nlog(&s);\n";
+
+fn loads_append(graph: &loader::Graph) -> bool {
+    graph
+        .modules()
+        .iter()
+        .any(|m| m.key.origin == Origin::Standard && m.key.path == "string/append.rill")
+}
+
+#[test]
+fn append_rill_loads_only_when_a_program_imports_it() {
+    const CASES: [(&str, bool, bool); 8] = [
+        ("", false, false),
+        ("import std::{Result};\n", false, false),
+        ("import std::string::Utf8Error;\n", false, false),
+        ("import std::log;\n", false, true),
+        ("import std::{log, panic};\n", false, true),
+        ("import std::string::append;\n", true, false),
+        ("import std::string::append::append;\n", true, false),
+        (
+            "import std::log;\nimport std::string::append::append;\n",
+            true,
+            true,
+        ),
+    ];
+    installed(
+        "output::append_rill_loads_only_when_a_program_imports_it",
+        |request| {
+            for (source, appends, outputs) in CASES {
+                fs::write(&request.entry, source).unwrap();
+                for test_mode in [false, true] {
+                    let request = InstalledRequest {
+                        test_mode,
+                        ..request.clone()
+                    };
+                    let graph = loader::load_installed(request).unwrap();
+                    assert_eq!(
+                        loads_append(&graph),
+                        appends,
+                        "{source:?} test_mode {test_mode}"
+                    );
+                    assert_eq!(
+                        loads_output(&graph),
+                        outputs,
+                        "{source:?} test_mode {test_mode}"
+                    );
+                    let standard = graph
+                        .modules()
+                        .iter()
+                        .filter(|m| m.key.origin == Origin::Standard)
+                        .count();
+                    assert_eq!(
+                        standard,
+                        17 + usize::from(appends) + usize::from(outputs),
+                        "{source:?}"
+                    );
+                }
+            }
+        },
+    );
+}
+
+fn append_root<'a, 'g>(report: &'a GraphReport<'g>, prefix: &str) -> &'a RootReport<'g> {
+    report
+        .roots()
+        .iter()
+        .find(|root| {
+            root.site().module.origin == Origin::Standard
+                && root.site().module.path == "string/append.rill"
+                && root.site().span.bytes().starts_with(prefix.as_bytes())
+        })
+        .unwrap()
+}
+
+#[test]
+fn append_hello_lowers_to_an_exclusive_borrow_a_call_and_an_append() {
+    program(
+        "output::append_hello_lowers_to_an_exclusive_borrow_a_call_and_an_append",
+        &format!("{APPEND_IMPORTS}{APPEND_HELLO}"),
+        |_, receipt| {
+            let report = analyze_ownership(receipt, AnalysisLimits::default());
+            let root = startup(&report);
+            assert_eq!(root.completion(), Completion::Checked);
+            assert_eq!(
+                sequence(&report, root.mir().unwrap()),
+                [
+                    "init s",
+                    "borrow s in &mut s",
+                    "borrow-static in &\"Ada\"",
+                    "call function append(target: &mut string, text: &string): void",
+                    "borrow s in &s",
+                    "call implement log(text: &string): void",
+                    "drop s",
+                ]
+            );
+            let root = append_root(&report, "function append(");
+            assert_eq!(root.completion(), Completion::Checked);
+            assert!(root.dependencies().is_empty());
+            assert_eq!(
+                sequence(&report, root.mir().unwrap()),
+                [
+                    "reborrow target: &mut string in target",
+                    "copy text: &string into text",
+                    "append text to target",
+                    "end text: &string",
+                    "end target: &mut string",
+                ]
+            );
+        },
+    );
+}
+
+const AFTER_PANIC: [(&str, &str, &str); 3] = [
+    ("feasible", "import std::{log, panic};\nlog(\"a\");\n", ""),
+    (
+        "dead",
+        "import std::{log, panic};\npanic(\"boom\");\nlog(\"after\");\n",
+        "panic(\"boom\")",
+    ),
+    (
+        "scoped dead",
+        "import std::{log, panic};\n{ panic(\"boom\"); log(\"after\"); }\n",
+        "panic(\"boom\")",
+    ),
+];
+
+#[test]
+fn code_after_a_panic_grants_nothing_and_the_feasible_control_checks() {
+    let sources: Vec<&str> = AFTER_PANIC.iter().map(|row| row.1).collect();
+    programs(
+        "output::code_after_a_panic_grants_nothing_and_the_feasible_control_checks",
+        &sources,
+        |index, _, receipt| {
+            let (name, _, blocker) = AFTER_PANIC[index];
+            let report = analyze_ownership(receipt, AnalysisLimits::default());
+            let root = startup(&report);
+            if blocker.is_empty() {
+                assert_eq!(root.completion(), Completion::Checked, "{name}");
+                return;
+            }
+            assert_eq!(root.completion(), Completion::Incomplete, "{name}");
+            assert_eq!(
+                root.blocked_at().unwrap().span.bytes(),
+                blocker.as_bytes(),
+                "{name}"
+            );
+            assert!(root.mir().is_none(), "{name}");
         },
     );
 }

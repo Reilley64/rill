@@ -29,7 +29,9 @@ impl Installation {
         for name in include_str!("../../../../tests/installed/typed/stdlib-sources.txt")
             .lines()
             .chain(include_str!("../../../../tests/installed/typed/routine-sources.txt").lines())
+            .chain(include_str!("../../../../tests/installed/typed/append-sources.txt").lines())
         {
+            fs::create_dir_all(std.join(name).parent().unwrap()).unwrap();
             fs::copy(repo.join("stdlib").join(name), std.join(name)).unwrap();
         }
         fs::copy(

@@ -1,0 +1,11 @@
+import std::log;
+import std::string::append::append;
+
+let mut s = "";
+let tail = "!";
+append(&mut s, &"a");
+append(&mut s, &"bcdefgh");
+append(&mut s, &"");
+append(&mut s, &"ijklmnopqrstuvwxyz0123456789");
+append(&mut s, &tail);
+log(&s);

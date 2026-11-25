@@ -1,0 +1,6 @@
+import std::log;
+import std::string::append::append;
+
+let mut s = "Hello ";
+append(&mut s, &"Ada");
+log(&s);

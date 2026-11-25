@@ -14,7 +14,7 @@ PROFILE = next(
     if line.startswith("host: ")
 )
 SOURCE_LISTS = [ROOT / "tests/installed/typed" / name
-                for name in ("stdlib-sources.txt", "routine-sources.txt")]
+                for name in ("stdlib-sources.txt", "routine-sources.txt", "append-sources.txt")]
 
 
 def stage(prefix: Path, llvm: bool = False) -> None:
