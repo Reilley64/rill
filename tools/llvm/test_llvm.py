@@ -15,7 +15,10 @@ from unittest.mock import patch
 
 import check
 import common
+import release
 import setup
+
+DIGEST = "0" * 64
 
 
 class LLVMTests(unittest.TestCase):
@@ -28,9 +31,8 @@ class LLVMTests(unittest.TestCase):
         p = self.root / "prefix"
         for directory in ["bin", "lib", "include/llvm-c", "include/llvm/Config"]:
             (p / directory).mkdir(parents=True, exist_ok=True)
-        for tool in ["llvm-config", "clang", "clang++", "ld.lld", "lld", "wasm-ld", "llc", "opt"]:
-            (p / "bin" / tool).write_text("fixture, not executable code")
-            (p / "bin" / tool).chmod(0o755)
+        (p / "bin/llvm-config").write_text("fixture, not executable code")
+        (p / "bin/llvm-config").chmod(0o755)
         for header in ["llvm-c/Core.h", "llvm-c/Target.h", "llvm-c/TargetMachine.h", "llvm/Pass.h"]:
             (p / "include" / header).write_text("fixture")
         (p / "include/llvm/Config/llvm-config.h").write_text("\n".join(
@@ -39,7 +41,7 @@ class LLVMTests(unittest.TestCase):
         (p / common.RECEIPT).write_text(json.dumps(common.pin("linux-x64")))
         self.answers = {
             "--version": "23.1.5", "--prefix": str(p), "--includedir": str(p / "include"),
-            "--libdir": str(p / "lib"), "--targets-built": " ".join(common.TARGETS),
+            "--libdir": str(p / "lib"), "--targets-built": "X86",
             "--host-target": "x86_64-unknown-linux-gnu", "--link-static --shared-mode all": "static",
             "--link-static --libnames all": "libLLVMCore.a", "--link-static --system-libs all": "-lm -ldl",
             "--cflags": "-I" + str(p / "include"), "--ldflags": "-L" + str(p / "lib"),
@@ -50,6 +52,9 @@ class LLVMTests(unittest.TestCase):
         if Path(args[0]).name == "llvm-config":
             return self.answers[" ".join(args[1:])]
         return "LLVM version 23.1.5"
+
+    def pinned(self):
+        return patch.dict(setup.ARTIFACTS, {name: (asset, size, DIGEST) for name, (asset, size, _) in setup.ARTIFACTS.items()})
 
     def inspect(self, prefix):
         with patch.object(check, "run", side_effect=self.fake_run), patch.dict(os.environ, {}, clear=True):
@@ -62,7 +67,9 @@ class LLVMTests(unittest.TestCase):
         for system, arch in [("Windows", "AMD64"), ("Linux", "riscv64"), ("Darwin", "i386")]:
             with self.assertRaises(ValueError):
                 common.host(system, arch)
-        self.assertEqual(common.pin("macos-x64")["route"], "source")
+        self.assertEqual(common.pin("macos-x64")["route"], "release-archive")
+        self.assertEqual({common.backend_for(host) for host in ["linux-x64", "macos-x64"]}, {"X86"})
+        self.assertEqual({common.backend_for(host) for host in ["linux-arm64", "macos-arm64"]}, {"AArch64"})
 
     def test_musl_rejected(self):
         with patch.object(common, "host", return_value="linux-x64"), patch.object(common.platform, "libc_ver", return_value=("musl", "1.2")):
@@ -141,7 +148,7 @@ class LLVMTests(unittest.TestCase):
     def test_query_rejections(self):
         p = self.fixture()
         cases = {"--version": "23.1.4", "--libdir": "/opt/homebrew/lib", "--prefix": "/tmp/other",
-                 "--targets-built": "X86", "--host-target": "aarch64-unknown-linux-gnu",
+                 "--targets-built": "X86 AArch64", "--host-target": "aarch64-unknown-linux-gnu",
                  "--link-static --shared-mode all": "shared", "--link-static --libnames all": "libLLVM.so",
                  "--link-static --system-libs all": "-L/opt/homebrew/lib -lz",
                  "--cflags": "-I/usr/local/include", "--ldflags": "-L/tmp/other"}
@@ -177,19 +184,47 @@ class LLVMTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.inspect(p)
 
-    def test_source_flag_policy(self):
-        flags = setup.source_flags("/prefix", "/sdk", "/cc", "/cxx", "/ninja")
-        for expected in ["LLVM_ENABLE_PROJECTS=clang;lld", "BUILD_SHARED_LIBS=OFF", "LLVM_BUILD_LLVM_DYLIB=OFF",
-                         "LLVM_LINK_LLVM_DYLIB=OFF", "LLVM_INSTALL_TOOLCHAIN_ONLY=OFF", "LLVM_INCLUDE_TOOLS=ON",
-                         "LLVM_ENABLE_ASSERTIONS=ON", "LLVM_PARALLEL_LINK_JOBS=1", "CMAKE_OSX_ARCHITECTURES=x86_64",
-                         "LLVM_TARGETS_TO_BUILD=" + ";".join(common.TARGETS)]:
+    def test_release_flags_build_one_static_native_backend(self):
+        flags = release.flags("/prefix", "AArch64")
+        for expected in ["LLVM_TARGETS_TO_BUILD=AArch64", "LLVM_ENABLE_PROJECTS=", "LLVM_ENABLE_RUNTIMES=",
+                         "CMAKE_INSTALL_PREFIX=/prefix", "LLVM_BUILD_LLVM_DYLIB=OFF", "LLVM_LINK_LLVM_DYLIB=OFF",
+                         "LLVM_BUILD_TOOLS=ON", "LLVM_INCLUDE_TESTS=OFF"]:
             self.assertIn("-D" + expected, flags)
-        for lib in ["ZLIB", "ZSTD", "LIBXML2", "FFI", "LIBEDIT", "LIBPFM", "CURL"]:
+        for lib in ["ZLIB", "ZSTD", "LIBXML2", "LIBEDIT", "FFI"]:
             self.assertIn(f"-DLLVM_ENABLE_{lib}=OFF", flags)
+        self.assertEqual(sum(flag.startswith("-DLLVM_TARGETS_TO_BUILD=") for flag in flags), 1)
+        self.assertEqual(release.INSTALL_TARGETS, ("install-llvm-headers", "install-llvm-libraries", "install-llvm-config"))
+
+    def test_release_source_extraction_keeps_only_build_directories(self):
+        root = f"llvm-project-{common.VERSION}.src"
+        names = [f"{root}/{directory}/file" for directory in release.SOURCE_DIRS] + [f"{root}/clang/file", f"{root}/llvmish/file"]
+        archive = self.archive([(name, tarfile.REGTYPE, b"x") for name in names])
+        release.extract_source(archive, self.root / "src")
+        for directory in release.SOURCE_DIRS:
+            self.assertTrue((self.root / "src" / directory / "file").is_file())
+        self.assertEqual(sorted(path.name for path in (self.root / "src").iterdir()), sorted(release.SOURCE_DIRS))
+
+    def test_release_archive_round_trips_through_setup_extract(self):
+        tree = self.fixture()
+        (tree / common.RECEIPT).unlink()
+        archive = self.root / "out" / "llvm.tar.xz"
+        archive.parent.mkdir()
+        digest = release.package(tree, archive)
+        self.assertEqual(archive.with_name("llvm.tar.xz.sha256").read_text(), f"{digest}  llvm.tar.xz\n")
+        unpacked = setup.extract(archive, self.root / "unpacked")
+        self.assertEqual((unpacked / "bin/llvm-config").read_text(), "fixture, not executable code")
+
+    def test_unset_pin_fails_naming_the_pin_before_any_work(self):
+        args = argparse.Namespace()
+        with patch.object(setup, "download") as download, self.assertRaisesRegex(ValueError, "checksum pin for macos-x64.*unset"):
+            setup.provision(args, "macos-x64", self.root / "output")
+        download.assert_not_called()
+        self.assertFalse((self.root / "output.lock").exists())
+        self.assertFalse(self.root.joinpath("output").exists())
 
     def test_resource_failure_precedes_download(self):
-        args = argparse.Namespace(build_source=False, jobs=2)
-        with patch.object(setup.shutil, "disk_usage", return_value=SimpleNamespace(free=0)), \
+        args = argparse.Namespace()
+        with self.pinned(), patch.object(setup.shutil, "disk_usage", return_value=SimpleNamespace(free=0)), \
                 patch.object(setup, "download") as download, self.assertRaisesRegex(ValueError, "disk"):
             setup.provision(args, "linux-x64", self.root / "output")
         download.assert_not_called()
@@ -198,8 +233,8 @@ class LLVMTests(unittest.TestCase):
     def test_failed_install_is_not_accepted(self):
         tree = self.fixture()
         output = self.root / "output"
-        args = argparse.Namespace(build_source=False, jobs=1)
-        with patch.object(setup.shutil, "disk_usage", return_value=SimpleNamespace(free=100 * setup.GIB)), \
+        args = argparse.Namespace()
+        with self.pinned(), patch.object(setup.shutil, "disk_usage", return_value=SimpleNamespace(free=100 * setup.GIB)), \
                 patch.object(setup, "download"), patch.object(setup, "extract", return_value=tree), \
                 patch.object(setup, "inspect", side_effect=ValueError("version mismatch")), self.assertRaises(ValueError):
             setup.provision(args, "linux-x64", output)
@@ -208,54 +243,15 @@ class LLVMTests(unittest.TestCase):
 
     def test_existing_prefix_is_rechecked_not_downloaded(self):
         prefix = self.fixture()
-        args = argparse.Namespace(build_source=False)
-        with patch.object(check, "run", side_effect=self.fake_run) as run, patch.object(setup, "download") as download, \
+        args = argparse.Namespace()
+        with self.pinned():
+            (prefix / common.RECEIPT).write_text(json.dumps(common.pin("linux-x64")))
+        with self.pinned(), patch.object(check, "run", side_effect=self.fake_run) as run, patch.object(setup, "download") as download, \
                 patch.dict(os.environ, {}, clear=True):
             result = setup.provision(args, "linux-x64", prefix)
         self.assertEqual(result["status"], "prefix-inspected")
         self.assertGreater(run.call_count, 1)
         download.assert_not_called()
-
-    def test_source_rejects_missing_sdk_and_system_tools(self):
-        with self.assertRaisesRegex(ValueError, "requires absolute"):
-            setup.source_prerequisites(argparse.Namespace(sdk=None, cc=None, cxx=None))
-        sdk = self.root / "sdk"
-        (sdk / "usr/lib").mkdir(parents=True)
-        (sdk / "usr/lib/libSystem.tbd").write_text("fixture")
-        compiler = self.root / "compiler"
-        compiler.write_text("fixture, not executable code")
-        compiler.chmod(0o755)
-        args = argparse.Namespace(sdk=sdk, cc=compiler, cxx=compiler)
-        def selected(command, **kwargs):
-            return "Apple clang fixture" if command[0] == compiler else str(compiler)
-        with patch.object(setup, "run", side_effect=selected), self.assertRaisesRegex(ValueError, "mise-installed"):
-            setup.source_prerequisites(args)
-
-    def test_task_scoped_build_tools_use_explicit_mise_roots(self):
-        sdk = self.root / "sdk"
-        (sdk / "usr/lib").mkdir(parents=True)
-        (sdk / "usr/lib/libSystem.tbd").write_text("fixture")
-        compiler = self.root / "compiler"
-        compiler.write_text("fixture")
-        compiler.chmod(0o755)
-        backends = {"cmake": "aqua:Kitware/CMake", "ninja": "aqua:ninja-build/ninja", "python": "core:python"}
-        paths, roots = {}, {}
-        for tool, backend in backends.items():
-            root = self.root / tool
-            path = root / "bin" / tool
-            path.parent.mkdir(parents=True)
-            path.write_text("fixture")
-            path.chmod(0o755)
-            roots[backend], paths[tool] = root, path
-        def selected(command, **kwargs):
-            if command[0] == compiler:
-                return "Apple clang fixture"
-            self.assertEqual(command[:2], ["mise", "where"])
-            return str(roots[command[2].split("@")[0]])
-        with patch.object(setup, "run", side_effect=selected), \
-                patch.object(setup.shutil, "which", side_effect=lambda tool: str(paths[tool])), \
-                patch.object(setup.sys, "executable", str(paths["python"])):
-            self.assertEqual(setup.source_prerequisites(argparse.Namespace(sdk=sdk, cc=compiler, cxx=compiler)), paths)
 
     def test_bin_path_inspects_before_printing(self):
         prefix = self.fixture()
@@ -276,18 +272,10 @@ class LLVMTests(unittest.TestCase):
             self.assertNotIn(key, env)
         self.assertNotIn("homebrew", env["PATH"])
 
-    def test_source_is_explicit(self):
-        args = argparse.Namespace(build_source=False)
-        with self.assertRaisesRegex(ValueError, "--build-source"):
-            setup.provision(args, "macos-x64", self.root / "absent")
-        args.build_source = True
-        with self.assertRaisesRegex(ValueError, "only approved"):
-            setup.provision(args, "linux-x64", self.root / "absent")
-
     def test_plan_no_execution_or_writes(self):
         stdout = io.StringIO()
-        with patch.object(setup.sys, "argv", ["setup.py", "--plan"]), patch.object(common, "host", return_value="macos-x64"), \
-                patch.object(common, "ROOT", self.root), patch.object(setup, "run") as run, \
+        with patch.object(sys, "argv", ["setup.py", "--plan"]), patch.object(common, "host", return_value="macos-x64"), \
+                patch.object(common, "ROOT", self.root), patch.object(setup.subprocess, "run") as run, \
                 patch.object(setup, "download") as download, redirect_stdout(stdout):
             setup.main()
         facts = json.loads(stdout.getvalue())
@@ -315,7 +303,7 @@ class LLVMTests(unittest.TestCase):
         with patch.object(check, "run", return_value="/fixture/libLLVMCore.a") as run, patch.object(check, "dependencies", return_value="libc.so"):
             result = check.smoke(Path(facts["prefix"]), "linux-x64", facts)
         commands = [[str(a) for a in call.args[0]] for call in run.call_args_list]
-        link = next(command for command in commands if command[0].endswith("clang++"))
+        link = next(command for command in commands if command[0] == "/usr/bin/c++")
         self.assertIn(facts["prefix"] + "/lib/libLLVMCore.a", link)
         self.assertFalse(any(arg.startswith("-lLLVM") for arg in link))
         self.assertEqual(result["status"], "c-api-static-smoke-passed")
