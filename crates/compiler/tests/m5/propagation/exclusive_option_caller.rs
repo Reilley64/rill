@@ -519,7 +519,7 @@ function writeThrough(input: Option<&mut bool>): Option<bool> {
         &source,
         |request, _, _| {
             let graph = loader::load_installed(request.clone()).unwrap();
-            let (stats, exact, short) = pinned((327_793, 48_338, 12));
+            let (stats, exact, short) = pinned((327_224, 48_338, 12));
             let typed = analyze_typed(&graph, exact);
             assert_eq!(typed.completion(), TypedCompletion::Incomplete);
             assert_eq!(typed.statistics(), stats);

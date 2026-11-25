@@ -1537,9 +1537,9 @@ function joined(numbers: List<i32>, otherInput: List<i32>): [i32, i32] {{
                     assert_eq!(
                         observed(typed_stats),
                         if live {
-                            (493280, 56808, 12)
+                            (492686, 56808, 12)
                         } else {
-                            (493281, 56810, 12)
+                            (492687, 56810, 12)
                         }
                     );
                     let (exact, short) = budget_caps(typed_stats);
@@ -1968,7 +1968,7 @@ fn unsupported_reference_children_preserve_prior_typed_caps() {
                 (
                     "input: &i32, work: () => &i32",
                     "() => input, work",
-                    486922,
+                    486328,
                     55357,
                     12,
                 ),
@@ -3200,7 +3200,7 @@ fn installed_join_fresh_results_keep_the_written_occurrence() {
             let loaded = loader::load_installed(request.clone()).unwrap();
             captured_keys(&loaded, true);
             let typed_cost = Statistics {
-                work: 445_102,
+                work: 444_520,
                 entries: 51_426,
                 max_depth: 12,
             };
@@ -3572,7 +3572,7 @@ fn an_unproved_join_does_not_invent_a_discard() {
             let loaded = loader::load_installed(request.clone()).unwrap();
             captured_keys(&loaded, true);
             let cost = Statistics {
-                work: 427_339,
+                work: 426_757,
                 entries: 49_016,
                 max_depth: 12,
             };
@@ -3699,7 +3699,7 @@ fn reference_pair_reserves_before_it_builds_each_slot() {
         |request, _, _| {
             let graph = loader::load_installed(request.clone()).unwrap();
             let pinned = compiler::analysis::Statistics {
-                work: 427_382,
+                work: 426_800,
                 entries: 49_151,
                 max_depth: 12,
             };
@@ -3727,9 +3727,9 @@ fn reference_pair_reserves_before_it_builds_each_slot() {
             // different points: before the reorder every one of these stops at
             // 405,462 / 44,957 / 12.
             for (max_entries, stopped) in [
-                (44964, (405617, 44963, 12)),
-                (44962, (405614, 44960, 12)),
-                (44959, (405586, 44957, 12)),
+                (44964, (405247, 44963, 12)),
+                (44962, (405244, 44960, 12)),
+                (44959, (405216, 44957, 12)),
             ] {
                 let limited = analyze_typed(
                     &graph,

@@ -327,11 +327,7 @@ impl<'a, 'g> Check<'a, 'g> {
             let [invocation] = syntax[*returned].children.as_slice() else {
                 return None;
             };
-            let fact = |node| {
-                self.table
-                    .and_then(|table| table.get(&node))
-                    .map(|&(_, fact)| fact)
-            };
+            let fact = |node| self.table.get(&node).map(|&(_, fact)| fact);
             if syntax[*body].kind != NodeKind::Block
                 || syntax[*returned].kind != NodeKind::Return
                 || !matches!(fact(*returned)?.kind, NodeFactKind::Return { target } if target == id)

@@ -428,14 +428,14 @@ impl<'a, 'g> Check<'a, 'g> {
         }
         let modules = self.inventory.graph().modules();
         self.budget.step(modules.len())?;
-        let Some(module) = modules.iter().find(|m| m.key == declaration.module) else {
+        let Some(index) = modules.iter().position(|m| m.key == declaration.module) else {
             return Ok(false);
         };
+        let (module, table) = (&modules[index], &self.nodes.tables[index]);
         let substitution = Substitutions {
             arguments,
             outer: self.substitution,
         };
-        let table = self.nodes.module(&module.key, self.budget)?;
         let mut proof = self.callable_check(module, table)?;
         proof.substitution = Some(&substitution);
         proof.function_body(signature, depth + 1)?;
@@ -445,7 +445,7 @@ impl<'a, 'g> Check<'a, 'g> {
     pub(super) fn callable_check(
         &mut self,
         module: &'g Module,
-        table: Option<&'a NodeTable<'a, 'g>>,
+        table: &'a NodeTable<'a, 'g>,
     ) -> Work<Check<'_, 'g>> {
         let sources = Sources {
             inventory: self.inventory,

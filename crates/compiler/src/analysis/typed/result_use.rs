@@ -163,42 +163,26 @@ impl<'g> ResultUseReport<'g> {
 
 type NodeTable<'a, 'g> = BTreeMap<NodeId, (usize, &'a NodeFacts<'g>)>;
 
-#[derive(Default)]
 struct Nodes<'a, 'g> {
-    modules: BTreeMap<&'g ModuleKey, NodeTable<'a, 'g>>,
+    modules: &'g [Module],
+    tables: Vec<NodeTable<'a, 'g>>,
     len: usize,
 }
 
-struct Cursor<'n, 'a, 'g> {
-    rest: std::iter::Peekable<
-        std::collections::btree_map::Iter<'n, &'g ModuleKey, NodeTable<'a, 'g>>,
-    >,
-}
-
-impl<'n, 'a, 'g> Cursor<'n, 'a, 'g> {
-    fn module(
-        &mut self,
-        key: &ModuleKey,
-        budget: &mut Budget,
-    ) -> Work<Option<&'n NodeTable<'a, 'g>>> {
-        while let Some((candidate, _)) = self.rest.peek() {
-            budget.step(key.path.len() + 1)?;
-            match (**candidate).cmp(key) {
-                std::cmp::Ordering::Less => {
-                    self.rest.next();
-                }
-                std::cmp::Ordering::Equal => return Ok(self.rest.next().map(|(_, table)| table)),
-                std::cmp::Ordering::Greater => break,
-            }
-        }
-        Ok(None)
-    }
-}
-
 impl<'a, 'g> Nodes<'a, 'g> {
-    fn insert(&mut self, module: &'g ModuleKey, node: NodeId, fact: (usize, &'a NodeFacts<'g>)) {
-        if let std::collections::btree_map::Entry::Vacant(slot) =
-            self.modules.entry(module).or_default().entry(node)
+    fn new(modules: &'g [Module]) -> Self {
+        Self {
+            modules,
+            tables: std::iter::repeat_with(BTreeMap::new)
+                .take(modules.len())
+                .collect(),
+            len: 0,
+        }
+    }
+
+    fn insert(&mut self, module: &ModuleKey, node: NodeId, fact: (usize, &'a NodeFacts<'g>)) {
+        if let Some(index) = self.position(module)
+            && let std::collections::btree_map::Entry::Vacant(slot) = self.tables[index].entry(node)
         {
             slot.insert(fact);
             self.len += 1;
@@ -209,21 +193,14 @@ impl<'a, 'g> Nodes<'a, 'g> {
         self.len
     }
 
+    fn position(&self, module: &ModuleKey) -> Option<usize> {
+        self.modules
+            .binary_search_by(|candidate| candidate.key.cmp(module))
+            .ok()
+    }
+
     fn get(&self, module: &ModuleKey, node: NodeId) -> Option<&(usize, &'a NodeFacts<'g>)> {
-        self.modules.get(module)?.get(&node)
-    }
-
-    fn cursor(&self) -> Cursor<'_, 'a, 'g> {
-        Cursor {
-            rest: self.modules.iter().peekable(),
-        }
-    }
-
-    fn module(&self, key: &ModuleKey, budget: &mut Budget) -> Work<Option<&NodeTable<'a, 'g>>> {
-        let probes = usize::BITS - self.modules.len().leading_zeros() + 1;
-        let width = key.path.len().checked_add(1).ok_or(())?;
-        budget.step(width.checked_mul(probes as usize).ok_or(())?)?;
-        Ok(self.modules.get(key))
+        self.tables[self.position(module)?].get(&node)
     }
 }
 
@@ -267,7 +244,7 @@ pub(super) fn check<'g>(
     budget: &mut Budget,
     report: &mut ResultUseReport<'g>,
 ) -> Work<()> {
-    let mut nodes = Nodes::default();
+    let mut nodes = Nodes::new(inventory.graph().modules());
     for (index, facts) in bodies.typed_nodes().iter().enumerate() {
         budget.reserve(1)?;
         nodes.insert(facts.site.module, facts.site.node, (index, facts));
@@ -368,17 +345,18 @@ pub(super) fn check<'g>(
     for (id, (entry, _)) in &contracts {
         budget.step(1)?;
         budget.step(inventory.graph().modules().len())?;
-        let Some(module) = inventory
+        let Some(index) = inventory
             .graph()
             .modules()
             .iter()
-            .find(|m| m.key == id.module)
+            .position(|m| m.key == id.module)
         else {
             continue;
         };
-        let mut check = Check::new(sources, module, None, &contracts, budget, report)?;
+        let module = &inventory.graph().modules()[index];
+        let table = &nodes.tables[index];
+        let mut check = Check::new(sources, module, table, &contracts, budget, report)?;
         if checked.contains(id) {
-            check.table = nodes.module(&module.key, check.budget)?;
             check.parametric = Some(*entry);
             check.proving_callable = true;
             check.function_body(&inventory.type_facts().declarations[id], 1)?;
@@ -391,10 +369,8 @@ pub(super) fn check<'g>(
     for (id, summary) in proved {
         contracts.get_mut(id).unwrap().1 = Some(summary);
     }
-    let mut tables = nodes.cursor();
-    for module in inventory.graph().modules() {
+    for (module, table) in inventory.graph().modules().iter().zip(&nodes.tables) {
         budget.step(1)?;
-        let table = tables.module(&module.key, budget)?;
         Check::new(sources, module, table, &contracts, budget, report)?.roots()?;
     }
     Ok(())
@@ -420,7 +396,7 @@ struct Check<'a, 'g> {
     pairs: &'a pairs::PairBodies<'g>,
     scoped: Option<(super::RoutineRole<'g>, pairs::PairBody<'g>)>,
     nodes: &'a Nodes<'a, 'g>,
-    table: Option<&'a NodeTable<'a, 'g>>,
+    table: &'a NodeTable<'a, 'g>,
     checked: &'a BTreeSet<&'g DeclarationId>,
     variants: &'a BTreeMap<&'g DeclarationId, &'a Payload<'g>>,
     implementation_headers: &'a BTreeMap<&'g DeclarationId, &'a DeclarationFacts<'g>>,
@@ -456,7 +432,7 @@ impl<'a, 'g> Check<'a, 'g> {
     fn new(
         sources: Sources<'a, 'g>,
         module: &'g Module,
-        table: Option<&'a NodeTable<'a, 'g>>,
+        table: &'a NodeTable<'a, 'g>,
         contracts: &'a CallbackContract<'g>,
         budget: &'a mut Budget,
         report: &'a mut ResultUseReport<'g>,
@@ -522,10 +498,7 @@ impl<'a, 'g> Check<'a, 'g> {
     }
 
     fn facts(&mut self, node: NodeId) -> Work<Option<&'a NodeFacts<'g>>> {
-        Ok(self
-            .table
-            .and_then(|table| table.get(&node))
-            .map(|&(_, fact)| fact))
+        Ok(self.table.get(&node).map(|&(_, fact)| fact))
     }
 
     fn pending(&mut self, node: NodeId, blocker: ResultUseBlocker) -> Work<()> {
