@@ -314,10 +314,10 @@ fn output_frame<'g>(
     {
         return Err(pending);
     }
-    budget.step(1)?;
-    if !typed
-        .inventory()
-        .headers()
+    let headers = typed.inventory().headers();
+    let probes = (usize::BITS - headers.len().leading_zeros() + 1) as usize;
+    graph::charge_key(&declaration.id.module, probes, budget)?;
+    if !headers
         .get(&declaration.id)
         .is_some_and(|metadata| metadata.defaults.is_empty() && metadata.requirements.is_empty())
     {
