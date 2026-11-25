@@ -12,3 +12,4 @@ doctest = false
 
 [dependencies]
 rill-collection = { path = "../collection" }
+libc = "0.2"

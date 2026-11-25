@@ -2,8 +2,11 @@
 //!
 //! The C symbols below are the contract with generated code. `main` captures the arguments and
 //! environment, then calls `rill_startup` and `rill_startup_cleanup`, which generated code
-//! provides, and returns 0. `main` also sets `SIGPIPE` to ignored, so a write to a closed pipe
+//! provides, on a managed 1 MiB entry stack with a guard page, and returns 0. `main` also sets `SIGPIPE` to ignored, so a write to a closed pipe
 //! fails with `EPIPE` instead of ending the process.
+mod counting;
+mod entry_stack;
+
 use std::alloc::{self, Layout};
 use std::ffi::{CStr, c_char, c_int};
 use std::fs::File;
@@ -19,6 +22,7 @@ const SIG_IGN: usize = 1;
 unsafe extern "C" {
     fn rill_startup();
     fn rill_startup_cleanup();
+    static rill_check_allocations: u8;
     fn _exit(status: c_int) -> !;
     fn signal(signal: c_int, handler: usize) -> usize;
 }
@@ -31,7 +35,9 @@ struct Captured {
 static CAPTURED: OnceLock<Captured> = OnceLock::new();
 
 /// Ignores `SIGPIPE`, captures the arguments and environment, runs startup, then its cleanup,
-/// and returns 0.
+/// on the entry stack, and returns 0. When the program defines `rill_check_allocations` as 1,
+/// counting of live allocations starts after the capture and the count is reported on standard
+/// error after cleanup, or after the panic line.
 ///
 /// # Safety
 ///
@@ -50,15 +56,32 @@ pub unsafe extern "C" fn main(argc: c_int, argv: *const *const c_char) -> c_int 
         }
     };
     let _ = CAPTURED.set(captured);
-    run_startup();
+    // SAFETY: generated code defines `rill_check_allocations` as one byte.
+    if unsafe { rill_check_allocations } != 0 {
+        counting::start();
+    }
+    if let Err(message) = entry_stack::run_on_entry_stack(run_startup) {
+        panic_exit(message);
+    }
+    report_live_allocations();
     0
 }
 
-fn run_startup() {
+extern "C" fn run_startup() {
     // SAFETY: generated code defines both symbols with these signatures.
     unsafe {
         rill_startup();
         rill_startup_cleanup();
+    }
+}
+
+fn report_live_allocations() {
+    if let Some(live) = counting::stop() {
+        let mut line = [0u8; 48];
+        let mut free = &mut line[..];
+        let _ = writeln!(free, "live allocations: {live}");
+        let length = 48 - free.len();
+        let _ = descriptor(2).write_all(&line[..length]);
     }
 }
 
@@ -239,6 +262,7 @@ fn panic_exit(message: &[u8]) -> ! {
     let _ = standard_error.write_all(b"panic: ");
     let _ = standard_error.write_all(message);
     let _ = standard_error.write_all(b"\n");
+    report_live_allocations();
     // SAFETY: `_exit` ends the process at once and runs no cleanup.
     unsafe { _exit(PANIC_STATUS) }
 }

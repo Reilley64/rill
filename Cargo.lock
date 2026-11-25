@@ -155,6 +155,7 @@ version = "0.1.0-dev"
 name = "rill-runtime"
 version = "0.1.0-dev"
 dependencies = [
+ "libc",
  "rill-collection",
 ]
 

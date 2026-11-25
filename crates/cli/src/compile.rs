@@ -72,19 +72,19 @@ impl Drop for Scratch {
     }
 }
 
-pub fn build(entry: &str, output: Option<&str>) -> ExitCode {
+pub fn build(entry: &str, output: Option<&str>, check_allocations: bool) -> ExitCode {
     let output = output.map_or_else(|| default_output(entry), PathBuf::from);
     check::with_program(entry, |graph, program| {
-        match build_to(entry, graph, program, &output) {
+        match build_to(entry, graph, program, &output, check_allocations) {
             Ok(()) => ExitCode::SUCCESS,
             Err(failure) => failure.report(),
         }
     })
 }
 
-pub fn run(entry: &str, arguments: &[OsString]) -> ExitCode {
+pub fn run(entry: &str, arguments: &[OsString], check_allocations: bool) -> ExitCode {
     check::with_program(entry, |graph, program| {
-        match run_built(entry, graph, program, arguments) {
+        match run_built(entry, graph, program, arguments, check_allocations) {
             Ok(code) => code,
             Err(failure) => failure.report(),
         }
@@ -101,6 +101,7 @@ fn build_to(
     graph: &Graph,
     program: &CompilableProgram<'_, '_>,
     output: &Path,
+    check_allocations: bool,
 ) -> Result<(), Failure> {
     if same_file(Path::new(entry), output) {
         return Err(Failure::new(
@@ -109,7 +110,7 @@ fn build_to(
         ));
     }
     let scratch = Scratch::create().map_err(scratch_failure)?;
-    let object = emit(graph, program, &scratch.0)?;
+    let object = emit(graph, program, &scratch.0, check_allocations)?;
     let directory = match output.parent() {
         Some(parent) if !parent.as_os_str().is_empty() => parent,
         _ => Path::new("."),
@@ -138,9 +139,10 @@ fn run_built(
     graph: &Graph,
     program: &CompilableProgram<'_, '_>,
     arguments: &[OsString],
+    check_allocations: bool,
 ) -> Result<ExitCode, Failure> {
     let scratch = Scratch::create().map_err(scratch_failure)?;
-    let object = emit(graph, program, &scratch.0)?;
+    let object = emit(graph, program, &scratch.0, check_allocations)?;
     let executable = scratch.0.join("program");
     link(&object, &executable)?;
     let mut child = Command::new(&executable)
@@ -172,9 +174,10 @@ fn emit(
     graph: &Graph,
     program: &CompilableProgram<'_, '_>,
     scratch: &Path,
+    check_allocations: bool,
 ) -> Result<PathBuf, Failure> {
     let object = scratch.join("program.o");
-    codegen_llvm::emit_object(graph, program, &object).map_err(|error| {
+    codegen_llvm::emit_object(graph, program, &object, check_allocations).map_err(|error| {
         Failure::new(
             ANALYSIS_INCOMPLETE,
             format!("the backend failed: {error}; this is a compiler failure, not a source error"),
