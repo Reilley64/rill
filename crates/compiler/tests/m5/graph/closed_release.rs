@@ -299,7 +299,7 @@ fn implicit_guard_release_closes_the_ordinary_root() {
             assert_eq!(
                 targeted.statistics(),
                 Statistics {
-                    work: 1891,
+                    work: 1901,
                     entries: 31,
                     max_depth: 1
                 }
@@ -311,7 +311,7 @@ fn implicit_guard_release_closes_the_ordinary_root() {
             // work and 134 entries and sets depth 5, so 185,246 / 3,993 / 3
             // becomes 185,562 / 4,127 / 5 and gives ResourceLimit below.
             let exact = AnalysisLimits {
-                max_work: 185596,
+                max_work: 188088,
                 max_entries: 4127,
                 max_depth: 5,
             };
@@ -377,8 +377,8 @@ fn two_guard_parameters_release_in_reverse_and_close_the_root() {
             ("release", "b: LockGuard<i32>"),
             ("release", "a: LockGuard<i32>"),
         ],
-        (1_935, 45, 1),
-        (185_838, 4_142, 5),
+        (1_945, 45, 1),
+        (188_330, 4_142, 5),
     );
 }
 
@@ -394,8 +394,8 @@ fn two_guard_fields_release_in_reverse_and_close_the_root() {
             ("release", "value: Pair.first"),
             ("end", "value: Pair"),
         ],
-        (2_297, 105, 1),
-        (186_550, 4_202, 5),
+        (2_445, 105, 1),
+        (189_180, 4_202, 5),
     );
 }
 
@@ -520,7 +520,7 @@ fn implicit_guard_siblings_keep_their_parent_caps() {
             };
             crate::limit::assert_graph_limit(&analyze_ownership(receipt, old));
             let exact = AnalysisLimits {
-                max_work: 186_038,
+                max_work: 188_530,
                 max_entries: 4_113,
                 max_depth: 5,
             };
@@ -528,7 +528,7 @@ fn implicit_guard_siblings_keep_their_parent_caps() {
             assert_eq!(
                 report.statistics(),
                 Statistics {
-                    work: 186_038,
+                    work: 188_530,
                     entries: 4_113,
                     max_depth: 5
                 }
@@ -542,10 +542,10 @@ fn implicit_guard_siblings_keep_their_parent_caps() {
             for (name, (work, entries), site) in [
                 (
                     &b"function wide"[..],
-                    (1_841, 12),
+                    (1_851, 12),
                     &b"lock: LockGuard<i64>"[..],
                 ),
-                (b"function generic", (1_849, 12), b"value: Holder<i32>"),
+                (b"function generic", (1_859, 12), b"value: Holder<i32>"),
             ] {
                 let root = root(&report, name);
                 assert_eq!(root.ordinary_completion(), Completion::Incomplete);
@@ -611,7 +611,7 @@ fn implicit_guard_binding_release_keeps_its_parent_caps() {
             assert_eq!(
                 targeted.statistics(),
                 Statistics {
-                    work: 1990,
+                    work: 2000,
                     entries: 76,
                     max_depth: 3
                 }
@@ -620,7 +620,7 @@ fn implicit_guard_binding_release_keeps_its_parent_caps() {
             // ResourceLimit; the i32 equality source root adds 316 work and
             // 134 entries and sets depth 5.
             let exact = AnalysisLimits {
-                max_work: 185792,
+                max_work: 188284,
                 max_entries: 4172,
                 max_depth: 5,
             };

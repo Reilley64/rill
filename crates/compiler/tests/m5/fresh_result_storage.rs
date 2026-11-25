@@ -119,27 +119,27 @@ fn installed_fresh_result_residences() {
                 // The unchanged blocked paths must not pay for a new wrapper lookup.
                 let stats = match name {
                     "exportErr" => Statistics {
-                        work: 3400,
+                        work: 3410,
                         entries: 438,
                         max_depth: 4,
                     },
                     "exportOk" => Statistics {
-                        work: 3398,
+                        work: 3408,
                         entries: 438,
                         max_depth: 4,
                     },
                     "opaque" => Statistics {
-                        work: 3266,
+                        work: 3276,
                         entries: 374,
                         max_depth: 3,
                     },
                     "retained" => Statistics {
-                        work: 3848,
+                        work: 3858,
                         entries: 685,
                         max_depth: 4,
                     },
                     "retireRetained" => Statistics {
-                        work: 3232,
+                        work: 3242,
                         entries: 357,
                         max_depth: 3,
                     },

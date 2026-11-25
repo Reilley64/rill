@@ -70,7 +70,7 @@ fn wraps_after_rhs_has_no_graph_root_mir_only_because_of_the_retained_display_ed
             let stats = targeted.statistics();
             assert_eq!(
                 (stats.work, stats.entries, stats.max_depth),
-                (11_672, 2_019, 6)
+                (11_922, 2_019, 6)
             );
             let exact = AnalysisLimits {
                 max_work: stats.work,
@@ -125,7 +125,7 @@ fn wraps_after_rhs_has_no_graph_root_mir_only_because_of_the_retained_display_ed
             // the i32 equality source root (ri-785.9, metering rule 11, D2 (b))
             // it is 203,351 / 7,479 / 6, and the old cap gives ResourceLimit.
             assert_pre_equality_graph_cap(receipt, (203_035, 7_345, 6));
-            assert_eq!((s.work, s.entries, s.max_depth), (203_397, 7_479, 6));
+            assert_eq!((s.work, s.entries, s.max_depth), (205_889, 7_479, 6));
             let again = analyze_ownership(receipt, exact);
             assert_eq!(again.completion(), GraphCompletion::Incomplete);
             for short in [

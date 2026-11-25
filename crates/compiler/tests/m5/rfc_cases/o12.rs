@@ -302,13 +302,13 @@ function viewField(): i32 { let view = &shifted(Point { x: 1, y: 2 }); return vi
                 &[Case {
                     text: VIEW,
                     typed_stats: (325259, 48462, 12),
-                    graph: (GraphCompletion::SourceRejected, (188614, 4666, 7)),
+                    graph: (GraphCompletion::SourceRejected, (191589, 4666, 7)),
                     roots: &[
                         Root {
                             name: "shifted",
                             want: Want::Checked,
                             graph: None,
-                            stats: (2779, 237, 3),
+                            stats: (2996, 237, 3),
                         },
                         Root {
                             name: "viewField",
@@ -318,7 +318,7 @@ function viewField(): i32 { let view = &shifted(Point { x: 1, y: 2 }); return vi
                                 related: r####"&shifted(Point { x: 1, y: 2 })"####,
                             },
                             graph: None,
-                            stats: (2963, 348, 7),
+                            stats: (3249, 348, 7),
                         },
                     ],
                 }],
@@ -381,61 +381,61 @@ function boundLiteral(): &string { let view = &"static"; return view; }
 function literal(): &string { return &"static"; }
 "####,
             typed_stats: (345597, 50550, 14),
-            graph: (GraphCompletion::SourceRejected, (206102, 7452, 11)),
+            graph: (GraphCompletion::SourceRejected, (210875, 7452, 11)),
             roots: &[
                 Root {
                     name: "shifted",
                     want: Want::Checked,
                     graph: None,
-                    stats: (3031, 363, 3),
+                    stats: (3248, 363, 3),
                 },
                 Root {
                     name: "bare",
                     want: Want::Checked,
                     graph: None,
-                    stats: (6287, 845, 7),
+                    stats: (6890, 845, 7),
                 },
                 Root {
                     name: "grouped",
                     want: Want::Checked,
                     graph: None,
-                    stats: (6359, 881, 11),
+                    stats: (6962, 881, 11),
                 },
                 Root {
                     name: "groupedLiteral",
                     want: Want::Checked,
                     graph: None,
-                    stats: (2171, 176, 6),
+                    stats: (2181, 176, 6),
                 },
                 Root {
                     name: "viaParam",
                     want: Want::Checked,
                     graph: None,
-                    stats: (6796, 976, 8),
+                    stats: (7537, 976, 8),
                 },
                 Root {
                     name: "second",
                     want: Want::Checked,
                     graph: None,
-                    stats: (6356, 881, 9),
+                    stats: (6959, 881, 9),
                 },
                 Root {
                     name: "looped",
                     want: Want::Checked,
                     graph: None,
-                    stats: (6705, 1084, 11),
+                    stats: (7308, 1084, 11),
                 },
                 Root {
                     name: "loopedLiteral",
                     want: Want::Checked,
                     graph: None,
-                    stats: (2356, 278, 6),
+                    stats: (2366, 278, 6),
                 },
                 Root {
                     name: "deadStore",
                     want: Want::Checked,
                     graph: None,
-                    stats: (2148, 167, 4),
+                    stats: (2158, 167, 4),
                 },
                 Root {
                     name: "liveStore",
@@ -445,31 +445,31 @@ function literal(): &string { return &"static"; }
                         related: r####"&shifted(Point { x: 1, y: 2 })"####,
                     },
                     graph: None,
-                    stats: (3418, 598, 9),
+                    stats: (3704, 598, 9),
                 },
                 Root {
                     name: "rawLiteral",
                     want: Want::Checked,
                     graph: None,
-                    stats: (2169, 176, 4),
+                    stats: (2179, 176, 4),
                 },
                 Root {
                     name: "backtick",
                     want: Want::Checked,
                     graph: None,
-                    stats: (2170, 176, 4),
+                    stats: (2180, 176, 4),
                 },
                 Root {
                     name: "boundLiteral",
                     want: Want::Checked,
                     graph: None,
-                    stats: (2263, 222, 4),
+                    stats: (2273, 222, 4),
                 },
                 Root {
                     name: "literal",
                     want: Want::Checked,
                     graph: None,
-                    stats: (2169, 176, 4),
+                    stats: (2179, 176, 4),
                 },
             ],
         }],
@@ -500,13 +500,13 @@ function owner(): &string { let text = "x"; return &text; }
 function flag(b: bool): &string { return &`a${b}`; }
 "####,
             typed_stats: (333802, 49443, 12),
-            graph: (GraphCompletion::SourceRejected, (191376, 4565, 5)),
+            graph: (GraphCompletion::SourceRejected, (194424, 4565, 5)),
             roots: &[
                 Root {
                     name: "shifted",
                     want: Want::Checked,
                     graph: None,
-                    stats: (2863, 279, 3),
+                    stats: (3080, 279, 3),
                 },
                 Root {
                     name: "copyOut",
@@ -514,7 +514,7 @@ function flag(b: bool): &string { return &`a${b}`; }
                         blocker: r####"*(&shifted(Point { x: 1, y: 2 }))"####,
                     },
                     graph: None,
-                    stats: (2306, 124, 3),
+                    stats: (2385, 124, 3),
                 },
                 Root {
                     name: "bound",
@@ -522,7 +522,7 @@ function flag(b: bool): &string { return &`a${b}`; }
                         blocker: r####"(&shifted(Point { x: 1, y: 2 })).x"####,
                     },
                     graph: None,
-                    stats: (1973, 75, 3),
+                    stats: (1983, 75, 3),
                 },
                 Root {
                     name: "interpolated",
@@ -530,7 +530,7 @@ function flag(b: bool): &string { return &`a${b}`; }
                         blocker: r####"`a${n}`"####,
                     },
                     graph: None,
-                    stats: (1959, 71, 4),
+                    stats: (1969, 71, 4),
                 },
                 Root {
                     name: "number",
@@ -538,7 +538,7 @@ function flag(b: bool): &string { return &`a${b}`; }
                         blocker: r####"1i32"####,
                     },
                     graph: None,
-                    stats: (1952, 65, 4),
+                    stats: (1962, 65, 4),
                 },
                 Root {
                     name: "owner",
@@ -548,7 +548,7 @@ function flag(b: bool): &string { return &`a${b}`; }
                         related: r####"text"####,
                     },
                     graph: None,
-                    stats: (2063, 126, 4),
+                    stats: (2073, 126, 4),
                 },
                 Root {
                     name: "flag",
@@ -556,7 +556,7 @@ function flag(b: bool): &string { return &`a${b}`; }
                         blocker: r####"`a${b}`"####,
                     },
                     graph: None,
-                    stats: (1959, 71, 4),
+                    stats: (1969, 71, 4),
                 },
             ],
         }],
@@ -579,13 +579,13 @@ function textBind(): void { let view = &named(); }
                 &[Case {
                     text: TEXT,
                     typed_stats: (326263, 48483, 12),
-                    graph: (GraphCompletion::Incomplete, (187455, 4277, 5)),
+                    graph: (GraphCompletion::Incomplete, (190016, 4277, 5)),
                     roots: &[
                         Root {
                             name: "named",
                             want: Want::Checked,
                             graph: None,
-                            stats: (2373, 159, 4),
+                            stats: (2452, 159, 4),
                         },
                         Root {
                             name: "textRead",
@@ -593,7 +593,7 @@ function textBind(): void { let view = &named(); }
                                 blocker: r####"(&named()).x"####,
                             },
                             graph: None,
-                            stats: (1873, 26, 3),
+                            stats: (1883, 26, 3),
                         },
                         Root {
                             name: "textBind",
@@ -601,7 +601,7 @@ function textBind(): void { let view = &named(); }
                                 blocker: r####"named()"####,
                             },
                             graph: None,
-                            stats: (1890, 33, 4),
+                            stats: (1900, 33, 4),
                         },
                     ],
                 }],
@@ -632,7 +632,7 @@ function bound(): void { let v = &make(); }
             name: "make",
             want: Want::Checked,
             graph: None,
-            stats: (2339, 137, 4),
+            stats: (2596, 137, 4),
         },
         Root {
             name: "within",
@@ -640,7 +640,7 @@ function bound(): void { let v = &make(); }
                 blocker: r####"(&make()).x"####,
             },
             graph: None,
-            stats: (1872, 27, 2),
+            stats: (1882, 27, 2),
         },
         Root {
             name: "bound",
@@ -648,7 +648,7 @@ function bound(): void { let v = &make(); }
                 blocker: r####"make()"####,
             },
             graph: None,
-            stats: (1888, 34, 4),
+            stats: (1898, 34, 4),
         },
     ];
     installed(
@@ -660,13 +660,13 @@ function bound(): void { let v = &make(); }
                     Case {
                         text: DISPOSER,
                         typed_stats: (327291, 48571, 12),
-                        graph: (GraphCompletion::Incomplete, (187676, 4260, 5)),
+                        graph: (GraphCompletion::Incomplete, (190415, 4260, 5)),
                         roots: ROOTS,
                     },
                     Case {
                         text: ALIASED,
                         typed_stats: (328162, 48579, 12),
-                        graph: (GraphCompletion::Incomplete, (187677, 4260, 5)),
+                        graph: (GraphCompletion::Incomplete, (190416, 4260, 5)),
                         roots: ROOTS,
                     },
                 ],

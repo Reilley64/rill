@@ -9,7 +9,7 @@ use super::{
     retained_record_contents,
 };
 use crate::loader::{
-    CollectionArtifact, Declaration, DeclarationId, DeclarationKind, DeclarationOrdinal,
+    CollectionArtifact, Declaration, DeclarationId, DeclarationKind, DeclarationOrdinal, keyed,
 };
 use crate::source::Span;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
@@ -128,7 +128,7 @@ impl<'g> Report<'g> {
 pub struct Mir<'g> {
     pub entry: usize,
     pub blocks: Vec<Block<'g>>,
-    disposer_bodies: BTreeMap<&'g DeclarationId, Mir<'g>>,
+    disposer_bodies: keyed::PathMap<&'g DeclarationId, Mir<'g>>,
     cancellation: Option<Cancellation<'g>>,
     replacement: Option<Box<ReplacementCancellation<'g>>>,
     /// Sole direct call in a checked active frame with no reached budget backedge.
@@ -139,7 +139,9 @@ impl<'g> Mir<'g> {
     /// On targeted root MIR, look up a reached active disposer. Graph reports
     /// store these frames separately in [`GraphReport::active_disposers`].
     pub fn disposer(&self, implementation: &DeclarationId) -> Option<&Mir<'g>> {
-        self.disposer_bodies.get(implementation)
+        self.disposer_bodies
+            .iter()
+            .find_map(|(id, body)| (**id == *implementation).then_some(body))
     }
 
     /// A checked disposal-through-install interval, not a whole-frame proof.
@@ -1386,7 +1388,7 @@ fn checked_graph<'g>(
     let mut scalar_module = None;
     let mut reached = |mir: &Mir<'g>,
                        pending: &mut VecDeque<(&'g Module, &'g DeclarationId, bool)>,
-                       seen: &mut BTreeMap<&'g DeclarationId, Option<Site<'g>>>,
+                       seen: &mut keyed::PathMap<&'g DeclarationId, Option<Site<'g>>>,
                        budget: &mut Budget|
      -> ResultOf<()> {
         graph::visit_dependencies(mir, budget, |_, edge, budget| {
@@ -1415,7 +1417,7 @@ fn checked_graph<'g>(
                 | DependencyContract::RetainedErrorDisplay => return Ok(()),
             };
             let callee = edge.declaration;
-            if seen.contains_key(callee) {
+            if seen.contains_key(&callee, budget)? {
                 return Ok(());
             }
             let scalar = !is_disposer && callee.kind == DeclarationKind::Implementation;
@@ -1438,13 +1440,13 @@ fn checked_graph<'g>(
                 scalar_module = Some(target);
             }
             budget.reserve(2)?;
-            seen.insert(callee, None);
+            seen.insert(callee, None, budget)?;
             pending.push_back((target, callee, is_disposer));
             Ok(())
         })
     };
 
-    let mut seen = BTreeMap::new();
+    let mut seen = keyed::PathMap::new();
     let mut pending = VecDeque::new();
     let mut cache = QueryCache::default();
     let lowering = Lowering::new(budget, &mut cache);
@@ -1454,7 +1456,8 @@ fn checked_graph<'g>(
                 .budget
                 .reserve(1)
                 .map_err(|()| (module, Stop::Limit))?;
-            seen.insert(&header.declaration.id, None);
+            seen.insert(&header.declaration.id, None, lowering.budget)
+                .map_err(|()| (module, Stop::Limit))?;
             (
                 header.declaration.node,
                 lower(
@@ -1534,9 +1537,14 @@ fn checked_graph<'g>(
                 })
         } else {
             let (selected, frame) = if is_disposer {
-                let family = typed
+                let role = typed
                     .dispose_role()
-                    .and_then(|role| typed.inventory().captured_family(&role.id))
+                    .ok_or((module, Stop::Pending(root_site)))?;
+                let families = typed.inventory();
+                keyed::charge(&role.id.module, families.family_probes(), budget)
+                    .map_err(|()| (target, Stop::Limit))?;
+                let family = families
+                    .captured_family(&role.id)
                     .ok_or((module, Stop::Pending(root_site)))?;
                 budget
                     .step(family.implementations.len())
@@ -1548,10 +1556,10 @@ fn checked_graph<'g>(
                     .map(|body| &body.header);
                 (selected, Frame::ActiveDisposer)
             } else {
-                (
-                    typed.inventory().type_facts().declarations.get(id),
-                    Frame::OrdinaryFunction,
-                )
+                let declarations = &typed.inventory().type_facts().declarations;
+                keyed::charge(&id.module, declarations.len(), budget)
+                    .map_err(|()| (target, Stop::Limit))?;
+                (declarations.get(id), Frame::OrdinaryFunction)
             };
             lower(
                 typed,
@@ -1584,7 +1592,10 @@ fn checked_graph<'g>(
             known_entry |= empty_entry.is_some();
             unknown_entry |= empty_entry.is_none();
             if let Some(entry) = empty_entry {
-                *seen.get_mut(id).unwrap() = Some(entry);
+                *seen
+                    .get_mut(&id, budget)
+                    .map_err(|()| (target, Stop::Limit))?
+                    .unwrap() = Some(entry);
             }
         }
         reached(&mir, &mut pending, &mut seen, budget).map_err(|stop| (target, stop))?;
@@ -1606,14 +1617,16 @@ fn checked_graph<'g>(
             }
         } else if is_disposer {
             budget.reserve(1).map_err(|()| (target, Stop::Limit))?;
-            root.disposer_bodies.insert(id, mir);
+            root.disposer_bodies
+                .insert(id, mir, budget)
+                .map_err(|()| (target, Stop::Limit))?;
         }
     }
     if let Some(trace) = trace.filter(|_| root.cancellation.is_none()) {
         root.cancellation = trace
             .finish(
                 &root,
-                |_, callee, _| Ok(seen.get(callee).copied().flatten()),
+                |_, callee, budget| Ok(seen.get(&callee, budget)?.copied().flatten()),
                 known_entry,
                 unknown_entry,
                 budget,
@@ -1623,13 +1636,11 @@ fn checked_graph<'g>(
     if matching_active && let (Some(candidate), Some(entry)) = (replacement, replacement_entry) {
         // The reached direct frames established both entry identities before
         // any replacement-only scan, lookup or cleanup allocation.
-        graph::charge_key(
-            &candidate.site.implementation.module,
-            root.disposer_bodies.len(),
-            budget,
-        )
-        .map_err(|()| (module, Stop::Limit))?;
-        if let Some(body) = root.disposer_bodies.get(candidate.site.implementation) {
+        if let Some(body) = root
+            .disposer_bodies
+            .get(&candidate.site.implementation, budget)
+            .map_err(|()| (module, Stop::Limit))?
+        {
             root.replacement = candidate
                 .finish(&root, body, entry, budget)
                 .map_err(|stop| (module, stop))?;
@@ -1974,7 +1985,7 @@ fn lower_implementation<'a, 'g>(
     {
         return Err(Stop::Pending(site));
     }
-    budget.step(1)?;
+    keyed::charge(&source.family.module, inventory.family_probes(), budget)?;
     let family = inventory
         .captured_family(&source.family)
         .ok_or(Stop::Pending(site))?;
@@ -2831,10 +2842,6 @@ impl<V> OrdinalMap<V> {
 
     fn insert(&mut self, id: &DeclarationId, value: V) -> Option<V> {
         self.0.insert(id.ordinal, value)
-    }
-
-    fn len(&self) -> usize {
-        self.0.len()
     }
 
     fn is_empty(&self) -> bool {

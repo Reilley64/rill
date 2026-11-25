@@ -198,30 +198,30 @@ fn unsupported_field_arithmetic_keeps_its_parent_caps_and_sites() {
     keeps_parent_caps(
         "o05_field_arithmetic::unsupported_field_arithmetic_keeps_its_parent_caps_and_sites",
         SIBLINGS,
-        statistics(195156, 4770, 5),
+        statistics(198894, 4770, 5),
         &[
-            ("nested", 2747, 223, 3, "outer.inner.left + outer.extra"),
+            ("nested", 2964, 223, 3, "outer.inner.left + outer.extra"),
             (
                 "nestedGrouped",
-                2747,
+                2964,
                 223,
                 3,
                 "((outer.inner.left)) + ((outer.extra))",
             ),
-            ("wide", 2384, 164, 3, "pair.left + pair.right"),
+            ("wide", 2532, 164, 3, "pair.left + pair.right"),
             (
                 "wideGrouped",
-                2384,
+                2532,
                 164,
                 3,
                 "((pair.left)) + ((pair.right))",
             ),
-            ("product", 2384, 164, 3, "pair.left * 10i32 + pair.right"),
-            ("literal", 2384, 164, 3, "pair.left + 1i32"),
-            ("lent", 2026, 105, 3, "pair.left + pair.right"),
+            ("product", 2532, 164, 3, "pair.left * 10i32 + pair.right"),
+            ("literal", 2532, 164, 3, "pair.left + 1i32"),
+            ("lent", 2036, 105, 3, "pair.left + pair.right"),
             (
                 "lentGrouped",
-                2026,
+                2036,
                 105,
                 3,
                 "((pair.left)) + ((pair.right))",
@@ -240,7 +240,7 @@ fn field_addition_checks_with_exact_and_one_short_caps() {
         |_, module, receipt| {
             let decl = named(module, "bare");
             let query = |cap| lower_body(receipt, module, &decl.id, cap).unwrap();
-            let stats = statistics(2712, 328, 4);
+            let stats = statistics(2860, 328, 4);
             let (exact, short) = caps(stats);
             let target = query(exact);
             assert_eq!(target.completion(), Completion::Checked);
@@ -279,17 +279,17 @@ fn unsupported_field_reborrow_writes_keep_their_parent_caps_and_sites() {
     keeps_parent_caps(
         "o05_field_arithmetic::unsupported_field_reborrow_writes_keep_their_parent_caps_and_sites",
         WRITE_SIBLINGS,
-        statistics(201192, 5074, 5),
+        statistics(205205, 5074, 5),
         &[
-            ("localScalar", 2205, 196, 3, "*view += 1i32;"),
-            ("nestedField", 2933, 314, 3, "*view += 1i32;"),
-            ("groupedTarget", 2567, 255, 3, "(*left) += 1i32;"),
-            ("groupedDescriptor", 2567, 255, 3, "*(left) += 1i32;"),
-            ("groupedOperand", 2567, 255, 3, "*left += (1i32);"),
-            ("computedOperand", 2574, 261, 3, "*left += step;"),
-            ("throughWholeLoan", 2571, 260, 3, "*left += 1i32;"),
-            ("wholeLoanCalled", 2590, 264, 3, "whole"),
-            ("wholeLoanRead", 2588, 265, 3, "whole.right"),
+            ("localScalar", 2215, 196, 3, "*view += 1i32;"),
+            ("nestedField", 3150, 314, 3, "*view += 1i32;"),
+            ("groupedTarget", 2715, 255, 3, "(*left) += 1i32;"),
+            ("groupedDescriptor", 2715, 255, 3, "*(left) += 1i32;"),
+            ("groupedOperand", 2715, 255, 3, "*left += (1i32);"),
+            ("computedOperand", 2722, 261, 3, "*left += step;"),
+            ("throughWholeLoan", 2719, 260, 3, "*left += 1i32;"),
+            ("wholeLoanCalled", 2806, 264, 3, "whole"),
+            ("wholeLoanRead", 2736, 265, 3, "whole.right"),
         ],
     );
 }
@@ -383,8 +383,8 @@ function viaOther(p: &mut i32): void {
   *d += 1i32;
 }
 "#,
-        statistics(186778, 4198, 5),
-        ("viaOther", 2249, 103, 2, "*d += 1i32;"),
+        statistics(189408, 4198, 5),
+        ("viaOther", 2397, 103, 2, "*d += 1i32;"),
     );
 }
 
@@ -401,7 +401,7 @@ function viaReborrow(p: &mut i32): void {
   *d += 1i32;
 }
 "#,
-        statistics(186902, 4200, 5),
-        ("viaReborrow", 2253, 105, 2, "*d += 1i32;"),
+        statistics(189532, 4200, 5),
+        ("viaReborrow", 2401, 105, 2, "*d += 1i32;"),
     );
 }
