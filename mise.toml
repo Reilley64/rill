@@ -102,6 +102,18 @@ run = "cargo build --locked -p cli --no-default-features"
 description = "Unavailable: complete Rill toolchain implementation is not present"
 run = "python tools/unavailable.py build"
 
+[tasks."build:prototypes"]
+description = "Build rill with the llvm feature and stage an installation in target/prototypes/prefix; needs LLVM_SYS_231_PREFIX (mise run setup:llvm)"
+depends = ["doctor"]
+env = { LLVM_SYS_231_STRICT_VERSIONING = "1" }
+run = ["rm -rf target/prototypes/prefix", "python tools/stage_typed_installation.py --llvm target/prototypes/prefix"]
+
+[tasks."test:prototypes"]
+description = "Run the prototype acceptance tests through the rill staged by build:prototypes; needs LLVM_SYS_231_PREFIX"
+depends = ["doctor"]
+env = { LLVM_SYS_231_STRICT_VERSIONING = "1", RILL_PROTOTYPES_PREFIX = "{{ config_root }}/target/prototypes/prefix" }
+run = "cargo test --locked -p cli --test prototypes"
+
 [tasks."test:language"]
 description = "Unavailable: executable Rill language conformance suite"
 run = "python tools/unavailable.py test:language"
