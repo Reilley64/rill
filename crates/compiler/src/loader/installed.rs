@@ -127,17 +127,12 @@ impl InstalledProfile {
         }
     }
 
-    fn on_demand(self) -> &'static [(&'static str, &'static str, &'static [&'static str])] {
+    pub(super) fn on_demand(
+        self,
+    ) -> &'static [(&'static str, &'static str, &'static [&'static str])] {
         match self {
             Self::Native => &[("std.rill", "output", &["log", "panic"])],
         }
-    }
-
-    pub(super) fn defers(self, import: &Import) -> bool {
-        import.module.origin == Origin::Standard
-            && self.on_demand().iter().any(|&(facade, module, _)| {
-                import.module.path == facade && import.path.first().is_some_and(|s| s == module)
-            })
     }
 
     pub(super) fn demands(self, import: &Import) -> bool {
