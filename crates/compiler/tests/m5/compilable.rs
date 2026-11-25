@@ -1,12 +1,14 @@
 use super::roots::fixture_with_main;
 use super::*;
 use compiler::analysis::compilable::{
-    Blocker, CheckedBody, Compilability, CompilableProgram, UNSUPPORTED_SHAPE, compilable_program,
+    Blocker, CheckedBody, Compilability, CompilableProgram, ProgramAnalysis, UNSUPPORTED_SHAPE,
+    compilable_program,
 };
 use compiler::analysis::ownership::{
     DependencyContract, GraphCompletion, GraphReport, analyze_ownership,
 };
 use compiler::analysis::scalars::BodyOwner;
+use compiler::analysis::typed::{TypedCompletion, TypedReport};
 
 const READY: &str = "function ready(flag: bool): bool { return flag; }\n";
 const MINUS: &str = "function minus(a: i32, b: i32): i32 { return a - b; }\n";
@@ -324,4 +326,115 @@ fn the_unsupported_shape_code_is_in_the_registry_and_the_contract() {
     assert!(registry.contains("### R0605. "));
     let contract = include_str!("../../../../docs/diagnostic-contracts.md");
     assert!(contract.contains("R0605"));
+}
+
+fn analysis(
+    test: &str,
+    program: &str,
+    limits: AnalysisLimits,
+    verify: impl for<'g, 't> Fn(&'t TypedReport<'g>, Compilability<'t, 'g>),
+) {
+    installed(test, |request| {
+        fs::write(&request.entry, program).unwrap();
+        let graph = loader::load_installed(request).unwrap();
+        let typed = analyze_typed(&graph, limits);
+        let analysis = ProgramAnalysis::new(&graph, &typed, limits);
+        verify(&typed, analysis.compilability());
+    });
+}
+
+#[test]
+fn the_program_analysis_of_a_typed_receipt_is_the_compilable_program_rule() {
+    let program = format!("{}\n{READY}let ok = ready(true);\n", super::IMPORTS);
+    analysis(
+        "compilable::the_program_analysis_of_a_typed_receipt_is_the_compilable_program_rule",
+        &program,
+        AnalysisLimits::default(),
+        |typed, result| {
+            assert!(typed.receipt().is_some());
+            let program = compilable(result);
+            let functions: Vec<_> = program.functions().iter().map(starts).collect();
+            assert_eq!(functions, ["function ready"]);
+        },
+    );
+}
+
+#[test]
+fn the_program_analysis_blocks_on_an_ownership_blocker() {
+    let program = format!(
+        "{}\n{READY}{MINUS}let ok = ready(true);\nlet n = minus(3i32, 1i32);\n",
+        super::IMPORTS
+    );
+    analysis(
+        "compilable::the_program_analysis_blocks_on_an_ownership_blocker",
+        &program,
+        AnalysisLimits::default(),
+        |_, result| {
+            let Blocker::Incomplete { site } = blocked(result) else {
+                panic!("expected Incomplete")
+            };
+            assert_eq!(site.span.bytes(), b"a - b");
+        },
+    );
+}
+
+#[test]
+fn a_typed_finding_blocks_as_a_located_typed_rejection() {
+    analysis(
+        "compilable::a_typed_finding_blocks_as_a_located_typed_rejection",
+        "function f(): bool { return 1i32; }\nfunction g(): bool { return 2i32; }\n",
+        AnalysisLimits::default(),
+        |typed, result| {
+            assert!(typed.receipt().is_none());
+            let Blocker::TypedRejected { findings } = blocked(result) else {
+                panic!("expected TypedRejected")
+            };
+            let found: Vec<_> = findings
+                .iter()
+                .map(|finding| (finding.code, finding.site.span.bytes()))
+                .collect();
+            assert_eq!(
+                found,
+                [(Some("R0100"), &b"1i32"[..]), (Some("R0100"), &b"2i32"[..])]
+            );
+        },
+    );
+}
+
+#[test]
+fn a_shape_typed_analysis_cannot_check_blocks_at_its_site() {
+    analysis(
+        "compilable::a_shape_typed_analysis_cannot_check_blocks_at_its_site",
+        "let flag: bool = true;\nlet n: i32 = flag;\n",
+        AnalysisLimits::default(),
+        |typed, result| {
+            assert!(typed.receipt().is_none());
+            assert_eq!(typed.completion(), TypedCompletion::Incomplete);
+            let Blocker::Incomplete { site } = blocked(result) else {
+                panic!("expected Incomplete")
+            };
+            assert_eq!(site.module.path, "main.rill");
+            assert_eq!(site.span.bytes(), b"let n: i32 = flag;");
+        },
+    );
+}
+
+#[test]
+fn a_typed_resource_limit_blocks_as_itself_with_the_typed_statistics() {
+    let tight = AnalysisLimits {
+        max_work: 10,
+        ..AnalysisLimits::default()
+    };
+    analysis(
+        "compilable::a_typed_resource_limit_blocks_as_itself_with_the_typed_statistics",
+        "let ok = true;\n",
+        tight,
+        |typed, result| {
+            assert_eq!(typed.completion(), TypedCompletion::ResourceLimit);
+            let Blocker::ResourceLimit { statistics } = blocked(result) else {
+                panic!("expected ResourceLimit")
+            };
+            assert_eq!(statistics, typed.statistics());
+        },
+    );
 }

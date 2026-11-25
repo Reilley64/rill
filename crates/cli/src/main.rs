@@ -1,6 +1,4 @@
-//! Owns command-line parsing and composition of the compiler, LSP, and optional
-//! LLVM backend. Only help, version, and invocation validation are implemented;
-//! compiler operations and LSP startup are absent.
+mod check;
 
 use std::env;
 use std::process::ExitCode;
@@ -12,9 +10,11 @@ Usage: rill <command> [<entry>]
        rill --help
        rill --version
 
+Commands:
+  check <entry>    Check without code generation or execution
+
 Commands (not implemented):
   build [<entry>]  Build an executable
-  check [<entry>]  Check without code generation or execution
   run [<entry>]    Build and run a program
   test [<entry>]   Check and run expectations
   lsp             Start the language server
@@ -23,15 +23,21 @@ Global commands:
   help, -h, --help        Show this help
   version, -V, --version  Show version
 
-This scaffold does not read source files, generate code, execute startup or
-user code, run expectations, or start an LSP server. Entry paths are not opened.
-Command options and additional arguments are not supported.
+check reads the entry and its imports from the installed layout beside the
+rill binary (<prefix>/bin/rill, <prefix>/lib/rill/std and
+<prefix>/lib/rill/runtime/<target>), runs the front end and prints its report
+on standard error. It generates no code and executes no startup, user code or
+expectation. The other commands do not read source files, generate code,
+execute user code, run expectations, or start an LSP server, and do not open
+entry paths. Command options and additional arguments are not supported.
 
-Help and version exit 0. Invalid invocations and unavailable commands exit 2
-with an explanation on stderr. Unavailability is a scaffold limitation, not
-a compiler check/build/test outcome or an internal compiler failure. The future
-driver contract distinguishes operation failure (1), invalid configuration (2),
-controlled internal failure (3), and interruption (130).
+Help and version exit 0. check exits 0 for a compilable program, 1 for a
+source finding or a valid program the compiler cannot compile yet (R0605), 2
+for an invalid invocation such as an unreadable entry, and 3 when analysis
+stops at a limit and is incomplete. Invalid invocations and unavailable
+commands exit 2 with an explanation on stderr. Unavailability is a scaffold
+limitation, not a compiler check/build/test outcome or an internal compiler
+failure. The driver contract also defines interruption (130).
 ";
 
 fn main() -> ExitCode {
@@ -65,7 +71,11 @@ fn main() -> ExitCode {
             if rest.first().is_some_and(|entry| entry.starts_with('-')) {
                 return fail("command options are not supported; use 'rill --help'");
             }
-            unavailable(command)
+            match (command, rest.first()) {
+                ("check", Some(entry)) => check::run(entry),
+                ("check", None) => fail("check expects an entry path; use 'rill --help'"),
+                _ => unavailable(command),
+            }
         }
         "lsp" => {
             if !rest.is_empty() {
