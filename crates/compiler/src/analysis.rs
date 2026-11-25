@@ -129,39 +129,10 @@ fn retained_i32_record<'a, 'g>(
     contents: &'a Type<'g>,
     budget: &mut declarations::Budget,
 ) -> Result<Option<&'a Type<'g>>, ()> {
-    let TypeTerm::Reference { referent, .. } = contents.as_ref() else {
-        return Ok(None);
-    };
-    let TypeTerm::Nominal { declaration, .. } = referent.as_ref() else {
-        return Ok(None);
-    };
-    if matches!(
-        inventory.field_class(declaration),
-        declarations::FieldClass::Text | declarations::FieldClass::Other
-    ) {
-        return Ok(None);
+    match retained::screen_i32_record(inventory, contents) {
+        Some(eligible) => retained::prove_i32_record(eligible, inventory, budget),
+        None => Ok(None),
     }
-    let declarations = &inventory.type_facts().declarations;
-    let probes = (usize::BITS - declarations.len().leading_zeros() + 1) as usize;
-    budget.step(
-        (declaration.module.path.len() + 1)
-            .checked_mul(probes)
-            .ok_or(())?,
-    )?;
-    let Some(facts) = declarations.get(*declaration) else {
-        return Ok(None);
-    };
-    let DeclarationShape::Record { fields } = &facts.shape else {
-        return Ok(None);
-    };
-    if !facts.binders.is_empty() {
-        return Ok(None);
-    }
-    budget.step(fields.len())?;
-    Ok(fields
-        .iter()
-        .all(|field| matches!(field.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "i32"))
-        .then_some(contents))
 }
 
 #[derive(Clone, Debug)]
@@ -432,6 +403,7 @@ enum NameTarget<'g> {
 }
 mod defaults;
 mod lexical;
+mod retained;
 use defaults::ActiveDefault;
 use lexical::Lexical;
 
