@@ -36,7 +36,15 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, macos-15-intel]
+        include:
+          - os: ubuntu-24.04
+            llvm: linux-x64
+          - os: ubuntu-24.04-arm
+            llvm: linux-arm64
+          - os: macos-15
+            llvm: macos-arm64
+          - os: macos-15-intel
+            llvm: macos-x64
 
     steps:
       - name: "Source: Check out the repository"
@@ -53,6 +61,15 @@ jobs:
 
       - name: "Setup: Install the locked tools"
         run: mise install --locked
+
+      - name: "Setup: Install the trimmed LLVM"
+        run: mise run setup:llvm
+
+      - name: "Test: Run the LLVM backend smoke"
+        env:
+          LLVM_SYS_231_PREFIX: ${{ github.workspace }}/target/toolchains/llvm-23.1.5/${{ matrix.llvm }}
+          LLVM_SYS_231_STRICT_VERSIONING: "1"
+        run: mise exec -- cargo test --locked -p codegen-llvm
 
       # This gate is unavailable, not successful, until native acceptance exists.
       # Do not substitute a C-API installation smoke for Rill runtime acceptance.

@@ -11,11 +11,17 @@ VERSION = "23.1.5"
 RELEASE = "llvm-23.1.5-1"
 ROOT = Path(__file__).resolve().parents[2]
 BASE = f"https://github.com/Reilley64/rill/releases/download/{RELEASE}/"
-# Pins for the trimmed archives that the "Release: Trimmed LLVM" workflow builds. The release
-# does not exist yet: None marks a size or SHA-256 not yet pinned, and setup refuses it.
+# Pins for the trimmed archives that the "Release: Trimmed LLVM" workflow builds and release
+# llvm-23.1.5-1 publishes: (asset, compressed size, SHA-256). A None size or digest is unpinned and setup refuses it.
 ARTIFACTS = {
-    host: (f"llvm-{VERSION}-1-{host}.tar.xz", None, None)
-    for host in ["linux-x64", "linux-arm64", "macos-arm64", "macos-x64"]
+    "linux-x64": ("llvm-23.1.5-1-linux-x64.tar.xz", 54808368,
+                  "e8cd21e7b8ec65b822c92a8b5be092991ccb7c956b5b639c554ffb87c7b9c7c8"),
+    "linux-arm64": ("llvm-23.1.5-1-linux-arm64.tar.xz", 50311096,
+                    "573a0b92d30d13bedc19fbe8f3641e7bb8c5ab46b667c2321f06a575fc3a9d0e"),
+    "macos-arm64": ("llvm-23.1.5-1-macos-arm64.tar.xz", 37105012,
+                    "94b54cadae2212ad418213ef879853c89c37ba78f3f5bc66044a1fa0793b145f"),
+    "macos-x64": ("llvm-23.1.5-1-macos-x64.tar.xz", 41803336,
+                  "eda7f3c02f73b2332ee243a56362ac37fd21af20441023e662092d305bed25be"),
 }
 BACKENDS = {"x64": "X86", "arm64": "AArch64"}
 RECEIPT = ".rill-llvm.json"
@@ -62,8 +68,7 @@ def pin(name):
 
 def require_pinned(name):
     asset, _, digest = ARTIFACTS[name]
-    require(digest, f"checksum pin for {name} ({asset}) is unset in tools/llvm/common.py ARTIFACTS; "
-                    f"release {RELEASE} is not published yet")
+    require(digest, f"checksum pin for {name} ({asset}) is unset in tools/llvm/common.py ARTIFACTS")
 
 
 def evidence(status, **facts):

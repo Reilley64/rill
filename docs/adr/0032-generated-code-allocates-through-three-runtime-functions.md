@@ -1,6 +1,6 @@
 # Generated code allocates only through three runtime functions
 
-**Status:** draft for owner approval (Hello World grilling decisions Q33 and Q20, 2026-11-25; the owner decided Q10 that each ABI decision is recorded as an ADR). The standard-library contracts make allocation failure fatal and the RFCs mention an allocator protocol, but nothing named the allocator or how generated code reaches it. The first program that runs builds an owned string with `append`, so slice 1 needs one interface.
+**Status:** accepted, 2026-11-25 (owner decision). Drafted from Hello World grilling decisions Q33 and Q20, 2026-11-25; the owner decided Q10 that each ABI decision is recorded as an ADR. The standard-library contracts make allocation failure fatal and the RFCs mention an allocator protocol, but nothing named the allocator or how generated code reaches it. The first program that runs builds an owned string with `append`, so slice 1 needs one interface.
 
 ## Decision
 
