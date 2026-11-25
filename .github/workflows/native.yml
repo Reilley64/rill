@@ -88,7 +88,7 @@ jobs:
       # which is a stub that exits 2. The stub message appears only after the
       # checks passed, so a failing check still fails this step. Replace this
       # step with `mise run verify:release` when the product build exists.
-      - name: "Build and test: Verify release acceptance stops at the unavailable build"
+      - name: "Build and test: Verify release acceptance stops at the unavailable build task"
         if: github.event_name == 'workflow_dispatch'
         run: |
           status=0

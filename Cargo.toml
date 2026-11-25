@@ -21,3 +21,8 @@ compiler = { path = "crates/compiler" }
 ide = { path = "crates/ide" }
 lsp = { path = "crates/lsp" }
 codegen-llvm = { path = "crates/codegen-llvm" }
+
+# The compiler's analysis tests run for minutes unoptimized, most of the macos-15-intel Native job.
+# Debug assertions and overflow checks stay on; only the code generation level changes.
+[profile.dev.package.compiler]
+opt-level = 1
