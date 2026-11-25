@@ -79,7 +79,7 @@ impl<'g> Analyzer<'g> {
             return Ok(None);
         };
         self.step(1)?;
-        let scopes = &lexical.modules[self.slot(module)];
+        let scopes = &lexical.modules[self.slot(module).index()];
         let mut scope = scopes.enclosing_block[node];
         while let Some(start) = scope {
             self.step(1)?;

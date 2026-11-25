@@ -421,7 +421,7 @@ fn compatibility<'g>(
     family: &DeclarationFacts<'g>,
     header: &DeclarationFacts<'g>,
     module: &'g Module,
-    module_at: usize,
+    module_at: ModuleSlot,
     signature: NodeId,
     budget: &mut Budget,
 ) -> Work<(Compatibility, Option<Vec<Substitution<'g>>>)> {

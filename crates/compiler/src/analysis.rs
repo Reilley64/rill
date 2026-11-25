@@ -1,5 +1,7 @@
 //! M4.1 explicit declaration types. A receipt is not a checked program.
-use crate::loader::keyed::{DeclarationTable, Meter, ModuleTables, PathMap, module_slot};
+use crate::loader::keyed::{
+    DeclarationTable, Meter, ModuleSlot, ModuleTables, PathMap, module_slot,
+};
 use crate::loader::{
     Binding, Declaration, DeclarationId, DeclarationKind, Graph, GraphId, Intrinsic, Module,
     ModuleKey, Namespace, Target,
@@ -471,7 +473,7 @@ impl<'g> Analyzer<'g> {
         self.declarations.size_for(modules);
         Ok(())
     }
-    fn slot(&self, module: &Module) -> usize {
+    fn slot(&self, module: &Module) -> ModuleSlot {
         module_slot(self.graph.modules(), module).expect("a module of the analyzed graph")
     }
     fn declaration_at(&mut self, module: &'g Module, node: NodeId) -> Work<&'g Declaration> {
