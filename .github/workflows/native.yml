@@ -63,7 +63,6 @@ jobs:
       - name: "Setup: Install the locked tools"
         run: mise install --locked
 
-      # Restores the dependency builds of earlier runs. The key ends in the commit so every run saves its own result; the prefix restores the latest one.
       - name: "Setup: Restore the Cargo build cache"
         uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
@@ -95,6 +94,16 @@ jobs:
           LLVM_SYS_231_PREFIX: ${{ github.workspace }}/target/toolchains/llvm-23.1.5/${{ matrix.llvm }}
           LLVM_SYS_231_STRICT_VERSIONING: "1"
         run: mise run test:prototypes
+
+      - name: "Test: Verify native runtime acceptance is unavailable"
+        run: |
+          status=0
+          output=$(mise run test:runtime 2>&1) || status=$?
+          printf '%s\n' "$output"
+          if [ "$status" -ne 2 ] || ! printf '%s\n' "$output" | grep -qF 'test:runtime is not implemented in this scaffold'; then
+            echo "::error::test:runtime no longer reports the scaffold stub (exit $status). Replace this assertion with the real acceptance run."
+            exit 1
+          fi
 
       # The release task runs the repository checks and then the product build,
       # which is a stub that exits 2. The stub message appears only after the

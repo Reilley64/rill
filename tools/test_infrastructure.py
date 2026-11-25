@@ -396,6 +396,7 @@ class WorkflowTests(unittest.TestCase):
 class NativeAcceptanceTests(unittest.TestCase):
     BUILD_STEP = "Build: Stage the prototypes installation"
     TEST_STEP = "Test: Run the prototype acceptance through the staged rill"
+    RUNTIME_STEP = "Test: Verify native runtime acceptance is unavailable"
     RELEASE_STEP = "Build and test: Verify release acceptance stops at the unavailable build task"
     BUILD_STUB = f'exec "{sys.executable}" tools/unavailable.py build\n'
 
@@ -426,7 +427,26 @@ class NativeAcceptanceTests(unittest.TestCase):
                                  "${{ github.workspace }}/target/toolchains/llvm-23.1.5/${{ matrix.llvm }}")
                 self.assertEqual(step["env"]["LLVM_SYS_231_STRICT_VERSIONING"], "1")
         self.assertLess(names.index(self.BUILD_STEP), names.index(self.TEST_STEP))
-        self.assertFalse([step for step in steps if "test:runtime" in step.get("run", "")])
+        self.assertEqual([step["name"] for step in steps if "test:runtime" in step.get("run", "")], [self.RUNTIME_STEP])
+
+    def test_the_runtime_stub_is_asserted_on_every_run(self):
+        workflow = yaml.load((doctor.ROOT / ".github/workflows/native.yml").read_text(), Loader=yaml.BaseLoader)
+        step = next(step for step in workflow["jobs"]["native"]["steps"] if step["name"] == self.RUNTIME_STEP)
+        self.assertNotIn("if", step)
+
+    def test_the_runtime_stub_is_asserted_so_the_job_is_not_red_by_design(self):
+        result = self.run_step(
+            f'[ "$1 $2" = "run test:runtime" ] && exec "{sys.executable}" tools/unavailable.py test:runtime\nexit 64\n',
+            self.RUNTIME_STEP, "mise run test:runtime")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_a_real_runtime_result_or_other_failure_still_fails_the_runtime_step(self):
+        for script in ["exit 0\n", "echo 'compile error' >&2\nexit 1\n",
+                       "echo 'unrelated is not implemented in this scaffold' >&2\nexit 2\n"]:
+            with self.subTest(script=script):
+                result = self.run_step(script, self.RUNTIME_STEP, "mise run test:runtime")
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("::error::test:runtime no longer reports the scaffold stub", result.stdout)
 
     def run_release(self, mise_script):
         guard = '[ "$1 $2" != "run verify:release" ] && exit 64\n'
