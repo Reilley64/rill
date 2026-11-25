@@ -40,7 +40,7 @@ The root Cargo workspace is private. Its crates are implementation boundaries, n
 | [`runtime/`](../runtime/README.md) | Target-runtime support and future native/ABI integration. |
 | [`tests/`](../tests/README.md) | Cross-component acceptance ownership and scaffold infrastructure checks. |
 
-The CLI's default `llvm` feature currently selects only the backend stub crate and links no LLVM library. Fast checks and `build:scaffold` disable that feature so future backend bindings stay outside the LLVM-free dependency graph.
+The CLI's default `llvm` feature selects `codegen-llvm`, which depends on inkwell and links the static LLVM prefix that `setup:llvm` installs. Fast checks and `build:scaffold` disable that feature, so the compiler and every LLVM-free check stay outside that dependency graph.
 
 The first scaffold checks manifest dependency direction; the names alone do not prove semantic reuse. The compiler, IDE, LSP and backend currently provide boundaries, not implemented product behavior. Language algorithms, runtime mechanisms and production ABI work remain behind their existing gates. There are no placeholder Rill implementations in `stdlib/`.
 
@@ -67,10 +67,10 @@ A distribution that claims language server support must also pass `test:lsp-clie
 | `plan:llvm` | Inspect the optional LLVM route and prerequisites. A plan is not installation evidence. |
 | `setup:llvm` | Explicit opt-in download of the trimmed LLVM archive for this host from the `Reilley64/rill` release, by pinned checksum. Separate from default setup. |
 | `build:llvm` | Build this host's trimmed LLVM archive from pinned source. The `Release: Trimmed LLVM archives` workflow runs it; run it locally only for a reproduction. |
-| `test:llvm` | LLVM C-API compile/link smoke only, not a Rill backend or inkwell integration test. |
+| `test:llvm` | LLVM C-API compile/link smoke only, not a Rill backend or inkwell integration test. The inkwell smoke is `cargo test -p codegen-llvm`, run by `Test: Native acceptance`. |
 | `experiment:*` | Explicit entry points for existing reproductions, with their original scope and prerequisites. |
 
-`Test: Scaffold checks` configures the LLVM-free checks on four GitHub-hosted OS/architecture profiles. `Test: Native acceptance` runs for native-impacting changes and manual dispatch. It asserts that `test:runtime` exits 2 with the scaffold message because native acceptance is absent; that is not a passing native profile. A manual run also asserts that `verify:release` passes the repository checks and then stops at the same stub for `build`; replace both assertions when the tasks exist. Neither workflow installs LLVM or publishes releases. `Release: Trimmed LLVM archives` runs only when dispatched by hand; it builds the four hosts' archives and uploads them as workflow artifacts, and a maintainer attaches them to the release.
+`Test: Scaffold checks` configures the LLVM-free checks on four GitHub-hosted OS/architecture profiles. `Test: Native acceptance` runs for native-impacting changes and manual dispatch. It asserts that `test:runtime` exits 2 with the scaffold message because native acceptance is absent; that is not a passing native profile. A manual run also asserts that `verify:release` passes the repository checks and then stops at the same stub for `build`; replace both assertions when the tasks exist. `Test: Native acceptance` also runs `setup:llvm` on each of the four platforms and then the `codegen-llvm` smoke against that prefix; `Test: Scaffold checks` installs no LLVM, and neither workflow publishes releases. `Release: Trimmed LLVM archives` runs only when dispatched by hand; it builds the four hosts' archives and uploads them as workflow artifacts, and a maintainer attaches them to the release.
 
 Both workflows use explicit runner-local Cargo and Rustup homes before mise installs tools. Nested mise tasks then retain the same Rustup provider, instead of losing the runner's external provider during tool lookup. Workflow names and YAML layout follow the [GitHub automation guide](../.github/AGENTS.md).
 
@@ -118,7 +118,7 @@ mise run setup:llvm
 
 `setup:llvm` downloads one archive for the host from the `llvm-23.1.5-1` release on `Reilley64/rill`, checks its size limit and SHA-256 against the pins in `tools/llvm/common.py`, extracts it safely and inspects the result. The prefix is `target/toolchains/llvm-23.1.5/<host>`, where host is `linux-x64`, `linux-arm64`, `macos-arm64` or `macos-x64`. It needs about 2 GiB of free disk. The script rejects insufficient disk rather than substituting another route.
 
-The release does not exist yet and the pins are unset. Until a maintainer publishes it and the pins land, `setup:llvm` stops before any download and names the unset pin.
+A pin with no digest makes `setup:llvm` stop before any download and name the pin. A download whose size or SHA-256 differs from the pin fails and leaves no prefix.
 
 After provisioning, use `mise run test:llvm` on Linux. The smoke builds with the host `/usr/bin/cc` and `/usr/bin/c++`, because the prefix holds no compiler. On macOS, pass the selected SDK explicitly:
 
@@ -130,7 +130,7 @@ The archive is a trimmed LLVM: one backend for the host architecture (`X86` or `
 
 Measured on standard GitHub-hosted runners of this repository: a build takes 32 to 36 minutes on `ubuntu-24.04`, `ubuntu-24.04-arm` and `macos-15` and 71 minutes on `macos-15-intel`. The `.tar.xz` archives are 40 to 52 MiB. The installed prefix is 206 to 215 MiB on macOS (the prototype measured 292 to 299 MiB on Linux). The build directory, source and prefix together take 2.3 to 2.4 GiB, and free disk fell by 2.6 to 2.9 GiB over a run; no sample was taken during the build, so treat 3 GiB as the budget for a local `build:llvm`. There is no implicit Homebrew prefix, driver-only substitute, shared-LLVM fallback or LLVM downgrade.
 
-Archive installation does not prove an inkwell build. Using the prefix from Rust needs `LLVM_SYS_231_PREFIX` set to it, `LLVM_SYS_231_STRICT_VERSIONING=1`, inkwell `=0.11.0` with `llvm23-1-force-static` and the native `target-*` feature rather than `target-all`. `test:llvm` is a C-API smoke boundary only. It does not establish the eventual Rust binding integration, WebAssembly or RISC-V backends, or any Rill execution. Because the prefix has no `clang`, `lld` or `wasm-ld`, `experiment:backend` cannot use it.
+Archive installation does not prove an inkwell build. `crates/codegen-llvm/tests/smoke.rs` does: it builds a module whose `main` returns 42, runs the LLVM verifier, writes an object for the host target, links it with the host `cc` and asserts the program's status. `Test: Native acceptance` runs it on the four platforms with `cargo test --locked -p codegen-llvm`. `crates/codegen-llvm` takes inkwell `=0.11.0` with `default-features = false`, `llvm23-1-force-static`, `no-libffi-linking` (inkwell otherwise links libffi unconditionally) and `target-x86` or `target-aarch64` by `cfg(target_arch)`. Using the prefix from Rust needs `LLVM_SYS_231_PREFIX` set to it, `LLVM_SYS_231_STRICT_VERSIONING=1`, inkwell `=0.11.0` with `llvm23-1-force-static` and the native `target-*` feature rather than `target-all`. `test:llvm` is a C-API smoke boundary only. Neither smoke establishes WebAssembly or RISC-V backends, or any Rill execution. Because the prefix has no `clang`, `lld` or `wasm-ld`, `experiment:backend` cannot use it.
 
 A usable route still needs per-host evidence for exact versions and prefixes, requested tools and target backends, static LLVM linkage, remaining loader dependencies and SDK/sysroot compatibility. Static LLVM linkage does not imply a fully static executable. Existing backend experiments and the production acceptance gates retain their separate obligations. The [LLVM provisioning research](research/0046-llvm23-provisioning-options.md) records artifact and recipe evidence, not a successful installation.
 
