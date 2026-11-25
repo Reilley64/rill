@@ -521,6 +521,12 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         let TypeTerm::Nominal { declaration, .. } = yielded.as_ref() else {
             return Err(pending());
         };
+        if matches!(
+            self.typed.inventory().field_class(declaration),
+            FieldClass::TextFreeScalars | FieldClass::Other
+        ) {
+            return Err(pending());
+        }
         let fields = self.record_fields(yielded)?.ok_or_else(pending)?;
         self.budget.step(fields.len())?;
         if fields.is_empty() || !fields.iter().all(|field| owns_text(&field.ty)) {

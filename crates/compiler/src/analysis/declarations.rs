@@ -87,6 +87,7 @@ pub(super) enum FieldClass {
     #[default]
     Unclassified,
     TextFreeScalars,
+    Text,
     Other,
 }
 #[derive(Debug, Default)]
@@ -457,15 +458,20 @@ impl<'r, 'g> Checker<'r, 'g> {
             match &facts.shape {
                 DeclarationShape::Record { fields } => {
                     let mut scalars = true;
+                    let mut text = !fields.is_empty();
                     for field in fields {
                         self.member_storage(origin, field)?;
-                        scalars &= matches!(field.ty.as_ref(), TypeTerm::Primitive(p) if p.name() != "string");
+                        let string = matches!(field.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "string");
+                        scalars &= matches!(field.ty.as_ref(), TypeTerm::Primitive(_)) && !string;
+                        text &= string;
                     }
                     if origin.module.origin == crate::loader::Origin::Application
                         && facts.binders.is_empty()
                     {
                         self.facts.summaries.0[origin.ordinal.index()] = if scalars {
                             FieldClass::TextFreeScalars
+                        } else if text {
+                            FieldClass::Text
                         } else {
                             FieldClass::Other
                         };
