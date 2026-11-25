@@ -1,0 +1,124 @@
+name: "Build: LLVM 23 inkwell prototype (ci-ajns)"
+
+# Throwaway prototype. Runs only for its own branch; delete with the branch.
+on:
+  push:
+    branches: [prototype/llvm23-inkwell]
+    paths:
+      - 'experiments/llvm23-inkwell/**'
+      - '.github/workflows/llvm23-inkwell.yml'
+
+permissions:
+  contents: read
+
+# Explicit homes keep nested mise commands on the same Rustup provider.
+env:
+  CARGO_HOME: ${{ github.workspace }}/target/ci/cargo
+  RUSTUP_HOME: ${{ github.workspace }}/target/ci/rustup
+
+jobs:
+  llvm:
+    name: "Build: Trimmed LLVM (${{ matrix.os }})"
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 330
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, macos-15-intel]
+
+    steps:
+      - name: "Source: Check out the repository"
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      # A cache hit skips the build on later pushes. BUILDINFO.txt inside the
+      # cached prefix keeps the timing of the build that produced it.
+      - name: "Setup: Restore the trimmed LLVM prefix"
+        id: cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ${{ runner.temp }}/llvm-prefix
+          key: llvm-23.1.5-${{ matrix.os }}-${{ hashFiles('experiments/llvm23-inkwell/build-llvm.sh') }}
+
+      - name: "Setup: Install CMake and Ninja when the image lacks them"
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: |
+          if command -v cmake >/dev/null && command -v ninja >/dev/null; then
+            exit 0
+          fi
+          case "$RUNNER_OS" in
+            Linux) sudo apt-get update && sudo apt-get install -y cmake ninja-build ;;
+            macOS) brew install cmake ninja ;;
+          esac
+
+      - name: "Build: Compile the trimmed LLVM from the pinned source"
+        if: steps.cache.outputs.cache-hit != 'true'
+        run: experiments/llvm23-inkwell/build-llvm.sh "$RUNNER_TEMP/llvm-work" "$RUNNER_TEMP/llvm-prefix"
+
+      - name: "Package: Archive the prefix"
+        run: |
+          tar -C "$RUNNER_TEMP/llvm-prefix" -czf "$RUNNER_TEMP/llvm-trimmed.tar.gz" .
+          {
+            echo "## Trimmed LLVM, ${{ matrix.os }}"
+            echo "cache hit: ${{ steps.cache.outputs.cache-hit }}"
+            echo "archive bytes: $(wc -c < "$RUNNER_TEMP/llvm-trimmed.tar.gz")"
+            echo '```'
+            cat "$RUNNER_TEMP/llvm-prefix/BUILDINFO.txt"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - name: "Publish: Upload the trimmed LLVM artifact"
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: llvm-trimmed-${{ matrix.os }}
+          path: ${{ runner.temp }}/llvm-trimmed.tar.gz
+          compression-level: 0
+          retention-days: 14
+
+  prototype:
+    name: "Test: Prototype (${{ matrix.os }})"
+    needs:
+      - llvm
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, macos-15-intel]
+
+    steps:
+      - name: "Source: Check out the repository"
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+
+      - name: "Setup: Download the trimmed LLVM"
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: llvm-trimmed-${{ matrix.os }}
+          path: ${{ runner.temp }}/artifact
+
+      - name: "Setup: Unpack the trimmed LLVM"
+        run: |
+          mkdir "$RUNNER_TEMP/llvm-prefix"
+          tar -C "$RUNNER_TEMP/llvm-prefix" -xzf "$RUNNER_TEMP/artifact/llvm-trimmed.tar.gz"
+
+      - name: "Setup: Install mise"
+        uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
+        with:
+          version: 2026.11.8
+          install: false
+          cache: false
+
+      - name: "Setup: Install the locked tools"
+        run: mise install --locked
+
+      - name: "Build and test: Emit, link and run hello world"
+        run: mise exec -- experiments/llvm23-inkwell/run.sh "$RUNNER_TEMP/llvm-prefix"
+
+      - name: "Publish: Upload the run outputs"
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: prototype-run-${{ matrix.os }}
+          path: experiments/llvm23-inkwell/target/run
+          if-no-files-found: ignore

@@ -1,0 +1,21 @@
+# PROTOTYPE (ci-ajns): throwaway. Its own workspace, not part of the root one.
+[workspace]
+
+[package]
+name = "llvm23-inkwell"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+# llvm-sys 231.0.2 (LLVM 23.1) comes in through the llvm23-1 features.
+# force-static: fail rather than fall back to libLLVM shared libraries.
+inkwell = { version = "=0.11.0", default-features = false, features = ["llvm23-1-force-static"] }
+
+# The default `target-all` feature references every LLVMInitialize* symbol,
+# which cannot link against a single-backend LLVM. Enable only the native one.
+[target.'cfg(target_arch = "x86_64")'.dependencies]
+inkwell = { version = "=0.11.0", default-features = false, features = ["llvm23-1-force-static", "target-x86"] }
+
+[target.'cfg(target_arch = "aarch64")'.dependencies]
+inkwell = { version = "=0.11.0", default-features = false, features = ["llvm23-1-force-static", "target-aarch64"] }
