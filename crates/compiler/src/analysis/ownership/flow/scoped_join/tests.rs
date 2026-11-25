@@ -534,7 +534,7 @@ fn real_frames_drive_the_scoped_join_transitions() {
         for test_mode in [false, true] {
             let graph = loader::load_installed(InstalledRequest {
                 entry: PathBuf::from(&root).join("main.rill"),
-                target: "aarch64-apple-darwin".into(),
+                target: env!("RILL_ANALYSIS_TARGET").into(),
                 options: Default::default(),
                 test_mode,
                 limits: Default::default(),
@@ -633,7 +633,7 @@ fn moved_second_capture_precedes_first_child_export() {
     for test_mode in [false, true] {
         let graph = loader::load_installed(InstalledRequest {
             entry: PathBuf::from(&root).join("main.rill"),
-            target: "aarch64-apple-darwin".into(),
+            target: env!("RILL_ANALYSIS_TARGET").into(),
             options: Default::default(),
             test_mode,
             limits: Default::default(),
@@ -708,7 +708,7 @@ fn installed_probe(name: &str, source: &str) {
     let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
     let lib = root.join("lib/rill");
     let stdlib = lib.join("std");
-    let runtime = lib.join("runtime/aarch64-apple-darwin");
+    let runtime = lib.join(concat!("runtime/", env!("RILL_ANALYSIS_TARGET")));
     for path in [&stdlib, &runtime, &root.join("bin")] {
         fs::create_dir_all(path).unwrap();
     }
