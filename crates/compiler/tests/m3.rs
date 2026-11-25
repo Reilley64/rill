@@ -1432,3 +1432,90 @@ fn entry_and_explicit_prelude_reuse_m1_m2_snapshots() {
     assert_eq!(graph.prelude().copy.module.origin, Origin::Standard);
     assert_eq!(graph.prelude().dispose.module.path, "core.rill");
 }
+
+/// The repository's standard sources, as the source-only path reads them from a root.
+fn real_stdlib(f: &Fixture) {
+    let stdlib = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../stdlib");
+    for name in include_str!("../../../tests/installed/typed/stdlib-sources.txt")
+        .lines()
+        .chain(["output.rill"])
+    {
+        f.write(
+            &format!("std/{name}"),
+            &fs::read_to_string(stdlib.join(name)).unwrap(),
+        );
+    }
+}
+
+#[test]
+fn source_only_load_resolves_std_log_and_panic_through_the_facade_table() {
+    for (source, names) in [
+        ("import std::log; log(\"x\");", &["log"][..]),
+        (
+            "import std::{log, panic}; log(\"x\"); panic(\"y\");",
+            &["log", "panic"],
+        ),
+    ] {
+        let f = Fixture::new();
+        real_stdlib(&f);
+        f.write("app/main.rill", source);
+        let graph = load(f.request()).unwrap_or_else(|e| panic!("{source}: {e:?}"));
+        let paths: Vec<_> = graph
+            .modules()
+            .iter()
+            .map(|m| m.key.path.as_str())
+            .collect();
+        assert!(paths.contains(&"output.rill"), "{source}: {paths:?}");
+        let std = graph
+            .modules()
+            .iter()
+            .find(|m| m.key.path == "std.rill")
+            .unwrap();
+        for &name in names {
+            let Lookup::Found(Target::Declaration(found)) =
+                graph.lookup_export(&std.key, Namespace::ValueFunction, &[name])
+            else {
+                panic!("{source}: std exports no {name}")
+            };
+            assert_eq!(found.module.path, "output.rill", "{source}: {name}");
+            assert!(
+                graph
+                    .bindings()
+                    .iter()
+                    .any(|b| b.module.path == "main.rill" && b.import.is_some() && b.name == name),
+                "{source}: no import binding for {name}"
+            );
+        }
+    }
+}
+
+#[test]
+fn source_only_load_without_the_output_names_keeps_output_unloaded() {
+    for source in [
+        "import std::{List};",
+        "import std::option::{Option};",
+        "expect true;",
+    ] {
+        let f = Fixture::new();
+        real_stdlib(&f);
+        f.write("app/main.rill", source);
+        let graph = load(f.request()).unwrap_or_else(|e| panic!("{source}: {e:?}"));
+        assert!(
+            graph.modules().iter().all(|m| m.key.path != "output.rill"),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn source_only_standard_root_without_output_gives_the_ordinary_missing_import() {
+    let f = Fixture::new();
+    real_stdlib(&f);
+    fs::remove_file(f.0.join("std/output.rill")).unwrap();
+    f.write("app/main.rill", "import std::log; log(\"x\");");
+    let error = load(f.request()).unwrap_err();
+    assert_eq!(error.kind, FailureKind::SourceRejected);
+    assert!(has_code(&error, "R0400"), "{error:?}");
+    f.write("app/main.rill", "import std;");
+    load(f.request()).unwrap();
+}
