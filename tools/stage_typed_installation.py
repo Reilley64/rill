@@ -1,4 +1,4 @@
-"""Stage the first-party inputs for the LLVM-free M4.8 installed check."""
+"""Stage the first-party inputs for the LLVM-free M4.8 installed check on the host target."""
 import argparse
 import json
 from pathlib import Path
@@ -6,7 +6,12 @@ import shutil
 import subprocess
 
 ROOT = Path(__file__).resolve().parents[1]
-PROFILE = "aarch64-apple-darwin"
+PROFILE = next(
+    line.split(": ", 1)[1]
+    for line in subprocess.run(["rustc", "-vV"], check=True, capture_output=True, text=True)
+    .stdout.splitlines()
+    if line.startswith("host: ")
+)
 SOURCE_LISTS = [ROOT / "tests/installed/typed" / name
                 for name in ("stdlib-sources.txt", "routine-sources.txt")]
 

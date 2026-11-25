@@ -1,6 +1,4 @@
 //! Boolean match snapshots and Result residences at the installed receipt boundary.
-// The installed M4 profile that can issue a receipt is macOS AArch64.
-#![cfg(all(target_arch = "aarch64", target_os = "macos"))]
 #[path = "support/form_grid.rs"]
 mod form_grid;
 #[path = "support/limit.rs"]
@@ -34,7 +32,7 @@ fn installed_boolean_matches() {
         let root = std::env::temp_dir().join(format!("rill-boolean-match-{}", std::process::id()));
         fs::create_dir(&root).unwrap();
         let _cleanup = Cleanup(root.clone());
-        let runtime = root.join("lib/rill/runtime/aarch64-apple-darwin");
+        let runtime = root.join(concat!("lib/rill/runtime/", env!("RILL_ANALYSIS_TARGET")));
         for directory in ["bin", "app", "lib/rill/std"] {
             fs::create_dir_all(root.join(directory)).unwrap();
         }
@@ -1038,7 +1036,7 @@ fn installed_over_parent(
     for test_mode in [false, true] {
         let graph = load_installed(InstalledRequest {
             entry: entry.clone(),
-            target: "aarch64-apple-darwin".into(),
+            target: env!("RILL_ANALYSIS_TARGET").into(),
             test_mode,
             limits: Default::default(),
             options: Default::default(),
@@ -1146,7 +1144,7 @@ fn installed_read_only(
     for test_mode in [false, true] {
         let graph = load_installed(InstalledRequest {
             entry: entry.clone(),
-            target: "aarch64-apple-darwin".into(),
+            target: env!("RILL_ANALYSIS_TARGET").into(),
             test_mode,
             limits: Default::default(),
             options: Default::default(),

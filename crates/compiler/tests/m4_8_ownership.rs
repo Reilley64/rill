@@ -1,5 +1,4 @@
 //! Installed ownership evidence is capture-bound and does not depend on application aliases.
-#![cfg(all(target_arch = "aarch64", target_os = "macos"))]
 
 #[path = "support/limit.rs"]
 mod limit;
@@ -17,7 +16,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const ARCHIVE: &str = "lib/rill/runtime/aarch64-apple-darwin/librill_ownership.rlib";
+const ARCHIVE: &str = concat!(
+    "lib/rill/runtime/",
+    env!("RILL_ANALYSIS_TARGET"),
+    "/librill_ownership.rlib"
+);
 
 #[test]
 fn installed_ownership_requires_the_built_archive() {
@@ -25,7 +28,7 @@ fn installed_ownership_requires_the_built_archive() {
         let root = PathBuf::from(root);
         let request = InstalledRequest {
             entry: root.join("app/main.rill"),
-            target: "aarch64-apple-darwin".into(),
+            target: env!("RILL_ANALYSIS_TARGET").into(),
             options: BTreeMap::new(),
             test_mode: false,
             limits: Limits::default(),
@@ -204,7 +207,7 @@ fn installed_ownership_requires_the_built_archive() {
         "bin",
         "lib/rill/std",
         "app",
-        "lib/rill/runtime/aarch64-apple-darwin",
+        concat!("lib/rill/runtime/", env!("RILL_ANALYSIS_TARGET")),
     ] {
         fs::create_dir_all(root.join(path)).unwrap();
     }

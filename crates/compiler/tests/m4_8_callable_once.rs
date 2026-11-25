@@ -1,5 +1,4 @@
 //! A private callable requirement does not check an actual environment by itself.
-#![cfg(all(target_arch = "aarch64", target_os = "macos"))]
 #[path = "support/limit.rs"]
 mod limit;
 
@@ -34,7 +33,11 @@ const SHARED_WRAPPER: &str =
     "function run<F>(job: &F): bool where callable(F, [], bool) { return job(); }\n";
 const SHARED_CALLER: &str =
     "function caller(flag: bool): bool { let f: () => bool = () => flag; return run(&f); }\n";
-const ARCHIVE: &str = "lib/rill/runtime/aarch64-apple-darwin/librill_ownership.rlib";
+const ARCHIVE: &str = concat!(
+    "lib/rill/runtime/",
+    env!("RILL_ANALYSIS_TARGET"),
+    "/librill_ownership.rlib"
+);
 
 #[test]
 fn private_once_checks_the_actual_shared_pair() {
@@ -300,7 +303,7 @@ fn check_sources(entry: &Path) {
         for test_mode in [false, true] {
             let graph = load_installed(InstalledRequest {
                 entry: entry.into(),
-                target: "aarch64-apple-darwin".into(),
+                target: env!("RILL_ANALYSIS_TARGET").into(),
                 test_mode,
                 options: Default::default(),
                 limits: Default::default(),

@@ -18,7 +18,7 @@ fn installed_list() {
         let root = PathBuf::from(root);
         let request = InstalledRequest {
             entry: root.join("app/main.rill"),
-            target: "aarch64-apple-darwin".into(),
+            target: env!("RILL_ANALYSIS_TARGET").into(),
             options: Default::default(),
             test_mode: false,
             limits: Limits::default(),
@@ -836,7 +836,7 @@ fn check_authority(root: &std::path::Path) {
     let entry = root.join("app/authority.rill");
     let request = InstalledRequest {
         entry,
-        target: "aarch64-apple-darwin".into(),
+        target: env!("RILL_ANALYSIS_TARGET").into(),
         options: Default::default(),
         test_mode: false,
         limits: Limits::default(),

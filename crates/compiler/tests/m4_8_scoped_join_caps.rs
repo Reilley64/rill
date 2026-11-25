@@ -1,6 +1,4 @@
 //! Fixed M4 caps measured at the published parent, 4ef298b.
-// The installed M4 profile that can issue a receipt is macOS AArch64.
-#![cfg(all(target_arch = "aarch64", target_os = "macos"))]
 #[path = "support/limit.rs"]
 mod limit;
 mod support;
@@ -40,7 +38,7 @@ fn unsupported_result_joins_keep_parent_caps_and_blockers() {
             "bin",
             "lib/rill/std",
             "app",
-            "lib/rill/runtime/aarch64-apple-darwin",
+            concat!("lib/rill/runtime/", env!("RILL_ANALYSIS_TARGET")),
         ] {
             fs::create_dir_all(root.join(dir)).unwrap();
         }
@@ -55,7 +53,7 @@ fn unsupported_result_joins_keep_parent_caps_and_blockers() {
             )
             .unwrap();
         }
-        let runtime = root.join("lib/rill/runtime/aarch64-apple-darwin");
+        let runtime = root.join(concat!("lib/rill/runtime/", env!("RILL_ANALYSIS_TARGET")));
         fs::copy(
             env!("RILL_OWNERSHIP_ARCHIVE"),
             runtime.join("librill_ownership.rlib"),
@@ -97,7 +95,7 @@ fn unsupported_result_joins_keep_parent_caps_and_blockers() {
     let load = |test_mode| {
         let graph = loader::load_installed(InstalledRequest {
             entry: entry.clone(),
-            target: "aarch64-apple-darwin".into(),
+            target: env!("RILL_ANALYSIS_TARGET").into(),
             options: Default::default(),
             test_mode,
             limits: Default::default(),

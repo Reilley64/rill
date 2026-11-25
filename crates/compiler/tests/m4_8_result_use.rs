@@ -681,7 +681,7 @@ fn installed_graphs(test: &str, source: &str, each: impl Fn(&Graph)) {
         for test_mode in [false, true] {
             let graph = loader::load_installed(InstalledRequest {
                 entry: entry.clone(),
-                target: "aarch64-apple-darwin".into(),
+                target: env!("RILL_ANALYSIS_TARGET").into(),
                 options: Default::default(),
                 test_mode,
                 limits: Limits::default(),
@@ -698,7 +698,7 @@ fn installed_graphs(test: &str, source: &str, each: impl Fn(&Graph)) {
         "bin",
         "app",
         "lib/rill/std",
-        "lib/rill/runtime/aarch64-apple-darwin",
+        concat!("lib/rill/runtime/", env!("RILL_ANALYSIS_TARGET")),
     ] {
         fs::create_dir_all(root.join(path)).unwrap();
     }
@@ -721,7 +721,11 @@ fn installed_graphs(test: &str, source: &str, each: impl Fn(&Graph)) {
     }
     fs::copy(
         repo.join("runtime/error/src/lib.rs"),
-        root.join("lib/rill/runtime/aarch64-apple-darwin/error.rs"),
+        root.join(concat!(
+            "lib/rill/runtime/",
+            env!("RILL_ANALYSIS_TARGET"),
+            "/error.rs"
+        )),
     )
     .unwrap();
     let output = support::run_copied_probe(Command::new(root.join("bin/result-use-probe")).args([
