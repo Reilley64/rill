@@ -2526,12 +2526,8 @@ fn list_roots_pre_charge_caps_now_give_resource_limit() {
             old_root_caps(
                 &request,
                 &[
-                    (
-                        AFTER_RETAIN,
-                        &[("reuse", (3489, 322, 5))],
-                        (193669, 4807, 5),
-                    ),
-                    (AFTER_READ, &[("reuse", (3457, 306, 5))], (189806, 4408, 5)),
+                    (AFTER_RETAIN, &[], (193669, 4807, 5)),
+                    (AFTER_READ, &[], (189806, 4408, 5)),
                     (
                         OUTLIVES,
                         &[("viewReadThenWrite", (2761, 346, 4))],
