@@ -411,9 +411,7 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         let path = self
             .arithmetic_local_path(operand, facts)
             .ok_or(Stop::Pending(node))?;
-        // The key ends in the declaration's module path: charge each probe.
-        let probes = 1 + self.locals.len().max(1).ilog2() as usize;
-        graph::charge_key(&path.root.module, probes, self.budget)?;
+        self.budget.step(1)?;
         self.locals
             .get(path.root)
             .copied()

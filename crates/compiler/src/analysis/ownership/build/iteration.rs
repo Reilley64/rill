@@ -54,6 +54,7 @@ impl<'a, 'g> Build<'a, 'g, '_> {
             None,
         )?;
         self.budget.reserve(1)?;
+        self.budget.step(1)?;
         self.locals.insert(&parameter.declaration.id, slot);
         Ok(slot)
     }

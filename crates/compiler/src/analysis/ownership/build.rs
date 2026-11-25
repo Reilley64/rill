@@ -535,11 +535,11 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             module,
             body,
             facts,
-            locals: BTreeMap::new(),
+            locals: OrdinalMap::new(),
             exclusive_field_reborrows: 0,
-            nested_record_values: BTreeMap::new(),
-            nested_tuple_parameters: BTreeMap::new(),
-            nested_tuple_bindings: BTreeMap::new(),
+            nested_record_values: OrdinalMap::new(),
+            nested_tuple_parameters: OrdinalMap::new(),
+            nested_tuple_bindings: OrdinalMap::new(),
             narrow_variant_parameters: BTreeMap::new(),
             whole_child_patterns: BTreeSet::new(),
             retained: BTreeMap::new(),
@@ -675,20 +675,20 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             let slot =
                 self.allocate_slot(node, true, StorageCleanup::DisposeListI32(disposal), None)?;
             self.budget.reserve(1)?;
-            // The key ends in the declaration's module path: charge each probe.
-            let probes = 1 + self.locals.len().max(1).ilog2() as usize;
-            graph::charge_key(&parameter.declaration.id.module, probes, self.budget)?;
+            self.budget.step(1)?;
             self.locals.insert(&parameter.declaration.id, slot);
             return Ok(slot);
         }
         if let Some(slot) = self.nested_record_region(node, ty)? {
             self.budget.reserve(1)?;
+            self.budget.step(1)?;
             self.nested_record_values
                 .insert(&parameter.declaration.id, slot);
             return Ok(slot);
         }
         if let Some(slot) = self.nested_tuple_region(node, ty)? {
             self.budget.reserve(1)?;
+            self.budget.step(1)?;
             self.nested_tuple_parameters
                 .insert(&parameter.declaration.id, slot);
             return Ok(slot);
@@ -906,6 +906,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
     fn local(&mut self, id: &'g DeclarationId, node: NodeId, ty: &Type<'g>) -> ResultOf<Slot> {
         let slot = self.slot(node, ty)?;
         self.budget.reserve(1)?;
+        self.budget.step(1)?;
         self.locals.insert(id, slot);
         Ok(slot)
     }
@@ -1714,9 +1715,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         {
             return Ok(None);
         }
-        // The key ends in the declaration's module path: charge each probe.
-        let probes = 1 + self.locals.len().max(1).ilog2() as usize;
-        graph::charge_key(&path.root.module, probes, self.budget)?;
+        self.budget.step(1)?;
         Ok(Some(
             *self.locals.get(path.root).ok_or(Stop::Pending(node))?,
         ))
@@ -3444,7 +3443,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         let scratch = self.clone_region(from, source)?;
         let mut tail = self.cleanup(node, &[scratch], next)?;
         if let Some((site, binder)) = binder {
-            graph::charge_key(&binder.declaration.module, self.locals.len(), self.budget)?;
+            self.budget.step(1)?;
             let into = *self
                 .locals
                 .get(binder.declaration)
@@ -3605,7 +3604,6 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             Binding::Discard => Ok(()),
             Binding::IrrefutableVariant { binder, .. } => {
                 if let Some((site, binder)) = binder {
-                    graph::charge_key(&binder.declaration.module, self.locals.len(), self.budget)?;
                     self.budget.reserve(1)?;
                     locals.push(self.local(binder.declaration, site, &binder.ty)?);
                 }
@@ -3622,15 +3620,18 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 };
                 let local = if let Some(slot) = nested {
                     self.budget.reserve(1)?;
+                    self.budget.step(1)?;
                     self.nested_record_values.insert(declaration, slot);
                     slot
                 } else if let Some(from) = self.nested_tuple_transfer_source(initializer, ty)? {
                     let slot = self.clone_region(from, site)?;
                     self.budget.reserve(1)?;
+                    self.budget.step(1)?;
                     self.nested_tuple_bindings.insert(declaration, (slot, from));
                     slot
                 } else if let Some(slot) = self.scoped_result_destination(initializer, site, ty)? {
                     self.budget.reserve(1)?;
+                    self.budget.step(1)?;
                     self.locals.insert(declaration, slot);
                     slot
                 } else {
@@ -5408,6 +5409,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             .iter()
             .find(|member| member.declaration.id == field.field.id && member.ty == facts.ty)
             .ok_or(Stop::Pending(node))?;
+        self.budget.step(1)?;
         let descriptor = *self.locals.get(path.root).ok_or(Stop::Pending(node))?;
         Ok((descriptor, Projection::Field(member.declaration)))
     }
@@ -5657,6 +5659,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 Action::UnloweredRebuildRead(slot)
             } else if facts.access != Access::Owned && owns_text(&facts.ty) {
                 let path = facts.path.as_ref().ok_or(Stop::Pending(node))?;
+                self.budget.step(1)?;
                 let root = *self.locals.get(path.root).ok_or(Stop::Pending(node))?;
                 Action::ForbiddenBorrowedMove(root)
             } else if let Some(from) = self.scalar_field_through_reference(node, facts)? {

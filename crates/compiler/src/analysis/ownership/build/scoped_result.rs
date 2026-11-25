@@ -54,7 +54,7 @@ impl<'a, 'g> Build<'a, 'g, '_> {
                 && facts.access == Access::Owned
                 && path.projections.is_empty()
             {
-                graph::charge_key(&path.root.module, self.locals.len(), self.budget)?;
+                self.budget.step(1)?;
                 if let Some(&from) = self.locals.get(path.root)
                     && self.slots[from].members == 2
                     && matches!(
