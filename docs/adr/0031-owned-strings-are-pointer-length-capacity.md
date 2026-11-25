@@ -1,6 +1,6 @@
 # An owned string is pointer, length and capacity; a view is pointer and length
 
-**Status:** draft for owner approval (Hello World grilling decision Q32, 2026-11-25; the owner decided Q10 that each ABI decision is recorded as an ADR). [ADR 0011](0011-explicit-numeric-widths-and-utf8-string-views.md) fixed the language's strings: one owned `string`, borrowed text views, UTF-8 throughout. No document fixed their run-time layout, and the first program that runs (`prototypes/00-hello.rill`) joins strings with `append`, so the backend needs one.
+**Status:** accepted, 2026-11-25 (owner decision). Drafted from Hello World grilling decision Q32, 2026-11-25; the owner decided Q10 that each ABI decision is recorded as an ADR. [ADR 0011](0011-explicit-numeric-widths-and-utf8-string-views.md) fixed the language's strings: one owned `string`, borrowed text views, UTF-8 throughout. No document fixed their run-time layout, and the first program that runs (`prototypes/00-hello.rill`) joins strings with `append`, so the backend needs one.
 
 ## Decision
 
