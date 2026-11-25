@@ -6,7 +6,7 @@ use super::*;
 
 pub(super) mod installed;
 
-#[cfg(all(test, target_arch = "aarch64", target_os = "macos"))]
+#[cfg(test)]
 pub(in crate::analysis::ownership) mod tests;
 
 /// A result in join-owned storage, distinct from the caller's vacant tuple.
@@ -707,7 +707,7 @@ enum Event {
     Child(usize, ChildEvent),
     RequestStop,
     WaitYield,
-    #[cfg(all(test, target_arch = "aarch64", target_os = "macos"))]
+    #[cfg(test)]
     HandleDrop,
 }
 
@@ -803,7 +803,7 @@ impl<'g> Waiting<'g> {
                     .map(|child| !matches!(child, ChildState::Complete));
             }
             Event::WaitYield => {}
-            #[cfg(all(test, target_arch = "aarch64", target_os = "macos"))]
+            #[cfg(test)]
             Event::HandleDrop => {}
             Event::Child(i, event) => {
                 let child = self.children.get_mut(i).ok_or(pending.clone())?;
