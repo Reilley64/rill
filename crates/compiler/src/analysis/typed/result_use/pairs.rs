@@ -11,7 +11,7 @@ mod references;
 mod results;
 use references::shared_i32;
 
-pub(super) type PairBodies<'g> = BTreeMap<&'g DeclarationId, PairBody<'g>>;
+pub(super) type PairBodies<'g> = keyed::PathMap<&'g DeclarationId, PairBody<'g>>;
 
 #[derive(Clone, Copy)]
 pub(super) struct PairBody<'g> {
@@ -135,7 +135,10 @@ pub(super) fn summary<'g>(
         return Ok(None);
     };
     let tuple = values::ungroup(module, tuple, budget)?;
-    let Some((_, facts)) = nodes.get(&module.key, tuple) else {
+    let Some(table) = nodes.table(&module.key, budget)? else {
+        return Ok(None);
+    };
+    let Some((_, facts)) = table.get(&tuple) else {
         return Ok(None);
     };
     let NodeFactKind::Expression(value) = &facts.kind else {
@@ -156,7 +159,7 @@ pub(super) fn summary<'g>(
         signature,
         metadata,
         bodies,
-        nodes,
+        table,
         (returned, tuple, calls),
     )
     .map(|slots| PairBody {
@@ -177,7 +180,7 @@ fn summarize<'g>(
     signature: &DeclarationFacts<'g>,
     metadata: &crate::analysis::ordinary::HeaderMetadata<'g>,
     bodies: &GenericReport<'g>,
-    nodes: &Nodes<'_, 'g>,
+    table: &NodeTable<'_, 'g>,
     (returned, tuple, calls): (NodeId, NodeId, [NodeId; 2]),
 ) -> Option<[Slot<'g>; 2]> {
     let DeclarationShape::Function { parameters, result } = &signature.shape else {
@@ -209,7 +212,7 @@ fn summarize<'g>(
         }
     }
     let syntax = &module.syntax.nodes;
-    let fact = |node| nodes.get(&module.key, node).map(|&(_, f)| f);
+    let fact = |node| table.get(&node).map(|&(_, f)| f);
     let expression = |node| match &fact(node)?.kind {
         NodeFactKind::Expression(value) if value.ordinary_context.is_none() => Some(value),
         _ => None,
@@ -328,27 +331,27 @@ pub(super) fn scoped_summary<'g>(
     let Some(module) = inventory.graph().installed_routine_source() else {
         return Ok(None);
     };
-    // Each comparison against the captured routine key has bounded width;
-    // the maps it is looked up in can grow with the application, however.
-    let width = module.key.path.len() + 4;
-    budget.step(width.checked_mul(inventory.headers().len() + 1).ok_or(())?)?;
+    keyed::charge(
+        &role.implementation.id.module,
+        inventory.headers().len(),
+        budget,
+    )?;
     let Some(metadata) = inventory.headers().get(&role.implementation.id) else {
         return Ok(None);
     };
     if metadata.requirements.len() != 6 {
         return Ok(None);
     }
-    let lookup = width.checked_mul(nodes.len() + 1).ok_or(())?;
-    // Three node lookups below; each slot scans the six written requirements
-    // for its callable goal and its two sendability goals.
-    budget.step(lookup.checked_mul(3).ok_or(())?)?;
+    let Some(table) = nodes.table(&module.key, budget)? else {
+        return Ok(None);
+    };
     budget.step(8 + 6 * metadata.requirements.len())?;
     let checked = || {
         let body = *module.syntax.nodes[role.implementation.node]
             .children
             .get(1)?;
         let (returned, operation) = single_return(module, body)?;
-        let fact = |n| nodes.get(&module.key, n).map(|&(_, f)| f);
+        let fact = |n| table.get(&n).map(|&(_, f)| f);
         if !matches!(fact(returned)?.kind, NodeFactKind::Return { target } if *target == role.implementation.id)
         {
             return None;
@@ -774,7 +777,7 @@ impl<'a, 'g> Check<'a, 'g> {
                 unreachable!("proved both scoped slots")
             };
             self.budget.step(self.module.key.path.len() + 2)?;
-            let index = self.nodes.get(&self.module.key, node).unwrap().0;
+            let index = self.table.get(&node).unwrap().0;
             if let std::collections::btree_map::Entry::Vacant(entry) =
                 self.report.pair_calls.entry(index)
             {
@@ -788,7 +791,7 @@ impl<'a, 'g> Check<'a, 'g> {
             }
         } else if let [Some(first), Some(second)] = children {
             self.budget.step(self.module.key.path.len() + 2)?;
-            let index = self.nodes.get(&self.module.key, node).unwrap().0;
+            let index = self.table.get(&node).unwrap().0;
             if let std::collections::btree_map::Entry::Vacant(entry) =
                 self.report.pair_calls.entry(index)
             {

@@ -82,7 +82,7 @@ impl<'a, 'g> Check<'a, 'g> {
             return Ok(None);
         }
         // Filter unrelated source bodies before opening typed evidence.
-        let Some(signature) = self.signature(call.callee) else {
+        let Some(signature) = self.signature(call.callee)? else {
             return Ok(None);
         };
         let declaration = signature.declaration;
@@ -178,7 +178,7 @@ impl<'a, 'g> Check<'a, 'g> {
             return Ok(None);
         }
         // Filter unrelated source bodies before opening typed evidence.
-        let Some(signature) = self.signature(call.callee) else {
+        let Some(signature) = self.signature(call.callee)? else {
             return Ok(None);
         };
         let declaration = signature.declaration;
@@ -237,7 +237,7 @@ impl<'a, 'g> Check<'a, 'g> {
     ) -> Work<Option<(Route<'g>, NodeId, Actual)>> {
         let syntax = &self.module.syntax.nodes;
         self.budget.step(1)?;
-        if !self.checked.contains(call.callee) {
+        if !self.checked.contains(call.callee, self.budget)? {
             return Ok(None);
         }
         let Some(name) = direct_name(syntax, syntax[node].children[0]) else {
@@ -287,7 +287,7 @@ impl<'a, 'g> Check<'a, 'g> {
         self.budget.step(4)?;
         let id = &signature.declaration.id;
         let syntax = &self.module.syntax.nodes;
-        Ok((|| {
+        let Some((formal, result, subject)) = (|| {
             let [binder] = signature.binders.as_slice() else {
                 return None;
             };
@@ -317,6 +317,12 @@ impl<'a, 'g> Check<'a, 'g> {
             {
                 return None;
             }
+            Some((formal, result, subject))
+        })() else {
+            return Ok(None);
+        };
+        keyed::charge(&id.module, self.inventory.headers().len(), self.budget)?;
+        Ok((|| {
             let metadata = self.inventory.headers().get(id)?;
             let [requirement] = metadata.requirements.as_slice() else {
                 return None;
@@ -400,6 +406,11 @@ impl<'a, 'g> Check<'a, 'g> {
         proved: bool,
     ) -> Work<()> {
         self.budget.reserve(2)?;
+        keyed::charge(
+            &route.declaration.module,
+            self.once_calls.len(),
+            self.budget,
+        )?;
         self.once_calls
             .entry(route)
             .or_default()

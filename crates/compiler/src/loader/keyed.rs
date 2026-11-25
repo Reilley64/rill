@@ -29,6 +29,12 @@ impl<T: PathKey + ?Sized> PathKey for &T {
     }
 }
 
+impl<T: PathKey, X> PathKey for (T, X) {
+    fn path(&self) -> &ModuleKey {
+        self.0.path()
+    }
+}
+
 pub(crate) fn probes(len: usize) -> usize {
     (usize::BITS - len.leading_zeros() + 1) as usize
 }
@@ -150,7 +156,6 @@ impl<K: fmt::Debug, V: fmt::Debug> fmt::Debug for PathMap<K, V> {
     }
 }
 
-#[cfg_attr(not(test), expect(dead_code))]
 pub(crate) struct PathSet<K>(BTreeSet<K>);
 
 impl<K> Default for PathSet<K> {
@@ -159,7 +164,6 @@ impl<K> Default for PathSet<K> {
     }
 }
 
-#[cfg_attr(not(test), expect(dead_code))]
 impl<K: PathKey + Ord> PathSet<K> {
     pub(crate) fn new() -> Self {
         Self::default()
@@ -179,6 +183,7 @@ impl<K: PathKey + Ord> PathSet<K> {
         Ok(self.0.insert(key))
     }
 
+    #[cfg_attr(not(test), expect(dead_code))]
     pub(crate) fn remove<Q>(&mut self, key: &Q, meter: &mut impl Meter) -> Result<bool, ()>
     where
         K: Borrow<Q>,
@@ -188,14 +193,17 @@ impl<K: PathKey + Ord> PathSet<K> {
         Ok(self.0.remove(key))
     }
 
+    #[cfg_attr(not(test), expect(dead_code))]
     pub(crate) fn len(&self) -> usize {
         self.0.len()
     }
 
+    #[cfg_attr(not(test), expect(dead_code))]
     pub(crate) fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
 
+    #[cfg_attr(not(test), expect(dead_code))]
     pub(crate) fn iter(&self) -> impl Iterator<Item = &K> {
         self.0.iter()
     }
