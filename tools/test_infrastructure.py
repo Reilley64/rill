@@ -396,7 +396,7 @@ class WorkflowTests(unittest.TestCase):
 class NativeAcceptanceTests(unittest.TestCase):
     BUILD_STEP = "Build: Stage the prototypes installation"
     TEST_STEP = "Test: Run the prototype acceptance through the staged rill"
-    RELEASE_STEP = "Build and test: Verify release acceptance stops at the unavailable build"
+    RELEASE_STEP = "Build and test: Verify release acceptance stops at the unavailable build task"
     BUILD_STUB = f'exec "{sys.executable}" tools/unavailable.py build\n'
 
     def run_step(self, mise_script, step_name, command):
