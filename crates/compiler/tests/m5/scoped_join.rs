@@ -3769,7 +3769,7 @@ fn reference_pair_reserves_before_it_builds_each_slot() {
                         entries: stopped.1,
                         max_depth: stopped.2,
                     },
-                    &format!("entries cap {max_entries}"),
+                    format!("entries cap {max_entries}"),
                 );
             }
         },

@@ -240,7 +240,7 @@ fn installed_captures_state_the_graph_root_inventory() {
                     crate::limit::assert_triple(
                         (used.work, used.entries, used.max_depth),
                         (case.typed[0], case.typed[1], case.typed[2]),
-                        &format!("{}: M4 caps", case.name),
+                        format!("{}: M4 caps", case.name),
                     );
                     assert_eq!(
                         graph
@@ -339,7 +339,7 @@ fn installed_captures_state_the_graph_root_inventory() {
                     crate::limit::assert_triple(
                         (used.work, used.entries, used.max_depth),
                         (case.graph[0], case.graph[1], case.graph[2]),
-                        &format!("{}: graph meter", case.name),
+                        format!("{}: graph meter", case.name),
                     );
                     let exact = AnalysisLimits {
                         max_work: used.work,
