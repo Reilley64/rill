@@ -98,12 +98,35 @@ pub enum DeclarationKind {
     Startup,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
+/// Position of a declaration among every declaration of one loaded graph, from
+/// zero with no gaps. Assigned in `loader/collect.rs`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub struct DeclarationOrdinal(usize);
+
+impl DeclarationOrdinal {
+    pub fn index(self) -> usize {
+        self.0
+    }
+}
+
+#[derive(Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct DeclarationId {
     pub context: GraphId,
     pub module: ModuleKey,
     pub start: usize,
     pub kind: DeclarationKind,
+    pub ordinal: DeclarationOrdinal,
+}
+
+impl std::fmt::Debug for DeclarationId {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("DeclarationId")
+            .field("context", &self.context)
+            .field("module", &self.module)
+            .field("start", &self.start)
+            .field("kind", &self.kind)
+            .finish()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -325,6 +348,7 @@ pub struct Graph {
     request: Request,
     modules: Vec<Module>,
     routine_index: Option<usize>,
+    declaration_count: usize,
     prelude: PreludeIdentities,
     bindings: Vec<Binding>,
     imports: Vec<ImportOutcome>,
@@ -384,6 +408,10 @@ impl Graph {
     }
     pub fn modules(&self) -> &[Module] {
         &self.modules
+    }
+    /// One more than the largest `DeclarationOrdinal` of the graph.
+    pub fn declaration_count(&self) -> usize {
+        self.declaration_count
     }
     pub fn prelude(&self) -> &PreludeIdentities {
         &self.prelude
