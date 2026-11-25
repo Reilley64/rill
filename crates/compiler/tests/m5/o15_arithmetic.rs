@@ -134,13 +134,8 @@ fn rfc_counter_caps_include_the_charged_local_reads() {
             let decl = named(module, "counter");
             let query = |cap| lower_body(receipt, module, &decl.id, cap).unwrap();
             let stats = statistics(2508, 329, 6);
-            // Review ci-0mdr ST-16 (R-4): the parent's 2,504 charged each read
-            // of `first` and `second` as one step; now each charges the key's
-            // path plus one, three probes. The +58 is that difference computed
-            // from the module path, and the parent cap now gives `ResourceLimit`.
             let parent = 2504;
-            let per_read = 3 * (module.key.path.len() + 1) - 1;
-            assert_eq!(stats.work - parent, 2 * per_read);
+            assert_eq!(stats.work - parent, 4);
             crate::limit::assert_body_limit(&query(caps(statistics(parent, 329, 6)).0));
             let (exact, short) = caps(stats);
             let target = query(exact);
@@ -505,10 +500,7 @@ fn written<'g>(module: &'g loader::Module, prefix: &str) -> &'g loader::Declarat
 }
 
 #[test]
-fn arithmetic_local_reads_charge_their_module_path() {
-    // Review c61a0a14: arithmetic looked up locals keyed by a module path
-    // without charging it. The same body in a longer-named module must cost
-    // more than a control body that reads the same locals without arithmetic.
+fn arithmetic_local_reads_do_not_depend_on_the_module_path() {
     const SHORT: &str = "short.rill";
     const LONG: &str = "arithmetic_read_from_a_module_with_a_much_longer_path.rill";
     const BODIES: &str = r#"
@@ -516,7 +508,7 @@ export function mix(left: i32, right: i32): i32 { return left * 10i32 + right; }
 export function pick(left: i32, right: i32): i32 { return right; }
 "#;
     installed(
-        "o15_arithmetic::arithmetic_local_reads_charge_their_module_path",
+        "o15_arithmetic::arithmetic_local_reads_do_not_depend_on_the_module_path",
         |request| {
             fs::write(
                 &request.entry,
@@ -555,11 +547,7 @@ export function pick(left: i32, right: i32): i32 { return right; }
                 };
                 let arithmetic = work(LONG, "mix") - work(SHORT, "mix");
                 let control = work(LONG, "pick") - work(SHORT, "pick");
-                // Two local reads, each two probes of a key ending in the path.
-                assert_eq!(
-                    arithmetic - control,
-                    4 * (LONG.len() - SHORT.len()) as isize
-                );
+                assert_eq!(arithmetic - control, 0);
             }
         },
     );
