@@ -20,7 +20,7 @@ fn installed_formatting_and_conversions() {
         for test_mode in [false, true] {
             let graph = load_installed(InstalledRequest {
                 entry: root.join("app/main.rill"),
-                target: "aarch64-apple-darwin".into(),
+                target: env!("RILL_ANALYSIS_TARGET").into(),
                 options: BTreeMap::new(),
                 test_mode,
                 limits: Limits::default(),
@@ -153,7 +153,7 @@ fn direct_formatting(root: &std::path::Path, test_mode: bool) {
     .unwrap();
     let graph = load_installed(InstalledRequest {
         entry,
-        target: "aarch64-apple-darwin".into(),
+        target: env!("RILL_ANALYSIS_TARGET").into(),
         options: BTreeMap::new(),
         test_mode,
         limits: Limits::default(),
@@ -208,7 +208,7 @@ fn numeric_conversions(root: &std::path::Path, test_mode: bool) {
     .unwrap();
     let graph = load_installed(InstalledRequest {
         entry,
-        target: "aarch64-apple-darwin".into(),
+        target: env!("RILL_ANALYSIS_TARGET").into(),
         options: BTreeMap::new(),
         test_mode,
         limits: Limits::default(),
@@ -303,7 +303,7 @@ fn authority_boundaries(root: &std::path::Path) {
             copy: selector("copy"),
             dispose: selector("dispose"),
         },
-        target: "aarch64-apple-darwin".into(),
+        target: env!("RILL_ANALYSIS_TARGET").into(),
         options: BTreeMap::new(),
         test_mode: false,
         limits: Limits::default(),
@@ -338,7 +338,7 @@ fn authority_boundaries(root: &std::path::Path) {
 fn request(root: &std::path::Path, test_mode: bool) -> InstalledRequest {
     InstalledRequest {
         entry: root.join("app/main.rill"),
-        target: "aarch64-apple-darwin".into(),
+        target: env!("RILL_ANALYSIS_TARGET").into(),
         options: BTreeMap::new(),
         test_mode,
         limits: Limits::default(),

@@ -259,6 +259,6 @@ The [M4.7 verification record](tests/m4-7-acceptance.md) lists the tests, review
 
 `analysis::typed::analyze_typed` checks one immutable M3 graph under one cumulative limit. The report retains declaration and body facts, public interface findings, the four core inventory statuses, and source-level Result-use witnesses or blockers.
 
-`loader::load_installed` derives the standard root from the running executable under `<prefix>/bin/`. For `aarch64-apple-darwin` with no options, it verifies the pinned first-party inputs in the capture. The source-only `loader::load` cannot attach that authority, even with identical bytes.
+`loader::load_installed` derives the standard root from the running executable under `<prefix>/bin/`. For the target the compiler is built for (one of the four native targets) with no options, it verifies the pinned first-party inputs in the capture. The source-only `loader::load` cannot attach that authority, even with identical bytes.
 
 `TypedReport::receipt` returns a receipt only when `completion` is `Checked`. The receipt identifies the capture and reports the work charged to the analysis budget. A receipt leaves `Ownership` and `Execution` unperformed. An incomplete, rejected or exhausted report retains partial facts and returns no receipt. See the [M4.8 verification record](tests/m4-8-acceptance.md) for the bounded profile and staged checks.

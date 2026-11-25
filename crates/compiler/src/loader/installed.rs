@@ -6,6 +6,8 @@ mod collection;
 pub use collection::CollectionArtifact;
 pub(super) use collection::CollectionLinks;
 
+const TARGET: &str = env!("RILL_ANALYSIS_TARGET");
+
 pub(super) const OWNERSHIP_ARCHIVE: Option<&[u8]> =
     Some(include_bytes!(env!("RILL_OWNERSHIP_ARCHIVE")));
 
@@ -27,7 +29,7 @@ pub(super) fn observe_ownership_archive(
     if OWNERSHIP_ARCHIVE.is_none() {
         return Ok(None);
     }
-    let path = prefix.join("lib/rill/runtime/aarch64-apple-darwin/librill_ownership.rlib");
+    let path = prefix.join(format!("lib/rill/runtime/{TARGET}/librill_ownership.rlib"));
     let Some(probe) = host.probe(&path, Some(prefix))? else {
         return Ok(None);
     };
@@ -55,18 +57,17 @@ pub struct InstalledRequest {
 
 #[derive(Clone, Copy, Debug)]
 pub(super) enum InstalledProfile {
-    DarwinArm64,
+    Native,
 }
 
 impl InstalledProfile {
     fn select(request: &InstalledRequest) -> Option<Self> {
-        (request.target == "aarch64-apple-darwin" && request.options.is_empty())
-            .then_some(Self::DarwinArm64)
+        (request.target == TARGET && request.options.is_empty()).then_some(Self::Native)
     }
 
     pub(super) fn metadata(self) -> &'static [MetadataEdge] {
         match self {
-            Self::DarwinArm64 => &[
+            Self::Native => &[
                 MetadataEdge {
                     path: "option.rill",
                     triggered_by: |kind| {
@@ -127,14 +128,14 @@ impl InstalledProfile {
 
     pub(super) fn conversion_metadata(self) -> &'static [&'static str] {
         match self {
-            Self::DarwinArm64 => &["bytes.rill"],
+            Self::Native => &["bytes.rill"],
         }
     }
 
     pub(super) fn error_storage(self) -> (&'static str, &'static [u8]) {
         match self {
-            Self::DarwinArm64 => (
-                "runtime/aarch64-apple-darwin/error.rs",
+            Self::Native => (
+                concat!("runtime/", env!("RILL_ANALYSIS_TARGET"), "/error.rs"),
                 include_bytes!("../../../../runtime/error/src/lib.rs"),
             ),
         }
@@ -158,7 +159,7 @@ impl InstalledProfile {
             };
         }
         match self {
-            Self::DarwinArm64 => pins![
+            Self::Native => pins![
                 "std.rill",
                 "core.rill",
                 "convert.rill",

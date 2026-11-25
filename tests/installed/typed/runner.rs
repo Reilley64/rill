@@ -18,7 +18,7 @@ fn main() -> ExitCode {
         let mode = if test_mode { "test" } else { "normal" };
         let graph = match loader::load_installed(InstalledRequest {
             entry: entry.clone(),
-            target: "aarch64-apple-darwin".into(),
+            target: env!("RILL_ANALYSIS_TARGET").into(),
             options: Default::default(),
             limits: Limits::default(),
             test_mode,

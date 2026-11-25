@@ -152,7 +152,7 @@ The approved future layout is:
 
 The selected toolchain identifies compatible standard-library source and target-runtime inputs. The installed loader derives its source root from the executable path, not the working directory. Toolchain metadata does not grant authority. The scaffold does not implement a release installer or metadata format.
 
-For the M4.8 static check on macOS AArch64, stage the current distribution inputs and run the separate Rust acceptance runner:
+For the M4.8 static check on the host target, stage the current distribution inputs and run the separate Rust acceptance runner:
 
 ```sh
 repo=$PWD

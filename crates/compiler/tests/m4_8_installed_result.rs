@@ -692,17 +692,16 @@ fn installed_capture_replays_its_error_storage_input() {
             .unwrap();
             let graph = loader::load_installed(request.clone()).unwrap();
             let evidence = analyze_typed(&graph, AnalysisLimits::default());
-            assert!(
-                evidence
-                    .error_storage_source()
-                    .unwrap()
-                    .ends_with("runtime/aarch64-apple-darwin/error.rs")
-            );
-            let artifact = request
-                .entry
-                .parent()
-                .unwrap()
-                .join("../lib/rill/runtime/aarch64-apple-darwin/error.rs");
+            assert!(evidence.error_storage_source().unwrap().ends_with(concat!(
+                "runtime/",
+                env!("RILL_ANALYSIS_TARGET"),
+                "/error.rs"
+            )));
+            let artifact = request.entry.parent().unwrap().join(concat!(
+                "../lib/rill/runtime/",
+                env!("RILL_ANALYSIS_TARGET"),
+                "/error.rs"
+            ));
             fs::write(&artifact, "// not the pinned implementation\n").unwrap();
             assert!(
                 analyze_typed(&graph, AnalysisLimits::default())
@@ -1583,7 +1582,7 @@ fn installed(test: &str, check: impl FnOnce(InstalledRequest)) {
     if let Some(root) = std::env::var_os("RILL_RESULT_PROBE_ROOT") {
         check(InstalledRequest {
             entry: PathBuf::from(root).join("app/main.rill"),
-            target: "aarch64-apple-darwin".into(),
+            target: env!("RILL_ANALYSIS_TARGET").into(),
             options: Default::default(),
             test_mode: false,
             limits: Limits::default(),
@@ -1596,7 +1595,7 @@ fn installed(test: &str, check: impl FnOnce(InstalledRequest)) {
     for dir in ["bin", "lib/rill/std", "app"] {
         fs::create_dir_all(root.join(dir)).unwrap();
     }
-    let runtime = root.join("lib/rill/runtime/aarch64-apple-darwin");
+    let runtime = root.join(concat!("lib/rill/runtime/", env!("RILL_ANALYSIS_TARGET")));
     fs::create_dir_all(&runtime).unwrap();
     fs::copy(
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../runtime/error/src/lib.rs"),

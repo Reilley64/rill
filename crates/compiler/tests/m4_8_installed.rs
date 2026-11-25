@@ -24,7 +24,7 @@ fn installed_option_uses_pinned_sources_in_both_modes() {
         let root = PathBuf::from(root);
         let request = InstalledRequest {
             entry: root.join("app/main.rill"),
-            target: "aarch64-apple-darwin".into(),
+            target: env!("RILL_ANALYSIS_TARGET").into(),
             options: BTreeMap::new(),
             test_mode: false,
             limits: Limits::default(),
@@ -428,7 +428,7 @@ fn untrusted_profiles(root: &Path, profile: &InstalledRequest) {
     })
     .unwrap();
     let unknown_target = loader::load_installed(InstalledRequest {
-        target: "x86_64-apple-darwin".into(),
+        target: "x86_64-pc-windows-msvc".into(),
         ..profile.clone()
     })
     .unwrap();
