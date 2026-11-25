@@ -1,5 +1,6 @@
 //! Result-use analysis consumes typed control and place facts. It does not grant moves.
 use super::{Budget, GenericReport, OrdinaryAnalysis, Work};
+use crate::analysis::ownership::OrdinalMap;
 use crate::analysis::scalars::data::{
     Access, Constructor, DataExpression, PathProjection, PlacePath,
 };
@@ -10,7 +11,7 @@ use crate::analysis::{
     Binder, DeclarationFacts, DeclarationId, DeclarationShape, MemberType, Payload, Substitution,
     Type, TypeTerm, retained_bool_contents_type, retained_record_contents,
 };
-use crate::loader::{DeclarationKind, Module, ModuleKey};
+use crate::loader::{DeclarationKind, Module, ModuleKey, keyed};
 use crate::parser::{NodeId, NodeKind};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -166,41 +167,46 @@ type NodeTable<'a, 'g> = BTreeMap<NodeId, (usize, &'a NodeFacts<'g>)>;
 struct Nodes<'a, 'g> {
     modules: &'g [Module],
     tables: Vec<NodeTable<'a, 'g>>,
-    len: usize,
+    address_memo: Option<(&'g ModuleKey, usize)>,
 }
 
 impl<'a, 'g> Nodes<'a, 'g> {
-    fn new(modules: &'g [Module]) -> Self {
-        Self {
+    fn new(modules: &'g [Module], budget: &mut Budget) -> Work<Self> {
+        budget.reserve(modules.len())?;
+        Ok(Self {
             modules,
             tables: std::iter::repeat_with(BTreeMap::new)
                 .take(modules.len())
                 .collect(),
-            len: 0,
-        }
+            address_memo: None,
+        })
     }
 
-    fn insert(&mut self, module: &ModuleKey, node: NodeId, fact: (usize, &'a NodeFacts<'g>)) {
-        if let Some(index) = self.position(module)
+    fn insert(
+        &mut self,
+        module: &'g ModuleKey,
+        node: NodeId,
+        fact: (usize, &'a NodeFacts<'g>),
+        budget: &mut Budget,
+    ) -> Work<()> {
+        let index = match self.address_memo {
+            Some((memo, index)) if std::ptr::eq(memo, module) => Some(index),
+            _ => {
+                let found = keyed::module_position(self.modules, module, budget)?;
+                self.address_memo = found.map(|index| (module, index));
+                found
+            }
+        };
+        if let Some(index) = index
             && let std::collections::btree_map::Entry::Vacant(slot) = self.tables[index].entry(node)
         {
             slot.insert(fact);
-            self.len += 1;
         }
+        Ok(())
     }
 
-    fn len(&self) -> usize {
-        self.len
-    }
-
-    fn position(&self, module: &ModuleKey) -> Option<usize> {
-        self.modules
-            .binary_search_by(|candidate| candidate.key.cmp(module))
-            .ok()
-    }
-
-    fn get(&self, module: &ModuleKey, node: NodeId) -> Option<&(usize, &'a NodeFacts<'g>)> {
-        self.tables[self.position(module)?].get(&node)
+    fn table(&self, module: &ModuleKey, budget: &mut Budget) -> Work<Option<&NodeTable<'a, 'g>>> {
+        Ok(keyed::module_position(self.modules, module, budget)?.map(|index| &self.tables[index]))
     }
 }
 
@@ -244,36 +250,39 @@ pub(super) fn check<'g>(
     budget: &mut Budget,
     report: &mut ResultUseReport<'g>,
 ) -> Work<()> {
-    let mut nodes = Nodes::new(inventory.graph().modules());
+    let mut nodes = Nodes::new(inventory.graph().modules(), budget)?;
     for (index, facts) in bodies.typed_nodes().iter().enumerate() {
         budget.reserve(1)?;
-        nodes.insert(facts.site.module, facts.site.node, (index, facts));
+        nodes.insert(facts.site.module, facts.site.node, (index, facts), budget)?;
     }
-    let mut checked = BTreeSet::new();
+    let mut checked = keyed::PathSet::new();
     for body in bodies.checked_bodies() {
         budget.step(1)?;
         if let BodyOwner::Declaration(id) = body.owner {
             budget.reserve(1)?;
-            checked.insert(id);
+            checked.insert(id, budget)?;
         }
     }
-    let mut variants = BTreeMap::new();
+    let mut variants = keyed::PathMap::new();
     for declaration in inventory.type_facts().declarations.values() {
         budget.step(1)?;
         if let DeclarationShape::Enum { variants: members } = &declaration.shape {
             for variant in members {
                 budget.reserve(1)?;
-                variants.insert(&variant.declaration.id, &variant.payload);
+                variants.insert(&variant.declaration.id, &variant.payload, budget)?;
             }
         }
     }
-    let mut pairs = BTreeMap::new();
-    let mut implementation_headers = BTreeMap::new();
-    let mut families = BTreeSet::new();
+    let mut pairs = keyed::PathMap::new();
+    let mut implementation_headers = keyed::PathMap::new();
+    let mut families = keyed::PathSet::new();
     for source in inventory.graph().implementations() {
         budget.reserve(1)?;
-        if families.insert(&source.family)
-            && let Some(family) = inventory.captured_family(&source.family)
+        if families.insert(&source.family, budget)?
+            && let Some(family) = {
+                keyed::charge(&source.family.module, inventory.family_probes(), budget)?;
+                inventory.captured_family(&source.family)
+            }
         {
             for implementation in &family.implementations {
                 budget.step(1)?;
@@ -282,10 +291,13 @@ pub(super) fn check<'g>(
                 {
                     budget.reserve(1)?;
                     let id = &implementation.source.declaration;
-                    implementation_headers.insert(id, &implementation.header);
+                    implementation_headers.insert(id, &implementation.header, budget)?;
                     if implementation.header.binders.len() == 4
-                        && checked.contains(id)
-                        && let Some(metadata) = inventory.headers().get(id)
+                        && checked.contains(id, budget)?
+                        && let Some(metadata) = {
+                            keyed::charge(&id.module, inventory.headers().len(), budget)?;
+                            inventory.headers().get(id)
+                        }
                         && metadata.requirements.len() == 6
                         && let Some(slots) = pairs::summary(
                             inventory,
@@ -297,7 +309,7 @@ pub(super) fn check<'g>(
                         )?
                     {
                         budget.reserve(2)?;
-                        pairs.insert(id, slots);
+                        pairs.insert(id, slots, budget)?;
                     }
                 }
             }
@@ -305,8 +317,8 @@ pub(super) fn check<'g>(
     }
     let mut scoped = None;
     if let Some(role) = core.routine
-        && checked.contains(&role.implementation.id)
-        && let Some(header) = implementation_headers.get(&role.implementation.id)
+        && checked.contains(&role.implementation.id, budget)?
+        && let Some(header) = implementation_headers.get(&role.implementation.id, budget)?
         && let Some(summary) = pairs::scoped_summary(inventory, role, header, &nodes, budget)?
     {
         scoped = Some((role, summary));
@@ -332,17 +344,17 @@ pub(super) fn check<'g>(
         release_parameters: &release_parameters,
         core,
     };
-    let mut contracts = BTreeMap::new();
+    let mut contracts = keyed::PathMap::new();
     for signature in inventory.type_facts().declarations.values() {
         budget.step(1)?;
         if let Some(entry) = CallbackEntry::from_signature(signature, core) {
             budget.reserve(1)?;
-            contracts.insert(&signature.declaration.id, (entry, None));
+            contracts.insert(&signature.declaration.id, (entry, None), budget)?;
         }
     }
     // Collect the symbolic contracts before checking uses, independent of module order.
     let mut proved = Vec::new();
-    for (id, (entry, _)) in &contracts {
+    for (id, (entry, _)) in contracts.iter() {
         budget.step(1)?;
         budget.step(inventory.graph().modules().len())?;
         let Some(index) = inventory
@@ -356,10 +368,12 @@ pub(super) fn check<'g>(
         let module = &inventory.graph().modules()[index];
         let table = &nodes.tables[index];
         let mut check = Check::new(sources, module, table, &contracts, budget, report)?;
-        if checked.contains(id) {
+        if checked.contains(id, check.budget)? {
             check.parametric = Some(*entry);
             check.proving_callable = true;
-            check.function_body(&inventory.type_facts().declarations[id], 1)?;
+            let declarations = &inventory.type_facts().declarations;
+            keyed::charge(&id.module, declarations.len(), check.budget)?;
+            check.function_body(&declarations[id], 1)?;
             if !check.has_pending {
                 check.budget.reserve(1)?;
                 proved.push((*id, check.invoked_variants));
@@ -367,7 +381,7 @@ pub(super) fn check<'g>(
         }
     }
     for (id, summary) in proved {
-        contracts.get_mut(id).unwrap().1 = Some(summary);
+        contracts.get_mut(id, budget)?.unwrap().1 = Some(summary);
     }
     for (module, table) in inventory.graph().modules().iter().zip(&nodes.tables) {
         budget.step(1)?;
@@ -383,9 +397,9 @@ struct Sources<'a, 'g> {
     pairs: &'a pairs::PairBodies<'g>,
     scoped: Option<(super::RoutineRole<'g>, pairs::PairBody<'g>)>,
     nodes: &'a Nodes<'a, 'g>,
-    checked: &'a BTreeSet<&'g DeclarationId>,
-    variants: &'a BTreeMap<&'g DeclarationId, &'a Payload<'g>>,
-    implementation_headers: &'a BTreeMap<&'g DeclarationId, &'a DeclarationFacts<'g>>,
+    checked: &'a keyed::PathSet<&'g DeclarationId>,
+    variants: &'a keyed::PathMap<&'g DeclarationId, &'a Payload<'g>>,
+    implementation_headers: &'a keyed::PathMap<&'g DeclarationId, &'a DeclarationFacts<'g>>,
     release_parameters: &'a releases::Parameters<'g>,
     core: Inputs<'a, 'g>,
 }
@@ -397,12 +411,12 @@ struct Check<'a, 'g> {
     scoped: Option<(super::RoutineRole<'g>, pairs::PairBody<'g>)>,
     nodes: &'a Nodes<'a, 'g>,
     table: &'a NodeTable<'a, 'g>,
-    checked: &'a BTreeSet<&'g DeclarationId>,
-    variants: &'a BTreeMap<&'g DeclarationId, &'a Payload<'g>>,
-    implementation_headers: &'a BTreeMap<&'g DeclarationId, &'a DeclarationFacts<'g>>,
+    checked: &'a keyed::PathSet<&'g DeclarationId>,
+    variants: &'a keyed::PathMap<&'g DeclarationId, &'a Payload<'g>>,
+    implementation_headers: &'a keyed::PathMap<&'g DeclarationId, &'a DeclarationFacts<'g>>,
     release_parameters: &'a releases::Parameters<'g>,
     module: &'g Module,
-    scopes: BTreeMap<&'g DeclarationId, Option<usize>>,
+    scopes: OrdinalMap<Option<usize>>,
     core: Inputs<'a, 'g>,
     budget: &'a mut Budget,
     report: &'a mut ResultUseReport<'g>,
@@ -437,9 +451,10 @@ impl<'a, 'g> Check<'a, 'g> {
         budget: &'a mut Budget,
         report: &'a mut ResultUseReport<'g>,
     ) -> Work<Self> {
-        let mut scopes = BTreeMap::new();
+        let mut scopes = OrdinalMap::new();
         for declaration in &module.declarations {
             budget.reserve(1)?;
+            budget.step(1)?;
             scopes.insert(&declaration.id, declaration.scope);
         }
         Ok(Self {
@@ -615,18 +630,18 @@ impl<'a, 'g> Check<'a, 'g> {
             match declaration.id.kind {
                 DeclarationKind::Function | DeclarationKind::Implementation => {
                     if syntax.children.get(1).is_none()
-                        || self.pairs.contains_key(&declaration.id)
+                        || self.pairs.contains_key(&declaration.id, self.budget)?
                         || self
                             .scoped
                             .is_some_and(|(role, _)| role.implementation.id == declaration.id)
                         || self
                             .contracts
-                            .get(&declaration.id)
+                            .get(&declaration.id, self.budget)?
                             .is_some_and(|(_, proof)| proof.is_some())
                     {
                         continue;
                     }
-                    if let Some(signature) = self.signature(&declaration.id) {
+                    if let Some(signature) = self.signature(&declaration.id)? {
                         self.function_body(signature, 1)?;
                     } else {
                         self.pending(node, ResultUseBlocker::TypedInput)?;
