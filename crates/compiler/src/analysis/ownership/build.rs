@@ -1,5 +1,6 @@
 //! Construct ownership operations from the M4 type and control facts.
 use super::*;
+use crate::analysis::declarations::FieldClass;
 use crate::analysis::ordinary::{self, HypotheticalOutcome};
 use crate::analysis::scalars::data::{
     Access, Construction, Constructor, DataExpression, PathProjection, Pattern, PatternBinder,
@@ -5905,6 +5906,11 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
     /// An application record whose fields are all scalars, so that ending its
     /// storage is its whole cleanup. A different shape stays where it was.
     fn scalar_record(&mut self, ty: &Type<'g>) -> ResultOf<bool> {
+        if let TypeTerm::Nominal { declaration, .. } = ty.as_ref()
+            && self.typed.inventory().field_class(declaration) == FieldClass::Other
+        {
+            return Ok(false);
+        }
         let Some(fields) = self.record_fields(ty)? else {
             return Ok(false);
         };

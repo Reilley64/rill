@@ -48,7 +48,17 @@ pub(super) fn signature_name(syntax: &Syntax, signature: NodeId) -> NodeId {
         .unwrap()
 }
 
-pub(super) fn collect(module: &mut Module, host: &mut Host) -> Result<Vec<Import>> {
+fn ordinal(next: &mut usize) -> DeclarationOrdinal {
+    let ordinal = DeclarationOrdinal(*next);
+    *next += 1;
+    ordinal
+}
+
+pub(super) fn collect(
+    module: &mut Module,
+    host: &mut Host,
+    next_ordinal: &mut usize,
+) -> Result<Vec<Import>> {
     let syntax = &module.syntax;
     let mut stack = vec![(syntax.root, None, false, false)];
     let mut imports = Vec::new();
@@ -131,6 +141,7 @@ pub(super) fn collect(module: &mut Module, host: &mut Host) -> Result<Vec<Import
                     module: module.key.clone(),
                     start: n.span.start(),
                     kind,
+                    ordinal: ordinal(next_ordinal),
                 },
                 name: name.map(|id| spelling(syntax, id)),
                 public,
@@ -154,6 +165,7 @@ pub(super) fn collect(module: &mut Module, host: &mut Host) -> Result<Vec<Import
                         module: module.key.clone(),
                         start: span.start(),
                         kind: DeclarationKind::Binding,
+                        ordinal: ordinal(next_ordinal),
                     },
                     name: Some(spelling(syntax, name)),
                     public: false,
@@ -173,6 +185,7 @@ pub(super) fn collect(module: &mut Module, host: &mut Host) -> Result<Vec<Import
                     module: module.key.clone(),
                     start: span.start(),
                     kind: DeclarationKind::Binding,
+                    ordinal: ordinal(next_ordinal),
                 },
                 name: Some(spelling(syntax, name)),
                 public: false,

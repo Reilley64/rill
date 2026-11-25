@@ -82,6 +82,20 @@ pub struct ContainmentEdge<'r, 'g> {
     pub source: StorageSource<'r, 'g>,
     pub forwarding: Vec<Forwarding<'r, 'g>>,
 }
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) enum FieldClass {
+    #[default]
+    Unclassified,
+    TextFreeScalars,
+    Other,
+}
+#[derive(Debug, Default)]
+pub(super) struct DeclarationSummaries(Vec<FieldClass>);
+impl DeclarationSummaries {
+    pub(super) fn fields(&self, id: &DeclarationId) -> FieldClass {
+        self.0.get(id.ordinal.index()).copied().unwrap_or_default()
+    }
+}
 #[derive(Debug)]
 pub struct LayoutFacts<'r, 'g> {
     pub declaration: &'g Declaration,
@@ -128,10 +142,14 @@ enum FindingOrder {
 pub struct CheckFacts<'r, 'g> {
     declarations: BTreeMap<&'g DeclarationId, CheckedDeclaration<'r, 'g>>,
     layouts: BTreeMap<&'g DeclarationId, LayoutFacts<'r, 'g>>,
+    summaries: DeclarationSummaries,
     obligations: BTreeMap<(&'g DeclarationId, NodeId), LayoutObligation<'r, 'g>>,
     findings: BTreeMap<(&'g DeclarationId, usize, FindingOrder), CheckFinding<'r, 'g>>,
 }
 impl<'r, 'g> CheckFacts<'r, 'g> {
+    pub(super) fn take_summaries(&mut self) -> DeclarationSummaries {
+        std::mem::take(&mut self.summaries)
+    }
     pub fn declarations(&self) -> impl Iterator<Item = &CheckedDeclaration<'r, 'g>> {
         self.declarations.values()
     }
@@ -417,6 +435,9 @@ impl<'r, 'g> Checker<'r, 'g> {
         )
     }
     fn layout_inputs(&mut self) -> Work<()> {
+        let count = self.graph.declaration_count();
+        self.budget.reserve(count)?;
+        self.facts.summaries = DeclarationSummaries(vec![FieldClass::Unclassified; count]);
         for facts in self.types.declarations() {
             self.budget.step(1)?;
             if matches!(facts.shape, DeclarationShape::Function { .. }) {
@@ -435,8 +456,19 @@ impl<'r, 'g> Checker<'r, 'g> {
             );
             match &facts.shape {
                 DeclarationShape::Record { fields } => {
+                    let mut scalars = true;
                     for field in fields {
                         self.member_storage(origin, field)?;
+                        scalars &= matches!(field.ty.as_ref(), TypeTerm::Primitive(p) if p.name() != "string");
+                    }
+                    if origin.module.origin == crate::loader::Origin::Application
+                        && facts.binders.is_empty()
+                    {
+                        self.facts.summaries.0[origin.ordinal.index()] = if scalars {
+                            FieldClass::TextFreeScalars
+                        } else {
+                            FieldClass::Other
+                        };
                     }
                 }
                 DeclarationShape::Enum { variants } => {
