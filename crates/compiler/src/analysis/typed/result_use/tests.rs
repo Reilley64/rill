@@ -242,3 +242,79 @@ fn result_use_depth_reaches_the_root_of_both_explicit_dereferences() {
         "same parameter types without the destination walk fit"
     );
 }
+
+#[test]
+fn the_node_table_memo_follows_the_module_address_between_uses() {
+    let graph = load_test_graph("nodes-memo", "function main(): void {}");
+    let modules = graph.modules();
+    assert!(modules.len() >= 2);
+    let facts: Vec<NodeFacts> = modules
+        .iter()
+        .map(|module| NodeFacts {
+            site: Site {
+                module: &module.key,
+                node: module.syntax.root,
+                span: &module.syntax.nodes[module.syntax.root].span,
+            },
+            kind: NodeFactKind::Statement,
+            flow: Default::default(),
+            callable: None,
+        })
+        .collect();
+    let search = |module: &Module| {
+        let mut budget = Budget {
+            limits: AnalysisLimits::default(),
+            statistics: Default::default(),
+        };
+        keyed::module_position(modules, &module.key, &mut budget).unwrap();
+        budget.statistics.work
+    };
+    let run = |order: &[usize], clone: Option<&ModuleKey>| {
+        let mut budget = Budget {
+            limits: AnalysisLimits::default(),
+            statistics: Default::default(),
+        };
+        let mut nodes = Nodes::new(modules, &mut budget).unwrap();
+        let before = budget.statistics.work;
+        for &index in order {
+            let module = clone.unwrap_or(&modules[index].key);
+            let fact = &facts[index];
+            nodes
+                .insert(module, fact.site.node, (index, fact), &mut budget)
+                .unwrap();
+        }
+        let mut probe = Budget {
+            limits: AnalysisLimits::default(),
+            statistics: Default::default(),
+        };
+        for (index, module) in modules.iter().enumerate() {
+            let table = nodes.table(&module.key, &mut probe).unwrap().unwrap();
+            let expected = if clone.is_some() {
+                index == order[0]
+            } else {
+                order.contains(&index)
+            };
+            assert_eq!(table.len(), usize::from(expected));
+        }
+        budget.statistics.work - before
+    };
+    assert_eq!(
+        run(&[0, 0, 0], None),
+        search(&modules[0]),
+        "one module run pays one search"
+    );
+    assert_eq!(
+        run(&[0, 1, 0, 1], None),
+        2 * search(&modules[0]) + 2 * search(&modules[1]),
+        "a change of module address pays a search again"
+    );
+    let equal_key = modules[0].key.clone();
+    assert!(!std::ptr::eq(&equal_key, &modules[0].key));
+    let spent = run(&[0], Some(&equal_key));
+    assert_eq!(spent, search(&modules[0]));
+    assert_eq!(
+        run(&[0, 0], Some(&equal_key)),
+        search(&modules[0]),
+        "an equal key at one address is one run"
+    );
+}

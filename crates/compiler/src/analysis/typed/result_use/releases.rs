@@ -2,14 +2,14 @@
 use super::*;
 use crate::analysis::typed::{CollectionOperation, NativeOwnershipAction, OwnershipRule};
 
-pub(super) type Parameters<'g> = BTreeMap<(&'g ModuleKey, NodeId), NodeId>;
+pub(super) type Parameters<'g> = keyed::PathMap<(&'g ModuleKey, NodeId), NodeId>;
 
 pub(super) fn check<'g>(
     inventory: &OrdinaryAnalysis<'g>,
     core: Inputs<'_, 'g>,
     nodes: &Nodes<'_, 'g>,
-    checked: &BTreeSet<&'g DeclarationId>,
-    headers: &BTreeMap<&'g DeclarationId, &DeclarationFacts<'g>>,
+    checked: &keyed::PathSet<&'g DeclarationId>,
+    headers: &keyed::PathMap<&'g DeclarationId, &DeclarationFacts<'g>>,
     budget: &mut Budget,
 ) -> Work<Parameters<'g>> {
     let mut parameters = Parameters::new();
@@ -35,7 +35,7 @@ pub(super) fn check<'g>(
     });
     for (wrapper, bridge) in collection.chain(native) {
         budget.step(1)?;
-        if !checked.contains(&wrapper.id) {
+        if !checked.contains(&wrapper.id, budget)? {
             continue;
         }
         let Some((module, _)) = crate::analysis::ordinary::selection::declaration(
@@ -46,7 +46,7 @@ pub(super) fn check<'g>(
         else {
             continue;
         };
-        let Some(header) = headers.get(&wrapper.id) else {
+        let Some(header) = headers.get(&wrapper.id, budget)? else {
             continue;
         };
         let DeclarationShape::Function {
@@ -70,7 +70,10 @@ pub(super) fn check<'g>(
         let [node] = module.syntax.nodes[*statement].children.as_slice() else {
             continue;
         };
-        let expression = |node| match &nodes.get(&module.key, node)?.1.kind {
+        let Some(table) = nodes.table(&module.key, budget)? else {
+            continue;
+        };
+        let expression = |node| match &table.get(&node)?.1.kind {
             NodeFactKind::Expression(value) if value.ordinary_context.is_none() => Some(value),
             _ => None,
         };
@@ -92,7 +95,7 @@ pub(super) fn check<'g>(
             // The delegate's effect is checked at its concrete application; it
             // is not an acknowledgement of the parameter or of known contents.
             budget.reserve(1)?;
-            parameters.insert((&module.key, *node), parameter.declaration.node);
+            parameters.insert((&module.key, *node), parameter.declaration.node, budget)?;
         }
     }
     Ok(parameters)

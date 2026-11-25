@@ -7,7 +7,7 @@ use crate::loader::Origin;
 
 // Each proved entry states which input variants require a checked actual callback.
 pub(super) type CallbackContract<'g> =
-    BTreeMap<&'g DeclarationId, (CallbackEntry<'g>, Option<[bool; 2]>)>;
+    keyed::PathMap<&'g DeclarationId, (CallbackEntry<'g>, Option<[bool; 2]>)>;
 
 #[derive(Clone, Copy)]
 pub(super) struct CallbackEntry<'g> {
@@ -64,12 +64,16 @@ impl<'g> CallbackEntry<'g> {
 }
 
 impl<'a, 'g> Check<'a, 'g> {
-    pub(super) fn signature(&self, id: &DeclarationId) -> Option<&'a DeclarationFacts<'g>> {
-        self.inventory
-            .type_facts()
-            .declarations
-            .get(id)
-            .or_else(|| self.implementation_headers.get(id).copied())
+    pub(super) fn signature(
+        &mut self,
+        id: &DeclarationId,
+    ) -> Work<Option<&'a DeclarationFacts<'g>>> {
+        let declarations = &self.inventory.type_facts().declarations;
+        keyed::charge(&id.module, declarations.len(), self.budget)?;
+        if let Some(facts) = declarations.get(id) {
+            return Ok(Some(facts));
+        }
+        Ok(self.implementation_headers.get(id, self.budget)?.copied())
     }
 
     pub(super) fn function_body(
@@ -87,7 +91,9 @@ impl<'a, 'g> Check<'a, 'g> {
         };
         let previous = std::mem::replace(&mut self.current_parameters, parameters);
         self.budget.step(1)?;
-        let checked = self.checked.contains(&signature.declaration.id);
+        let checked = self
+            .checked
+            .contains(&signature.declaration.id, self.budget)?;
         let previous_once = self.once_return.take();
         if checked
             && signature.declaration.id.kind == DeclarationKind::Function
@@ -222,7 +228,7 @@ impl<'a, 'g> Check<'a, 'g> {
         state: &Residence<'g>,
         depth: usize,
     ) -> Work<bool> {
-        if let Some(&(entry, proof)) = self.contracts.get(call.callee) {
+        if let Some(&(entry, proof)) = self.contracts.get(call.callee, self.budget)? {
             let Some(variants) = proof else {
                 return Ok(false);
             };
@@ -258,7 +264,7 @@ impl<'a, 'g> Check<'a, 'g> {
             .map_or((call.callee, call.substitution.as_slice()), |selected| {
                 (selected.implementation, selected.substitution.as_slice())
             });
-        if !self.checked.contains(target) {
+        if !self.checked.contains(target, self.budget)? {
             return Ok(false);
         }
         if self.proving_callable || call.selection.is_some() {
@@ -407,13 +413,13 @@ impl<'a, 'g> Check<'a, 'g> {
         depth: usize,
     ) -> Work<bool> {
         self.depth(depth)?;
-        if !self.checked.contains(declaration)
-            || self.contracts.contains_key(declaration)
-            || self.pairs.contains_key(declaration)
+        if !self.checked.contains(declaration, self.budget)?
+            || self.contracts.contains_key(declaration, self.budget)?
+            || self.pairs.contains_key(declaration, self.budget)?
         {
             return Ok(false);
         }
-        let Some(signature) = self.signature(declaration) else {
+        let Some(signature) = self.signature(declaration)? else {
             return Ok(false);
         };
         self.budget.step(signature.binders.len())?;
