@@ -1798,23 +1798,19 @@ impl<'g> CancellationTrace<'_, 'g> {
             return Ok(None);
         }
         if self.facts.is_indexed() {
-            // Include the binding equality test and all possible map probes.
-            let width = path
-                .root
-                .module
-                .path
-                .len()
-                .checked_add(1)
-                .ok_or(Stop::Limit)?;
             budget.step(
-                width
-                    .checked_mul(self.bindings.len() + 1)
+                path.root
+                    .module
+                    .path
+                    .len()
+                    .checked_add(1)
                     .ok_or(Stop::Limit)?,
             )?;
         }
         if facts.binding != Some(path.root) {
             return Ok(None);
         }
+        budget.step(1)?;
         let slot = self.bindings[path.root];
         Ok((slot < u64::BITS as usize).then_some(slot))
     }
@@ -5135,7 +5131,7 @@ pub(super) fn run<'a, 'g>(
         mir: Mir {
             entry,
             blocks,
-            disposer_bodies: BTreeMap::new(),
+            disposer_bodies: keyed::PathMap::new(),
             cancellation: None,
             replacement: None,
             active_leaf: active_leaf.filter(|_| single_active_call),

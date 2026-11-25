@@ -7,7 +7,6 @@ pub(crate) trait Meter {
     fn step(&mut self, n: usize) -> Result<(), ()>;
 }
 
-#[cfg_attr(not(test), expect(dead_code))]
 pub(crate) trait PathKey {
     fn path(&self) -> &ModuleKey;
 }
@@ -56,7 +55,6 @@ pub(crate) fn module_position(
     Ok(modules.binary_search_by(|module| module.key.cmp(key)).ok())
 }
 
-#[cfg_attr(not(test), expect(dead_code))]
 pub(crate) struct PathMap<K, V>(BTreeMap<K, V>);
 
 impl<K, V> Default for PathMap<K, V> {
@@ -65,7 +63,6 @@ impl<K, V> Default for PathMap<K, V> {
     }
 }
 
-#[cfg_attr(not(test), expect(dead_code))]
 impl<K: PathKey + Ord, V> PathMap<K, V> {
     pub(crate) fn new() -> Self {
         Self::default()
@@ -112,6 +109,7 @@ impl<K: PathKey + Ord, V> PathMap<K, V> {
         Ok(self.0.insert(key, value))
     }
 
+    #[cfg_attr(not(test), expect(dead_code))]
     pub(crate) fn remove<Q>(&mut self, key: &Q, meter: &mut impl Meter) -> Result<Option<V>, ()>
     where
         K: Borrow<Q>,
@@ -121,10 +119,12 @@ impl<K: PathKey + Ord, V> PathMap<K, V> {
         Ok(self.0.remove(key))
     }
 
+    #[cfg_attr(not(test), expect(dead_code))]
     pub(crate) fn len(&self) -> usize {
         self.0.len()
     }
 
+    #[cfg_attr(not(test), expect(dead_code))]
     pub(crate) fn is_empty(&self) -> bool {
         self.0.is_empty()
     }
@@ -133,10 +133,12 @@ impl<K: PathKey + Ord, V> PathMap<K, V> {
         self.0.iter()
     }
 
+    #[cfg_attr(not(test), expect(dead_code))]
     pub(crate) fn keys(&self) -> impl Iterator<Item = &K> {
         self.0.keys()
     }
 
+    #[cfg_attr(not(test), expect(dead_code))]
     pub(crate) fn values(&self) -> impl Iterator<Item = &V> {
         self.0.values()
     }
