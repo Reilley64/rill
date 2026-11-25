@@ -36,10 +36,10 @@ The last two are the two `Result` types of the acceptance program. The LLVM type
 
 ### 2. Passing and returning aggregates
 
-In this section, a scalar is a boolean, a character, an integer, a float, a pointer, a list handle, or a `&T` for any `T` other than `string`. An aggregate is a string, a view, a record, a tuple or an enum, whatever its size. A reference to an aggregate other than a string is a pointer to the aggregate's storage. A `&string` is the two-word view of ADR 0031.
+In this section, a scalar is a boolean, a character, an integer, a float, a pointer, a list handle, or a `&T` for any `T` other than `string` and `Bytes` (see Open). An aggregate is a string, a `Bytes`, a view, a record, a tuple or an enum, whatever its size. A reference to an aggregate other than a string is a pointer to the aggregate's storage. A `&string` is the two-word view of ADR 0031, and the recommendation gives `&Bytes` the same two words.
 
 - **Scalars** pass and return by value as LLVM scalars.
-- **Strings and views as parameters** keep the split of ADRs 0031 and 0034: three scalar words for an owned string, two for a view.
+- **Strings, `Bytes` and their views as parameters** keep the split of ADRs 0031 and 0034: three scalar words for an owned string or `Bytes`, two for a view.
 - **Other aggregates as parameters** pass as one `ptr` to storage the caller owns. An owned argument is a move: the callee owns the bytes and drops them, and the caller treats the source place as moved. A `&T` argument is the pointer to the place. The callee never receives the aggregate as an LLVM aggregate and no parameter has the `byval` attribute.
 - **Every aggregate result**, a string and a view included, returns through a caller-provided out-pointer: the first parameter, `ptr sret(<type>) align <n>`, and the function returns `void`. The caller allocates the storage and the callee initialises all of it. A callee that panics leaves it uninitialised, and the caller never reads it ([ADR 0035](0035-panic-ends-the-program-with-status-101.md)).
 - **Calls into the runtime** pass and return scalars only, as ADR 0032 and the runtime's table already do. A runtime function never reads or writes an enum or a record. It exchanges words, pointers and list handles, and generated code builds the `Result` or `Option` around them. The runtime therefore depends on no layout in section 1.
@@ -61,7 +61,7 @@ In this section, a scalar is a boolean, a character, an integer, a float, a poin
 - There is no push. The collection crate has none, and the ownership MIR builds a list once from staged elements (`CommitList*`, "no partial List is published"), which is `from_elements`. A later slice that needs `push` adds it to the collection crate, which slice 1 leaves unchanged.
 - `get` gives an `Option<&T>`: generated code tests the pointer, writes tag `Some` or `None`, and for `Some` writes the element's view. For `List<string>` the view is the first two words of the slot (pointer, length), a copy of two words and never a pointer to the slot, as ADR 0031 requires. For another `T` the payload is the pointer to the slot.
 - The handle's box, the `Vec` and its buffer allocate through the runtime's `#[global_allocator]`, so the checking allocator counts them ([ADR 0032](0032-generated-code-allocates-through-three-runtime-functions.md), planner decision D4). Strings inside a list allocate through the three runtime functions and are released by the element's drop glue.
-- The runtime builds the `List<Bytes>` of `inputs()` itself with the same `from_elements`, allocating each argument's bytes through the allocator the generated release uses, so one drop glue releases them.
+- The runtime builds the `List<Bytes>` of `inputs()` itself with the same `from_elements`, allocating each argument's bytes with `rill_rt_allocate(len, 1)`, so capacity equals length. An empty argument holds the dangling address 1 and capacity 0, as an empty string does ([ADR 0031](0031-owned-strings-are-pointer-length-capacity.md)). One glue, `rill_rt_release(ptr, capacity, 1)` unless the capacity is 0, then releases every `Bytes` correctly.
 
 ### 4. Drop glue
 
