@@ -5009,7 +5009,7 @@ pub(super) fn run<'a, 'g>(
             }
             Err(stop) => return Err(stop),
         };
-        #[cfg(all(test, target_arch = "aarch64", target_os = "macos"))]
+        #[cfg(test)]
         if let Some(probe) = cache
             .as_deref_mut()
             .and_then(|cache| cache.join_probe.as_mut())

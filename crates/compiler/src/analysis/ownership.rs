@@ -1649,7 +1649,7 @@ struct QueryCache<'a, 'g> {
     // Canonical references belong to this receipt. Address keys avoid path
     // comparisons, and identical source offsets in other modules cannot alias.
     callable_proofs: BTreeMap<(*const DeclarationId, CallableLayout), ResultOf<Arc<Mir<'g>>>>,
-    #[cfg(all(test, target_arch = "aarch64", target_os = "macos"))]
+    #[cfg(test)]
     join_probe: Option<flow::scoped_join::tests::Probe<'g>>,
 }
 

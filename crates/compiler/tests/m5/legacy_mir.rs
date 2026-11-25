@@ -3,6 +3,7 @@ use compiler::analysis::ownership::{RootReport, analyze_ownership};
 use compiler::analysis::scalars::BodyOwner;
 use std::collections::BTreeMap;
 
+const PUBLISHED_TARGET: &str = "aarch64-apple-darwin";
 const BLESS: &str = "RILL_BLESS_MIR";
 const HEADER: &str = "# Digests of the ownership output over the legacy-caps fixtures, checked by m5::legacy_mir. Regenerate: RILL_BLESS_MIR=1 mise run test:m5 -- legacy_mir\n# Columns: fixture, mode, root, digest. A root is a module path and function, a `disposer` root, `standard` (every standard-library root together) or `graph` (completion and findings).\n";
 
@@ -172,6 +173,14 @@ fn stable(debug: &str, installs: &[String; 2]) -> String {
     for install in longest_first {
         text = text.replace(install.as_str(), "<install>");
     }
+    text = text.replace(
+        concat!(
+            "<install>/lib/rill/runtime/",
+            env!("RILL_ANALYSIS_TARGET"),
+            "/"
+        ),
+        &format!("<install>/lib/rill/runtime/{PUBLISHED_TARGET}/"),
+    );
     for (what, needle) in [
         ("a snapshot", "Snapshot"),
         ("the install path", installs[0].as_str()),
