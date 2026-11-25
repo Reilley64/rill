@@ -136,13 +136,13 @@ fn declared_shared_formal_reads_the_lent_actual_in_one_call_frame() {
             assert!(open.mir().is_none() && open.findings().is_empty());
             assert_eq!(open.blocked_at().unwrap().span.bytes(), b"job()");
             let used = open.statistics();
-            assert_eq!((used.work, used.entries, used.max_depth), (1_884, 33, 3));
+            assert_eq!((used.work, used.entries, used.max_depth), (1_894, 33, 3));
             let open_root = capture_graph_root(module, &graph, run);
             assert_eq!(open_root.ordinary_completion(), Completion::Incomplete);
             assert!(open_root.mir().is_none() && open_root.ordinary_mir().is_none());
 
             let used = target.statistics();
-            assert_eq!((used.work, used.entries, used.max_depth), (5_201, 201, 6));
+            assert_eq!((used.work, used.entries, used.max_depth), (2_421, 201, 6));
             let lower = |limit| lower_body(receipt, module, &decl.id, limit).unwrap();
             assert_declared_shared_frame(module, lower(exact(used)).mir().unwrap(), b"flag: bool");
             for short in short_capture_limits(exact(used)) {
@@ -153,7 +153,7 @@ fn declared_shared_formal_reads_the_lent_actual_in_one_call_frame() {
             let used = graph.statistics();
             assert_eq!(
                 (used.work, used.entries, used.max_depth),
-                (190_167, 4_302, 6)
+                (189_869, 4_302, 6)
             );
             let bounded = analyze_ownership(receipt, exact(used));
             assert_declared_shared_frame(
@@ -191,17 +191,17 @@ fn declared_shared_frame_checks_the_lent_owner_and_rejects_without_mir() {
             );
             let graph = analyze_ownership(receipt, AnalysisLimits::default());
             for (name, rejection, caps) in [
-                ("caller", None, (5_373, 252, 6)),
+                ("caller", None, (2_533, 252, 6)),
                 // A second actual caller closes its own frame.
-                ("second", None, (5_373, 252, 6)),
+                ("second", None, (2_533, 252, 6)),
                 // Replacing `f` while a shared borrow of it is still live.
                 (
                     "write",
                     Some(("R0203", "f = () => flag;", "&f")),
-                    (5_533, 339, 6),
+                    (2_693, 339, 6),
                 ),
                 // A finished shared borrow of `f` does not block the frame's loan.
-                ("sibling", None, (5_616, 367, 6)),
+                ("sibling", None, (2_776, 367, 6)),
             ] {
                 let target = check_local_capture_root(module, receipt, &graph, name, rejection);
                 let decl = capture_declaration(module, name);
@@ -236,7 +236,7 @@ fn declared_shared_frame_checks_the_lent_owner_and_rejects_without_mir() {
             let used = graph.statistics();
             assert_eq!(
                 (used.work, used.entries, used.max_depth),
-                (204_449, 5_104, 6)
+                (195_541, 5_104, 6)
             );
             let bounded = analyze_ownership(receipt, exact(used));
             assert_eq!(bounded.findings().len(), 1);
@@ -319,15 +319,15 @@ fn declared_shared_siblings_keep_their_parent_caps() {
         |_, module, receipt| {
             let graph = analyze_ownership(receipt, AnalysisLimits::default());
             for (name, at, caps) in [
-                ("plain", "same(&flag)", (1_908, 46, 3)),
-                ("ignored", "skip(&f)", (1_919, 55, 3)),
+                ("plain", "same(&flag)", (1_918, 46, 3)),
+                ("ignored", "skip(&f)", (1_929, 55, 3)),
             ] {
                 check_capture_blocker(module, receipt, &graph, name, at);
                 assert_incomplete_at_caps(module, receipt, name, at, caps);
             }
             assert_parent_graph_cap(receipt, (187_611, 4_040, 3));
             assert_pre_equality_graph_cap(receipt, (187_616, 4_040, 3));
-            assert_graph_incomplete_at_caps(receipt, &graph, (187_963, 4_174, 5));
+            assert_graph_incomplete_at_caps(receipt, &graph, (190_455, 4_174, 5));
         },
     );
     probe(
@@ -341,10 +341,10 @@ fn declared_shared_siblings_keep_their_parent_caps() {
                 receipt,
                 "ignoredOther",
                 "skipOther(&f)",
-                (1_901, 46, 3),
+                (1_911, 46, 3),
             );
             assert_parent_graph_cap(receipt, (186_959, 4_049, 3));
-            assert_graph_incomplete_at_caps(receipt, &graph, (187_310, 4_183, 5));
+            assert_graph_incomplete_at_caps(receipt, &graph, (189_802, 4_183, 5));
         },
     );
     // Local invocations of a one-capture arrow are not frames: `f()` and
@@ -355,14 +355,14 @@ fn declared_shared_siblings_keep_their_parent_caps() {
         |_, module, receipt| {
             let graph = analyze_ownership(receipt, AnalysisLimits::default());
             for (name, at, caps) in [
-                ("local", "d()", (1_909, 49, 5)),
-                ("direct", "f()", (1_900, 44, 5)),
+                ("local", "d()", (1_919, 49, 5)),
+                ("direct", "f()", (1_910, 44, 5)),
             ] {
                 check_capture_blocker(module, receipt, &graph, name, at);
                 assert_incomplete_at_caps(module, receipt, name, at, caps);
             }
             assert_pre_equality_graph_cap(receipt, (186_671, 4_033, 5));
-            assert_graph_incomplete_at_caps(receipt, &graph, (187_025, 4_167, 5));
+            assert_graph_incomplete_at_caps(receipt, &graph, (189_517, 4_167, 5));
         },
     );
 }
