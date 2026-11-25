@@ -107,7 +107,7 @@ fn declared_shared_formal_reads_the_lent_actual_in_one_call_frame() {
             let stats = typed.statistics();
             crate::limit::assert_triple(
                 (stats.work, stats.entries, stats.max_depth),
-                (325_092, 48_483, 12),
+                (325_288, 48_483, 12),
                 "",
             );
             let graph = analyze_ownership(receipt, AnalysisLimits::default());
@@ -197,7 +197,7 @@ fn declared_shared_frame_checks_the_lent_owner_and_rejects_without_mir() {
             let stats = typed.statistics();
             crate::limit::assert_triple(
                 (stats.work, stats.entries, stats.max_depth),
-                (332_854, 49_468, 12),
+                (333_050, 49_468, 12),
                 "",
             );
             let graph = analyze_ownership(receipt, AnalysisLimits::default());
@@ -274,7 +274,7 @@ fn declared_shared_siblings_keep_their_parent_caps() {
                 (ResultUseBlocker::Storage, "&mut f"),
             ]
             .as_slice(),
-            (323_768, 48_297, 12),
+            (323_964, 48_297, 12),
         ),
         (
             "bound",
@@ -282,7 +282,7 @@ fn declared_shared_siblings_keep_their_parent_caps() {
                 "{SHARED}function caller(flag: bool): bool {{ let f: () => bool = () => flag; let out = run(&f); return out; }}\n"
             ),
             [(ResultUseBlocker::CallBoundary, "job()")].as_slice(),
-            (323_861, 48_329, 12),
+            (324_057, 48_329, 12),
         ),
         // Review ci-uaa1 (ri-785.7 #1): an owned once wrapper whose body
         // invokes another function, not its formal.
@@ -290,7 +290,7 @@ fn declared_shared_siblings_keep_their_parent_caps() {
             "otherOwned",
             "function other(): bool { return true; }\nfunction invokeOther<F>(job: F): bool where callableOnce(F, [], bool) { return other(); }\nfunction callerOther(flag: bool): bool { return invokeOther(() => flag); }\n".to_string(),
             [(ResultUseBlocker::Containment, "job: F")].as_slice(),
-            (324_657, 48_273, 12),
+            (324_853, 48_273, 12),
         ),
     ] {
         probe_report(

@@ -44,7 +44,7 @@ fn record_view_reads_check() {
                 &[const {
                     Case {
                         text: READS,
-                        typed_stats: (333296, 49248, 12),
+                        typed_stats: (333492, 49248, 12),
                         graph: (GraphCompletion::Incomplete, (193384, 5239, 5)),
                         roots: &[
                             checked("viaParam", (2094, 137, 3)),
@@ -94,7 +94,7 @@ fn unsupported_record_reads_pin_current_caps_and_blockers() {
                     const {
                         Case {
                             text: READ_SIBLINGS,
-                            typed_stats: (328345, 48671, 12),
+                            typed_stats: (328541, 48671, 12),
                             graph: (GraphCompletion::Incomplete, (188282, 4241, 5)),
                             roots: &[
                                 incomplete("exclusive", "view.x", (1907, 45, 3)),
@@ -107,7 +107,7 @@ fn unsupported_record_reads_pin_current_caps_and_blockers() {
                     const {
                         Case {
                             text: NAMED_READS,
-                            typed_stats: (324980, 48361, 12),
+                            typed_stats: (325176, 48361, 12),
                             graph: (GraphCompletion::SourceRejected, (186600, 4221, 5)),
                             roots: &[
                                 Root {
@@ -256,7 +256,7 @@ fn stored_source_loans_reach_the_caller_view() {
                 &[const {
                     Case {
                         text: FORMS,
-                        typed_stats: (346590, 52058, 12),
+                        typed_stats: (346786, 52058, 12),
                         graph: (GraphCompletion::SourceRejected, (215850, 9533, 8)),
                         roots: &[
                             checked("remember", (2812, 339, 3)),
@@ -322,7 +322,7 @@ fn callee_stores_of_locals_escape_and_of_parameters_do_not() {
                 &[const {
                     Case {
                         text: POISON,
-                        typed_stats: (332562, 49404, 12),
+                        typed_stats: (332758, 49404, 12),
                         graph: (GraphCompletion::SourceRejected, (196296, 5587, 6)),
                         roots: &[
                             checked("remember", (2554, 210, 3)),
@@ -408,7 +408,7 @@ fn empty_body_and_family_calls_with_record_contents() {
                     const {
                         Case {
                             text: EMPTY_BODY,
-                            typed_stats: (329013, 49174, 12),
+                            typed_stats: (329209, 49174, 12),
                             graph: (GraphCompletion::SourceRejected, (193618, 5558, 8)),
                             roots: &[
                                 checked("remember", (2324, 138, 1)),
@@ -426,7 +426,7 @@ fn empty_body_and_family_calls_with_record_contents() {
                     const {
                         Case {
                             text: FAMILY,
-                            typed_stats: (328468, 49165, 12),
+                            typed_stats: (328664, 49165, 12),
                             graph: (GraphCompletion::Incomplete, (189462, 4282, 5)),
                             roots: &[incomplete(
                                 "selected",
@@ -487,7 +487,7 @@ const UNSUPPORTED: &[Source] = &[
                 r####"pending Storage @ *slot = source;"####,
                 r####"pending Storage @ &mut view"####,
             ],
-            stats: (325332, 48573, 12),
+            stats: (325528, 48573, 12),
         },
     },
     Source {
@@ -511,7 +511,7 @@ const UNSUPPORTED: &[Source] = &[
                 r####"pending Storage @ *slot = source;"####,
                 r####"pending Storage @ &mut view"####,
             ],
-            stats: (326996, 48797, 12),
+            stats: (327192, 48797, 12),
         },
     },
     Source {
@@ -529,7 +529,7 @@ const UNSUPPORTED: &[Source] = &[
         outcome: Outcome::Typed {
             completion: TypedCompletion::Incomplete,
             signals: &[r####"pending Storage @ *slot = source;"####],
-            stats: (324050, 48341, 12),
+            stats: (324246, 48341, 12),
         },
     },
     Source {
@@ -552,7 +552,7 @@ const UNSUPPORTED: &[Source] = &[
                 r####"pending Storage @ *slot = source;"####,
                 r####"pending Storage @ &mut view"####,
             ],
-            stats: (325258, 48571, 12),
+            stats: (325454, 48571, 12),
         },
     },
     Source {
@@ -575,7 +575,7 @@ const UNSUPPORTED: &[Source] = &[
                 r####"pending Storage @ *slot = source;"####,
                 r####"pending Storage @ &mut view"####,
             ],
-            stats: (325245, 48553, 12),
+            stats: (325441, 48553, 12),
         },
     },
 ];
@@ -640,7 +640,7 @@ fn forwarded_record_slot_roots_keep_their_parent_caps_and_outcomes() {
                     const {
                         Case {
                             text: FORWARD_NAMED,
-                            typed_stats: (330559, 48902, 12),
+                            typed_stats: (330755, 48902, 12),
                             graph: (GraphCompletion::Incomplete, (191078, 4267, 5)),
                             roots: &[
                                 checked("touch", (1984, 83, 1)),
@@ -652,7 +652,7 @@ fn forwarded_record_slot_roots_keep_their_parent_caps_and_outcomes() {
                     const {
                         Case {
                             text: FORWARD_NAMED_PIPE,
-                            typed_stats: (330569, 48906, 12),
+                            typed_stats: (330765, 48906, 12),
                             graph: (GraphCompletion::Incomplete, (191078, 4264, 5)),
                             roots: &[
                                 checked("touch", (1984, 83, 1)),
@@ -664,7 +664,7 @@ fn forwarded_record_slot_roots_keep_their_parent_caps_and_outcomes() {
                     const {
                         Case {
                             text: FORWARD_NESTED,
-                            typed_stats: (331573, 48950, 12),
+                            typed_stats: (331769, 48950, 12),
                             graph: (GraphCompletion::Incomplete, (191144, 4268, 5)),
                             roots: &[
                                 checked("touch", (1986, 84, 1)),
@@ -676,7 +676,7 @@ fn forwarded_record_slot_roots_keep_their_parent_caps_and_outcomes() {
                     const {
                         Case {
                             text: FORWARD_ENUM,
-                            typed_stats: (330141, 48899, 12),
+                            typed_stats: (330337, 48899, 12),
                             graph: (GraphCompletion::Incomplete, (190954, 4265, 5)),
                             roots: &[
                                 checked("touch", (1980, 81, 1)),

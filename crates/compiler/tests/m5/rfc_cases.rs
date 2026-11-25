@@ -519,7 +519,7 @@ expect shifted(Point { x: 2, y: 3 }).x == 3i32;
     // pins that cap. `pre_equality_graph` is the graph cap with the expectation
     // root's attributed work and entries removed (8913, 1139).
     outcome: Outcome::Receipt {
-        typed_stats: (326069, 48655, 12),
+        typed_stats: (326265, 48655, 12),
         graph: (GraphCompletion::Incomplete, (190796, 5184, 6)),
         pre_equality_graph: Some((181846, 4044, 6)),
         roots: &[
@@ -566,7 +566,7 @@ expect selected() == 9i32;
     // `pre_equality_graph` is the graph cap with the expectation root's
     // attributed work and entries removed (8410, 961).
     outcome: Outcome::Receipt {
-        typed_stats: (326776, 48821, 12),
+        typed_stats: (326972, 48821, 12),
         graph: (GraphCompletion::Incomplete, (190852, 5004, 6)),
         pre_equality_graph: Some((182404, 4043, 6)),
         roots: &[
@@ -603,7 +603,7 @@ function carried(): i32 {
 expect carried() == 42i32;
 "#,
     outcome: Outcome::Receipt {
-        typed_stats: (323890, 48451, 12),
+        typed_stats: (324086, 48451, 12),
         graph: (GraphCompletion::Incomplete, (187017, 4212, 5)),
         pre_equality_graph: Some((186482, 4013, 3)),
         roots: &[
@@ -648,7 +648,7 @@ function invalidMove(): string {
 }
 "#,
     outcome: Outcome::Receipt {
-        typed_stats: (321942, 48190, 12),
+        typed_stats: (322138, 48190, 12),
         graph: (GraphCompletion::SourceRejected, (185919, 4186, 5)),
         pre_equality_graph: Some((185568, 4052, 3)),
         roots: &[Root {
@@ -678,7 +678,7 @@ function separate(): i32 {
 expect separate() == 6i32;
 "#,
     outcome: Outcome::Receipt {
-        typed_stats: (325589, 48706, 12),
+        typed_stats: (325785, 48706, 12),
         graph: (GraphCompletion::Incomplete, (190075, 5288, 5)),
         pre_equality_graph: Some((187506, 4084, 3)),
         roots: &[
@@ -784,7 +784,7 @@ function wholeReadWhileLive(): i32 {
 }
 "#,
     outcome: Outcome::Receipt {
-        typed_stats: (347068, 51999, 12),
+        typed_stats: (347264, 51999, 12),
         graph: (GraphCompletion::SourceRejected, (214313, 9734, 5)),
         pre_equality_graph: Some((205449, 5349, 5)),
         roots: &[
@@ -899,7 +899,7 @@ expect result() == 3i32;
     // pins that cap. `pre_equality_graph` is the graph cap with the expectation
     // root's attributed work and entries removed (8642, 688).
     outcome: Outcome::Receipt {
-        typed_stats: (325935, 48579, 12),
+        typed_stats: (326131, 48579, 12),
         graph: (GraphCompletion::Incomplete, (189127, 4699, 6)),
         pre_equality_graph: Some((180449, 4011, 6)),
         roots: &[
@@ -942,7 +942,7 @@ function overlap(): i32 {
 }
 "#,
     outcome: Outcome::Receipt {
-        typed_stats: (324416, 48529, 12),
+        typed_stats: (324612, 48529, 12),
         graph: (GraphCompletion::SourceRejected, (187485, 4378, 5)),
         pre_equality_graph: Some((186712, 4049, 3)),
         roots: &[Root {
@@ -981,7 +981,7 @@ function poison(slot: &mut &Point): void {
     // `pending Storage` signals; `o08_pre_record_contents_typed_cap_now_gives_resource_limit`
     // pins it. `pre_equality_graph` removes the expectation root (8494, 1003).
     outcome: Outcome::Receipt {
-        typed_stats: (328583, 49057, 12),
+        typed_stats: (328779, 49057, 12),
         graph: (GraphCompletion::SourceRejected, (192753, 5271, 6)),
         pre_equality_graph: Some((184219, 4268, 6)),
         roots: &[
@@ -1033,7 +1033,7 @@ function local(dst: &mut List<&User>): void {
     // (typed unchanged at 329,382 / 48,563 / 12).
     // `o09_pre_list_contents_caps_now_give_resource_limit` pins them.
     outcome: Outcome::Receipt {
-        typed_stats: (329240, 49228, 12),
+        typed_stats: (329436, 49228, 12),
         graph: (GraphCompletion::SourceRejected, (192343, 4641, 6)),
         pre_equality_graph: Some((189147, 4103, 3)),
         roots: &[
@@ -1067,7 +1067,7 @@ function extract(users: List<&User>): Option<&User> {
 }
 "#,
         outcome: Outcome::Receipt {
-            typed_stats: (323986, 48499, 12),
+            typed_stats: (324186, 48499, 12),
             graph: (GraphCompletion::Incomplete, (188072, 4612, 6)),
             pre_equality_graph: Some((187721, 4478, 3)),
             roots: &[Root {
@@ -1085,7 +1085,7 @@ type User = { id: i32 };
 function slot(users: List<&User>): Option<&&User> { return get(&users, 0u64); }
 "#,
         outcome: Outcome::Receipt {
-            typed_stats: (325755, 48716, 12),
+            typed_stats: (325972, 48716, 12),
             graph: (GraphCompletion::SourceRejected, (187349, 4363, 5)),
             pre_equality_graph: Some((186999, 4229, 5)),
             roots: &[Root {
@@ -1107,7 +1107,7 @@ type User = { id: i32 };
 function indexed(users: List<&User>, index: u64): Option<&&User> { return get(&users, index); }
 "#,
         outcome: Outcome::Receipt {
-            typed_stats: (325678, 48667, 12),
+            typed_stats: (325891, 48667, 12),
             graph: (GraphCompletion::SourceRejected, (187433, 4374, 5)),
             pre_equality_graph: Some((187082, 4240, 5)),
             roots: &[Root {
@@ -1140,7 +1140,7 @@ function exclusive(users: List<&mut User>): Option<&mut User> {
             signals: &[
                 r####"pending Storage @ for (let user of users) { return Option.Some(user); }"####,
             ],
-            stats: (323145, 48331, 12),
+            stats: (323345, 48331, 12),
         },
     },
     Source {
@@ -1155,7 +1155,7 @@ function scalar(users: List<&i32>): Option<&i32> {
             signals: &[
                 r####"pending Storage @ for (let number of users) { return Option.Some(number); }"####,
             ],
-            stats: (322315, 48283, 12),
+            stats: (322515, 48283, 12),
         },
     },
 ];
@@ -1178,7 +1178,7 @@ function bound(users: List<&User>): Option<&&User> { let found = get(&users, 0u6
 function discarded(users: List<&User>): void { get(&users, 0u64); }
 "#,
     outcome: Outcome::Receipt {
-        typed_stats: (342727, 51606, 12),
+        typed_stats: (343048, 51606, 12),
         graph: (GraphCompletion::Incomplete, (191131, 4248, 5)),
         pre_equality_graph: Some((190775, 4114, 3)),
         roots: &[
@@ -1250,7 +1250,7 @@ function mutable(users: List<&mut User>): Option<&&mut User> { return get(&users
                 r####"pending TypedInput @ get(&users, 0u64)"####,
                 r####"pending TypedInput @ return get(&users, 0u64);"####,
             ],
-            stats: (325172, 48528, 12),
+            stats: (325390, 48528, 12),
         },
     },
     Source {
@@ -1265,7 +1265,7 @@ function scalar(users: List<&i32>): Option<&&i32> { return get(&users, 0u64); }
                 r####"pending TypedInput @ get(&users, 0u64)"####,
                 r####"pending TypedInput @ return get(&users, 0u64);"####,
             ],
-            stats: (324345, 48480, 12),
+            stats: (324563, 48480, 12),
         },
     },
     Source {
@@ -1281,7 +1281,7 @@ function owned(users: List<User>): Option<&User> { return get(&users, 0u64); }
                 r####"pending TypedInput @ get(&users, 0u64)"####,
                 r####"pending TypedInput @ return get(&users, 0u64);"####,
             ],
-            stats: (325103, 48491, 12),
+            stats: (325321, 48491, 12),
         },
     },
     Source {
@@ -1297,7 +1297,7 @@ function grouped(users: List<&User>): Option<&&User> { return get(&(users), 0u64
                 r####"pending TypedInput @ get(&(users), 0u64)"####,
                 r####"pending TypedInput @ return get(&(users), 0u64);"####,
             ],
-            stats: (324976, 48445, 12),
+            stats: (325191, 48445, 12),
         },
     },
 ];
@@ -1321,7 +1321,7 @@ function ordered(input: List<i32>): i32 {
 }
 "#,
     outcome: Outcome::Receipt {
-        typed_stats: (328690, 49089, 12),
+        typed_stats: (328886, 49089, 12),
         graph: (GraphCompletion::SourceRejected, (191919, 4600, 6)),
         // The caps before ri-2s0.6 (metering rule 11, third case): the family
         // call now reaches its contract, so they give `ResourceLimit`.
@@ -1361,7 +1361,7 @@ function count(input: List<i32>): i32 {
 }
 "#,
         outcome: Outcome::Receipt {
-            typed_stats: (325530, 48594, 12),
+            typed_stats: (325726, 48594, 12),
             graph: (GraphCompletion::Incomplete, (187838, 4148, 5)),
             pre_equality_graph: Some((187486, 4014, 4)),
             roots: &[Root {
@@ -1385,7 +1385,7 @@ function shared(input: List<i32>): i32 {
 }
 "#,
         outcome: Outcome::Receipt {
-            typed_stats: (325696, 48642, 12),
+            typed_stats: (325892, 48642, 12),
             graph: (GraphCompletion::Incomplete, (188024, 4151, 5)),
             pre_equality_graph: Some((187672, 4017, 4)),
             roots: &[Root {
@@ -1409,7 +1409,7 @@ function grouped(input: List<i32>): i32 {
 }
 "#,
         outcome: Outcome::Receipt {
-            typed_stats: (326228, 48714, 12),
+            typed_stats: (326424, 48714, 12),
             graph: (GraphCompletion::Incomplete, (188087, 4152, 5)),
             pre_equality_graph: Some((187735, 4018, 4)),
             roots: &[Root {
@@ -1436,7 +1436,7 @@ function looped(input: List<i32>): i32 {
 }
 "#,
         outcome: Outcome::Receipt {
-            typed_stats: (325783, 48683, 12),
+            typed_stats: (325979, 48683, 12),
             graph: (GraphCompletion::Incomplete, (188348, 4167, 5)),
             pre_equality_graph: Some((187996, 4033, 4)),
             roots: &[Root {
@@ -1487,7 +1487,7 @@ function escaped(input: List<i32>): &i32 {
 }
 "#,
     outcome: Outcome::Receipt {
-        typed_stats: (338144, 50421, 12),
+        typed_stats: (338341, 50421, 12),
         graph: (GraphCompletion::SourceRejected, (198354, 5020, 6)),
         pre_equality_graph: None,
         roots: &[
@@ -1557,7 +1557,7 @@ function stored(): void {
 function literal(): &string { return &"static"; }
 "#,
     outcome: Outcome::Receipt {
-        typed_stats: (327954, 48743, 12),
+        typed_stats: (328150, 48743, 12),
         graph: (GraphCompletion::SourceRejected, (191218, 5092, 9)),
         pre_equality_graph: Some((188491, 4251, 4)),
         roots: &[
@@ -1610,7 +1610,7 @@ function loops(flag: bool, left: string, seed: &string): void {
 }
 "#,
         outcome: Outcome::Receipt {
-            typed_stats: (326772, 48819, 12),
+            typed_stats: (326970, 48819, 12),
             graph: (GraphCompletion::SourceRejected, (190137, 5031, 6)),
             pre_equality_graph: Some((189777, 4897, 6)),
             roots: &[
@@ -1651,7 +1651,7 @@ function joined(flag: bool, left: string, right: string, seed: &string): void {
 }
 "#,
         outcome: Outcome::Receipt {
-            typed_stats: (331969, 49632, 12),
+            typed_stats: (332166, 49632, 12),
             graph: (GraphCompletion::SourceRejected, (193235, 5097, 8)),
             pre_equality_graph: Some((189687, 4102, 3)),
             roots: &[
@@ -1707,7 +1707,7 @@ function released(flag: bool, left: string, right: string, seed: &string): void 
 }
 "#,
     outcome: Outcome::Receipt {
-        typed_stats: (336837, 49967, 12),
+        typed_stats: (337037, 49967, 12),
         graph: (GraphCompletion::SourceRejected, (203602, 7569, 8)),
         pre_equality_graph: None,
         roots: &[
@@ -1777,7 +1777,7 @@ function released(flag: bool, left: string, right: string, seed: &string): void 
 }
 "#,
     outcome: Outcome::Receipt {
-        typed_stats: (337589, 50492, 12),
+        typed_stats: (337788, 50492, 12),
         graph: (GraphCompletion::SourceRejected, (202624, 6570, 8)),
         pre_equality_graph: None,
         roots: &[
@@ -1819,7 +1819,7 @@ function gated(flag: bool, left: string, seed: &string): void {
 }
 "#,
         outcome: Outcome::Receipt {
-            typed_stats: (328343, 49155, 12),
+            typed_stats: (328540, 49155, 12),
             graph: (GraphCompletion::Incomplete, (188710, 4174, 5)),
             pre_equality_graph: Some((188671, 4174, 5)),
             roots: &[Root {
@@ -1844,7 +1844,7 @@ function triple(left: string, middle: string, right: string, seed: &string): voi
 }
 "#,
         outcome: Outcome::Receipt {
-            typed_stats: (331109, 49869, 12),
+            typed_stats: (331306, 49869, 12),
             graph: (GraphCompletion::Incomplete, (189218, 4186, 5)),
             pre_equality_graph: Some((189178, 4186, 5)),
             roots: &[Root {
@@ -1869,7 +1869,7 @@ function grouped(left: string, seed: &string): void {
 }
 "#,
         outcome: Outcome::Receipt {
-            typed_stats: (328150, 49081, 12),
+            typed_stats: (328347, 49081, 12),
             graph: (GraphCompletion::Incomplete, (188513, 4167, 5)),
             pre_equality_graph: Some((188475, 4167, 5)),
             roots: &[Root {
@@ -1902,7 +1902,7 @@ function stale(old: Owner, next: string): void {
 }
 "#,
     outcome: Outcome::Receipt {
-        typed_stats: (328196, 48784, 12),
+        typed_stats: (328394, 48784, 12),
         graph: (GraphCompletion::SourceRejected, (193474, 5361, 5)),
         pre_equality_graph: Some((192262, 5227, 4)),
         roots: &[
@@ -1941,7 +1941,7 @@ function counter(): i32 {
 expect counter() == 12i32;
 "#,
     outcome: Outcome::Receipt {
-        typed_stats: (323509, 48580, 12),
+        typed_stats: (323705, 48580, 12),
         graph: (GraphCompletion::Incomplete, (188022, 4496, 6)),
         pre_equality_graph: Some((187543, 4297, 6)),
         roots: &[
@@ -1978,7 +1978,7 @@ function joinedOrder(): bool {
 expect joinedOrder();
 "#,
     outcome: Outcome::Receipt {
-        typed_stats: (434074, 50764, 12),
+        typed_stats: (434272, 50764, 12),
         graph: (GraphCompletion::Incomplete, (226906, 25858, 10)),
         pre_equality_graph: Some((225238, 25046, 10)),
         roots: &[
@@ -2020,7 +2020,7 @@ function exclusiveCopy(seed: bool): once () => &mut bool {
                 r####"pending TypedInput @ copy(&job)"####,
                 r####"pending TypedInput @ return copy(&job);"####,
             ],
-            stats: (324140, 48535, 12),
+            stats: (324337, 48535, 12),
         },
     },
     Source {
@@ -2032,7 +2032,7 @@ function repeated(left: string, right: string): [string, string] {
 }
 "#,
         outcome: Outcome::Receipt {
-            typed_stats: (323526, 48423, 12),
+            typed_stats: (323722, 48423, 12),
             graph: (GraphCompletion::SourceRejected, (187751, 4500, 5)),
             pre_equality_graph: Some((187399, 4366, 5)),
             roots: &[Root {
@@ -2059,7 +2059,7 @@ function plain(value: Plain): string { return value.keep; }
 function custom(value: Custom): string { return value.keep; }
 "#,
     outcome: Outcome::Receipt {
-        typed_stats: (329004, 48596, 12),
+        typed_stats: (329201, 48596, 12),
         graph: (GraphCompletion::SourceRejected, (187961, 4372, 5)),
         pre_equality_graph: Some((187610, 4238, 3)),
         roots: &[
@@ -2095,7 +2095,7 @@ function ordered(seed: &string): void {
 }
 "#,
     outcome: Outcome::Receipt {
-        typed_stats: (326274, 48579, 12),
+        typed_stats: (326471, 48579, 12),
         graph: (GraphCompletion::Incomplete, (189358, 4794, 5)),
         pre_equality_graph: Some((186874, 4059, 3)),
         roots: &[Root {
@@ -2113,7 +2113,7 @@ type Outer = { lock: LockGuard<i32>; value: i32; }
 function render(outer: Outer): string { return `${outer.value}-${outer.value}`; }
 "#,
     outcome: Outcome::Receipt {
-        typed_stats: (325153, 48668, 12),
+        typed_stats: (325353, 48668, 12),
         graph: (GraphCompletion::Incomplete, (186766, 4311, 5)),
         pre_equality_graph: Some((186048, 4042, 3)),
         roots: &[Root {
@@ -2138,7 +2138,7 @@ implement release(value: LockGuard<Payload>): void { }
             signals: &[
                 r####"overlap R0500 @ implement release(value: LockGuard<Payload>): void { } (related: mutex.rill implement<T> dispose(value: LockGuard<T>): void { releaseGuard(value); })"####,
             ],
-            stats: (324130, 48311, 12),
+            stats: (324327, 48311, 12),
         },
     },
     // Siblings with a second obligation: since ri-2s0.9 both are `SourceRejected`
@@ -2157,7 +2157,7 @@ implement release(value: LockGuard<Payload>): void { let text = "a"; let view = 
             signals: &[
                 r####"overlap R0500 @ implement release(value: LockGuard<Payload>): void { let text = \"a\"; let view = &text; release(view); } (related: mutex.rill implement<T> dispose(value: LockGuard<T>): void { releaseGuard(value); })"####,
             ],
-            stats: (324617, 48434, 12),
+            stats: (324814, 48434, 12),
         },
     },
     Source {
@@ -2176,7 +2176,7 @@ function ended(owner: string): void {
             signals: &[
                 r####"overlap R0500 @ implement release(value: LockGuard<Payload>): void { } (related: mutex.rill implement<T> dispose(value: LockGuard<T>): void { releaseGuard(value); })"####,
             ],
-            stats: (325890, 48459, 12),
+            stats: (326087, 48459, 12),
         },
     },
     // Witness that a second obligation still keeps the module `Incomplete` after
@@ -2196,7 +2196,7 @@ implement release(value: LockGuard<Payload>): void { let mut text = "a"; let vie
                 r####"pending TypedInput @ release(view)"####,
                 r####"overlap R0500 @ implement release(value: LockGuard<Payload>): void { let mut text = \"a\"; let view = &mut text; release(view); } (related: mutex.rill implement<T> dispose(value: LockGuard<T>): void { releaseGuard(value); })"####,
             ],
-            stats: (324487, 48338, 12),
+            stats: (324689, 48338, 12),
         },
     },
 ];
@@ -2237,7 +2237,7 @@ function ended(owner: string): void {
 }
 "#,
         outcome: Outcome::Receipt {
-            typed_stats: (325268, 48571, 12),
+            typed_stats: (325465, 48571, 12),
             graph: (GraphCompletion::SourceRejected, (188326, 4569, 5)),
             pre_equality_graph: Some((187969, 4435, 5)),
             roots: &[
@@ -2270,7 +2270,7 @@ function aliased(owner: string): void {
 }
 "#,
         outcome: Outcome::Receipt {
-            typed_stats: (322737, 48306, 12),
+            typed_stats: (322934, 48306, 12),
             graph: (GraphCompletion::SourceRejected, (186396, 4240, 5)),
             pre_equality_graph: Some((186043, 4106, 4)),
             roots: &[Root {
@@ -2299,7 +2299,7 @@ function released(owner: string): void {
 }
 "#,
         outcome: Outcome::Receipt {
-            typed_stats: (324973, 48470, 12),
+            typed_stats: (325170, 48470, 12),
             graph: (GraphCompletion::SourceRejected, (188494, 4447, 5)),
             pre_equality_graph: Some((188140, 4313, 5)),
             roots: &[
@@ -2337,7 +2337,7 @@ function concrete(): i32 { return onlyOwned(1i32); }
             r####"pending TypedInput @ onlyOwned(value)"####,
             r####"pending TypedInput @ return onlyOwned(value);"####,
         ],
-        stats: (325048, 48396, 12),
+        stats: (325244, 48396, 12),
     },
 }];
 
@@ -2363,7 +2363,7 @@ function childLocal(input: &i32): [&i32, &i32] {
 }
 "#,
     outcome: Outcome::Receipt {
-        typed_stats: (441761, 51602, 12),
+        typed_stats: (441960, 51602, 12),
         graph: (GraphCompletion::SourceRejected, (224551, 21166, 10)),
         pre_equality_graph: Some((224187, 21032, 10)),
         roots: &[
@@ -2414,7 +2414,7 @@ function bump(value: &mut i64): void { *value += 1i64; }
         outcome: Outcome::Typed {
             completion: TypedCompletion::Incomplete,
             signals: &[r####"pending Storage @ *value += 1i64;"####],
-            stats: (321265, 48030, 12),
+            stats: (321461, 48030, 12),
         },
     },
     Source {
@@ -2427,7 +2427,7 @@ function bump(value: &i32): void { *value += 1i32; }
                 r####"finding ReadOnly @ *value += 1i32;"####,
                 r####"pending Storage @ *value += 1i32;"####,
             ],
-            stats: (321653, 48025, 12),
+            stats: (321849, 48025, 12),
         },
     },
     Source {
@@ -2437,7 +2437,7 @@ function bump(value: &mut i32): void { *value = 1i32; }
         outcome: Outcome::Typed {
             completion: TypedCompletion::Incomplete,
             signals: &[r####"pending Storage @ *value = 1i32;"####],
-            stats: (321264, 48030, 12),
+            stats: (321460, 48030, 12),
         },
     },
     Source {
@@ -2447,7 +2447,7 @@ function bump(value: &mut i32): void { *value -= 1i32; }
         outcome: Outcome::Typed {
             completion: TypedCompletion::Incomplete,
             signals: &[r####"pending Storage @ *value -= 1i32;"####],
-            stats: (321263, 48030, 12),
+            stats: (321459, 48030, 12),
         },
     },
     Source {
@@ -2457,7 +2457,7 @@ function bump(value: &mut i32): void { *value *= 2i32; }
         outcome: Outcome::Typed {
             completion: TypedCompletion::Incomplete,
             signals: &[r####"pending Storage @ *value *= 2i32;"####],
-            stats: (321263, 48030, 12),
+            stats: (321459, 48030, 12),
         },
     },
     Source {
@@ -2468,7 +2468,7 @@ function bump(value: &mut Pair): void { value.x += 1i32; }
         outcome: Outcome::Typed {
             completion: TypedCompletion::Incomplete,
             signals: &[r####"pending Storage @ value.x += 1i32;"####],
-            stats: (322687, 48103, 12),
+            stats: (322883, 48103, 12),
         },
     },
 ];
@@ -2494,7 +2494,7 @@ function computed(value: &mut i32, step: i32): void { *value += step; }
 function viaLocal(value: &mut i32): void { let view = value; *view += 1i32; }
 "#,
     outcome: Outcome::Receipt {
-        typed_stats: (335114, 49231, 12),
+        typed_stats: (335310, 49231, 12),
         graph: (GraphCompletion::Incomplete, (192871, 4858, 5)),
         pre_equality_graph: Some((190538, 4622, 5)),
         roots: &[
@@ -2587,7 +2587,7 @@ function dead(): bool { return false; return mk().x == 2i32; }
 function looped(flag: bool): bool { while (flag) { return mk().x == 2i32; } return false; }
 "#,
     outcome: Outcome::Receipt {
-        typed_stats: (339875, 49665, 12),
+        typed_stats: (340071, 49665, 12),
         graph: (GraphCompletion::Incomplete, (197959, 5956, 6)),
         pre_equality_graph: Some((193367, 4510, 5)),
         roots: &[
@@ -2918,7 +2918,7 @@ fn o10_pre_extraction_typed_cap_now_gives_resource_limit() {
                     ..request.clone()
                 };
                 let graph = loader::load_installed(request).unwrap();
-                let (old, _) = limits(statistics((323145, 48331, 12)));
+                let (old, _) = limits(statistics((323345, 48331, 12)));
                 let typed = analyze_typed(&graph, old);
                 crate::limit::assert_typed_limit(&typed);
             }
@@ -2957,7 +2957,7 @@ fn o10_pre_slot_get_typed_cap_now_gives_resource_limit() {
                     ..request.clone()
                 };
                 let graph = loader::load_installed(request).unwrap();
-                let (old, _) = limits(statistics((325172, 48528, 12)));
+                let (old, _) = limits(statistics((325390, 48528, 12)));
                 let typed = analyze_typed(&graph, old);
                 crate::limit::assert_typed_limit(&typed);
             }
@@ -3095,7 +3095,7 @@ function nonList(input: Box): i32 {
   return *view;
 }
 "####,
-                        typed_stats: (326272, 48621, 12),
+                        typed_stats: (326468, 48621, 12),
                         graph: (GraphCompletion::Incomplete, (188640, 4266, 5)),
                         roots: &[Root {
                             name: "nonList",
@@ -3116,7 +3116,7 @@ function scalar(input: i32): i32 {
   return *view;
 }
 "####,
-                        typed_stats: (325434, 48570, 12),
+                        typed_stats: (325630, 48570, 12),
                         graph: (GraphCompletion::Incomplete, (187862, 4149, 5)),
                         roots: &[Root {
                             name: "scalar",
@@ -3152,7 +3152,7 @@ function stop(): never { while (true) {} }
 function id(x: i32): i32 { return x; }
 function decidedLeft(a: i32, b: i32): bool { return id(if (true) stop() else 1i32) == b && a == b; }
 "####,
-                    typed_stats: (326574, 48538, 12),
+                    typed_stats: (326770, 48538, 12),
                     graph: (GraphCompletion::Incomplete, (187502, 4246, 5)),
                     roots: &[Root {
                         name: "decidedLeft",
@@ -3181,7 +3181,7 @@ function stop(): never { while (true) {} }
 function id(x: i32): i32 { return x; }
 function decidedRight(a: i32, b: i32): bool { return a == b && id(if (true) stop() else 1i32) == b; }
 "####,
-                    typed_stats: (326581, 48544, 12),
+                    typed_stats: (326777, 48544, 12),
                     graph: (GraphCompletion::Incomplete, (187502, 4246, 5)),
                     roots: &[Root {
                         name: "decidedRight",
@@ -3928,7 +3928,7 @@ fn field_through_reference_charges_its_local_probe() {
                 &[const {
                     o12::Case {
                         text: FIELD_THROUGH_REFERENCE,
-                        typed_stats: (325240, 48451, 12),
+                        typed_stats: (325436, 48451, 12),
                         graph: (GraphCompletion::Incomplete, (187332, 4397, 5)),
                         roots: &[
                             record_contents::checked("viaParam", (1996, 88, 3)),
@@ -3970,7 +3970,7 @@ fn call_field_equality_reserves_its_scratch() {
                 &[const {
                     o12::Case {
                         text: CALL_FIELD_SCRATCH,
-                        typed_stats: (329581, 48820, 12),
+                        typed_stats: (329777, 48820, 12),
                         graph: (GraphCompletion::Incomplete, (191514, 5128, 5)),
                         roots: &[
                             record_contents::checked("a", (2407, 176, 4)),

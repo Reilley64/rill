@@ -33,7 +33,7 @@ function writeWhileMemberLive(): i32 {
   let e = 5i32; let mut h = Own2 { v: 1i32, r: &e }; h.r = &h.v; h.v = 2i32; let n = *h.r; return n;
 }
 "#,
-    typed_stats: (340041, 50960, 12),
+    typed_stats: (340237, 50960, 12),
     graph: (GraphCompletion::SourceRejected, (205221, 7678, 6)),
     roots: &[
         Root {
@@ -117,7 +117,7 @@ function returnTheRecord(): Own2 {
   let e = 5i32; let mut h = Own2 { v: 1i32, r: &e }; h.r = &h.v; return h;
 }
 "#,
-    typed_stats: (330569, 49327, 12),
+    typed_stats: (330765, 49327, 12),
     graph: (GraphCompletion::SourceRejected, (195400, 5863, 5)),
     roots: &[
         Root {
@@ -179,7 +179,7 @@ function p13MoveWhileBorrowed(): i32 {
   let e = 5i32; let mut h = OwnS { v: 1i32, s: "a", r: &e }; let k = &h.v; let g = h; return *k;
 }
 "#,
-    typed_stats: (331331, 49449, 12),
+    typed_stats: (331527, 49449, 12),
     graph: (GraphCompletion::SourceRejected, (194713, 5698, 5)),
     roots: &[
         Root {
@@ -252,7 +252,7 @@ function deadLoanBeforeCopy(): i32 {
   let e = 5i32; let mut h = Own2 { v: 1i32, r: &e }; let k = &h.v; return take2(h);
 }
 "#,
-    typed_stats: (340647, 50673, 12),
+    typed_stats: (340843, 50673, 12),
     graph: (GraphCompletion::Incomplete, (205615, 7723, 5)),
     roots: &[
         Root {
@@ -411,7 +411,7 @@ function p14MoveAfterLoanDied(): i32 {
   let e = 5i32; let mut h = OwnS { v: 1i32, s: "a", r: &e }; let k = &h.v; return takeS(h);
 }
 "#,
-    typed_stats: (325888, 48611, 12),
+    typed_stats: (326084, 48611, 12),
     graph: (GraphCompletion::Incomplete, (189196, 4795, 5)),
     roots: &[Root {
         name: "p14MoveAfterLoanDied",
@@ -462,7 +462,7 @@ function p16StoreIntoBox(): Box1 {
   let e = 5i32; let mut h = Own2 { v: 1i32, r: &e }; h.r = &h.v; return store(h);
 }
 "#,
-    typed_stats: (333802, 49641, 12),
+    typed_stats: (333998, 49641, 12),
     graph: (GraphCompletion::Incomplete, (195048, 5054, 5)),
     roots: &[
         Root {
@@ -552,7 +552,7 @@ function ownMutMember(): i32 {
   h.m = &mut h.v; return takeOwn(h);
 }
 "#,
-    typed_stats: (353543, 52319, 12),
+    typed_stats: (353739, 52319, 12),
     graph: (GraphCompletion::SourceRejected, (213675, 8865, 5)),
     roots: &[
         Root {
@@ -753,7 +753,7 @@ function moveMatchWrapper(): i32 {
   let n = match (Option.Some(h)) { Option.Some(x) => 0i32, Option.None => 1i32 }; return n;
 }
 "#,
-    typed_stats: (365380, 54877, 12),
+    typed_stats: (365576, 54877, 12),
     graph: (GraphCompletion::Incomplete, (216784, 6116, 5)),
     roots: &[
         Root {
@@ -942,7 +942,7 @@ function q1StoreIntoCallerBox(): i32 {
         "pending Storage @ slot.r = o.r;",
         "pending Storage @ &mut b",
     ],
-    stats: (327859, 48816, 12),
+    stats: (328055, 48816, 12),
 };
 
 const STORE_INTO_CALLER_REFERENCE: TypedForm = TypedForm {
@@ -954,7 +954,7 @@ function q2StoreIntoCallerReference(): i32 {
 }
 "#,
     signals: &["pending Storage @ *slot = o.r;", "pending Storage @ &mut b"],
-    stats: (326274, 48681, 12),
+    stats: (326470, 48681, 12),
 };
 
 /// Ruling 25 condition 3, the probe ci-0xlg lacks: the copy `g` outliving `h`
@@ -985,7 +985,7 @@ function p19DisposeTheOriginal(): i32 {
         "obligation FamilySelection @ dispose(h)",
         "pending TypedInput @ dispose(h)",
     ],
-    stats: (325318, 48550, 12),
+    stats: (325517, 48550, 12),
 };
 
 const DISPOSE_PLAIN: TypedForm = TypedForm {
@@ -999,7 +999,7 @@ function disposePlain(): i32 {
         "obligation FamilySelection @ dispose(h)",
         "pending TypedInput @ dispose(h)",
     ],
-    stats: (323749, 48257, 12),
+    stats: (323948, 48257, 12),
 };
 
 /// Probe ci-0xlg P19. `dispose(h)` of any record, with or without a self-borrow
@@ -1027,7 +1027,7 @@ function captured(): i32 {
 }
 "#,
     signals: &["pending Containment @ () => h"],
-    stats: (324082, 48462, 12),
+    stats: (324278, 48462, 12),
 };
 
 /// An arrow that captures the record stops in the typed analysis, before any

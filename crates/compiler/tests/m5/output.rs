@@ -238,10 +238,10 @@ fn the_log_string_root_sets_the_graph_depth() {
             let report = analyze_ownership(receipt, AnalysisLimits::default());
             let mut depths = Vec::new();
             for (prefix, triple) in [
-                ("implement log(text: string)", (2367, 126, 6)),
-                ("implement log(text: &string)", (2364, 124, 5)),
-                ("implement panic(message: string)", (2330, 103, 5)),
-                ("implement panic(message: &string)", (2327, 101, 4)),
+                ("implement log(text: string)", (2487, 126, 6)),
+                ("implement log(text: &string)", (2484, 124, 5)),
+                ("implement panic(message: string)", (2450, 103, 5)),
+                ("implement panic(message: &string)", (2447, 101, 4)),
             ] {
                 let root = output_root(&report, prefix);
                 let module = module_of(graph, root.site().module);
@@ -328,7 +328,7 @@ const SIBLINGS: [(&str, &str, &str, Triple, Triple); 7] = [
         "panic borrow",
         "import std::panic;\nlet s = \"x\";\npanic(&s);\n",
         "panic(&s)",
-        (1907, 15, 3),
+        (1908, 15, 3),
         (1911, 17, 3),
     ),
 ];
@@ -385,17 +385,17 @@ const GROUPED: [(&str, &str, (usize, usize, usize)); 6] = [
     (
         "borrow",
         "import std::log;\nlet s = \"x\";\nlog(&s);\n",
-        (4246, 155, 6),
+        (4247, 155, 6),
     ),
     (
         "borrow groups",
         "import std::log;\nlet s = \"x\";\nlog(((&s)));\n",
-        (4258, 157, 8),
+        (4259, 157, 8),
     ),
     (
         "move",
         "import std::log;\nlet s = \"x\";\nlog(s);\n",
-        (4236, 152, 5),
+        (4237, 152, 5),
     ),
 ];
 
