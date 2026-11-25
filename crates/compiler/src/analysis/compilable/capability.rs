@@ -54,8 +54,6 @@ pub enum Shape {
     Call,
     /// Write one string and a newline to standard output.
     WriteLine,
-    /// Report a string and end the program.
-    Panic,
     /// A block of cleanup actions.
     Cleanup,
     /// A cleanup action that ends storage and does nothing else.
@@ -68,8 +66,6 @@ pub enum Shape {
     TextViewParameter,
     /// A result of type `void`.
     VoidResult,
-    /// A result of type `never`.
-    NeverResult,
 }
 
 impl Shape {
@@ -87,14 +83,12 @@ impl Shape {
         Shape::MoveInto,
         Shape::Call,
         Shape::WriteLine,
-        Shape::Panic,
         Shape::Cleanup,
         Shape::EndStorage,
         Shape::DropText,
         Shape::TextParameter,
         Shape::TextViewParameter,
         Shape::VoidResult,
-        Shape::NeverResult,
     ];
 }
 
@@ -259,7 +253,6 @@ impl<'a, 'g> Facts<'a, 'g> {
         budget.step(1)?;
         let shape = match result.as_ref() {
             TypeTerm::Primitive(ty) if ty.name() == "void" => Shape::VoidResult,
-            TypeTerm::Primitive(ty) if ty.name() == "never" => Shape::NeverResult,
             _ => return Ok(false),
         };
         shapes.note(shape, budget)?;
@@ -304,7 +297,6 @@ pub(super) fn first_unadmitted<'g>(
     budget.reserve(mir.blocks.len())?;
     let mut seen = vec![false; mir.blocks.len()];
     let mut at = mir.entry;
-    let mut diverged = false;
     loop {
         budget.step(1)?;
         let Some(block) = mir.blocks.get(at) else {
@@ -313,11 +305,8 @@ pub(super) fn first_unadmitted<'g>(
         if std::mem::replace(&mut seen[at], true) {
             return Ok(Some(block.site));
         }
-        if !diverged {
-            if !operation(block, facts, shapes, budget)? {
-                return Ok(Some(block.site));
-            }
-            diverged = matches!(block.operation, Operation::Panic { .. });
+        if !operation(block, facts, shapes, budget)? {
+            return Ok(Some(block.site));
         }
         let (next, shape) = match block.terminator {
             Terminator::Goto(next) => (Some(next), Shape::Goto),
@@ -367,7 +356,6 @@ fn operation<'g>(
         } => (plain(from) && plain(into)).then_some(Shape::MoveInto),
         Operation::Call(_) => facts.plain_call(site, budget)?.then_some(Shape::Call),
         Operation::WriteLine { text } => plain(text).then_some(Shape::WriteLine),
-        Operation::Panic { message } => plain(message).then_some(Shape::Panic),
         Operation::Cleanup(actions) => {
             for action in actions {
                 budget.step(1)?;
@@ -445,6 +433,7 @@ fn operation<'g>(
         | Operation::InstallThroughTwoHop { .. }
         | Operation::Export(_)
         | Operation::Drop(_)
+        | Operation::Panic { .. }
         | Operation::DropCapture { .. } => None,
     };
     match shape {
