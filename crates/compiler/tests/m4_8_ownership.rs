@@ -1913,7 +1913,7 @@ fn installed_pair_invocation(request: &InstalledRequest) {
                 // The mixed output remains unsupported at the old pending cap.
                 (
                     AnalysisLimits {
-                        max_work: 2462,
+                        max_work: 2472,
                         max_entries: 300,
                         max_depth: 0,
                     },

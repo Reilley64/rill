@@ -58,7 +58,7 @@ impl<'a, 'g> Build<'a, 'g, '_> {
             return Err(pending);
         }
         let headers = &self.typed.inventory().type_facts().declarations;
-        graph::charge_key(&call.callee.module, headers.len(), self.budget)?;
+        keyed::charge(&call.callee.module, headers.len(), self.budget)?;
         let header = headers
             .get(call.callee)
             .filter(|header| std::ptr::eq(call.callee, &header.declaration.id))

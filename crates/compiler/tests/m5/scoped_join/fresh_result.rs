@@ -358,7 +358,7 @@ fn fresh_join_checks_capture_conflicts_and_parent_cleanup() {
         |_, module, receipt, typed| {
             assert_pre_equality_graph_cap(receipt, (228_462, 18_860, 8));
             let graph_cost = Statistics {
-                work: 228_743,
+                work: 232_187,
                 entries: 18_994,
                 max_depth: 8,
             };
@@ -378,13 +378,13 @@ fn fresh_join_checks_capture_conflicts_and_parent_cleanup() {
             }
 
             for (name, expected, (work, entries, max_depth)) in [
-                ("unproved", Completion::Incomplete, (4_247, 561, 7)),
-                ("conflict", Completion::SourceRejected, (4_467, 693, 7)),
-                ("liveParentError", Completion::Incomplete, (4_165, 638, 7)),
+                ("unproved", Completion::Incomplete, (4_593, 561, 7)),
+                ("conflict", Completion::SourceRejected, (4_813, 693, 7)),
+                ("liveParentError", Completion::Incomplete, (4_175, 638, 7)),
                 (
                     "retiredParentError",
                     Completion::Checked,
-                    (25_939, 13_247, 8),
+                    (25_949, 13_247, 8),
                 ),
             ] {
                 let d = &module.declarations[named(module, name)];
@@ -515,7 +515,7 @@ fn plain_conflict_reports_r0201_at_the_second_capture() {
         "#,
         |_, module, receipt, _| {
             let graph_cost = Statistics {
-                work: 194_563,
+                work: 197_055,
                 entries: 4_692,
                 max_depth: 7,
             };
@@ -536,7 +536,7 @@ fn plain_conflict_reports_r0201_at_the_second_capture() {
 
             let d = &module.declarations[named(module, "conflictPlain")];
             let stats = Statistics {
-                work: 3_872,
+                work: 3_882,
                 entries: 530,
                 max_depth: 7,
             };
@@ -593,7 +593,7 @@ fn live_parent_error_reaches_the_join_at_its_repinned_cap() {
 
                 assert_pre_equality_graph_cap(&receipt, (219_596, 17_727, 8));
                 let graph_cost = Statistics {
-                    work: 219_929,
+                    work: 222_421,
                     entries: 17_861,
                     max_depth: 8,
                 };
@@ -608,11 +608,11 @@ fn live_parent_error_reaches_the_join_at_its_repinned_cap() {
                 }
 
                 for (name, expected, (work, entries, max_depth)) in [
-                    ("liveParentError", Completion::Incomplete, (4_007, 571, 7)),
+                    ("liveParentError", Completion::Incomplete, (4_017, 571, 7)),
                     (
                         "retiredParentError",
                         Completion::Checked,
-                        (25_741, 13_172, 8),
+                        (25_751, 13_172, 8),
                     ),
                 ] {
                     let d = &module.declarations[named(module, name)];
@@ -709,7 +709,7 @@ fn shared_join_rejects_a_live_fresh_error_without_wrapper_selection() {
                 // lookup removed; the pre-preflight route paid 6,299/1,398/10
                 // targeted and 217,320/6,276/10 for the graph.
                 let target_cost = Statistics {
-                    work: 5_830,
+                    work: 5_840,
                     entries: 1_301,
                     max_depth: 10,
                 };
@@ -733,7 +733,7 @@ fn shared_join_rejects_a_live_fresh_error_without_wrapper_selection() {
                 };
                 crate::limit::assert_graph_limit(&analyze_ownership(&receipt, before_o16));
                 let graph_cost = Statistics {
-                    work: 218_527,
+                    work: 221_299,
                     entries: 6_991,
                     max_depth: 10,
                 };

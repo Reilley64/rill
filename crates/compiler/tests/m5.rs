@@ -351,7 +351,7 @@ fn ownership_from_installed_source() {
             for (name, caps, cleanup) in [
                 (
                     "ordered",
-                    (3_014, 590, 4),
+                    (3_024, 590, 4),
                     &[
                         ("end", &b"dependent"[..]),
                         ("drop", b"source"),
@@ -360,7 +360,7 @@ fn ownership_from_installed_source() {
                 ),
                 (
                     "reinitialized",
-                    (3_109, 648, 4),
+                    (3_119, 648, 4),
                     &[
                         ("drop", &b"owner"[..]),
                         ("drop", b"owner"),
@@ -634,7 +634,7 @@ fn replacement_keeps_the_declaration_rank() {
                 receipt,
                 module,
                 "rank",
-                (2_075, 131, 3),
+                (2_085, 131, 3),
                 &[("drop", b"a"), ("drop", b"b"), ("drop", b"a")],
             );
         },

@@ -199,20 +199,17 @@ impl<'g> DisposerLookup<'_, 'g> {
                     .iter()
                     .find(|choice| &choice.body.source.declaration == winner && choice.covers)
                     .ok_or(Stop::Pending(node))?;
-                budget.step(2)?;
-                if selected.body.header.binders.is_empty()
-                    && selected.substitution.is_empty()
-                    && [dispose, winner].into_iter().all(|id| {
-                        inventory
-                            .headers()
-                            .get(id)
-                            .is_some_and(|h| h.requirements.is_empty())
-                    })
-                {
-                    Ok(Some(winner))
-                } else {
-                    Err(Stop::Pending(node))
+                if !selected.body.header.binders.is_empty() || !selected.substitution.is_empty() {
+                    return Err(Stop::Pending(node));
                 }
+                let headers = inventory.headers();
+                for id in [dispose, winner] {
+                    keyed::charge(&id.module, headers.len(), budget)?;
+                    if !headers.get(id).is_some_and(|h| h.requirements.is_empty()) {
+                        return Err(Stop::Pending(node));
+                    }
+                }
+                Ok(Some(winner))
             }
             _ => Err(Stop::Pending(node)),
         }
@@ -723,7 +720,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             return Err(pending());
         }
         let headers = &self.typed.inventory().type_facts().declarations;
-        graph::charge_key(&parent_id.module, headers.len(), self.budget)?;
+        keyed::charge(&parent_id.module, headers.len(), self.budget)?;
         let facts = headers.get(parent_id).ok_or_else(pending)?;
         let DeclarationShape::Enum { variants } = &facts.shape else {
             return Err(pending());
@@ -1209,14 +1206,9 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         if !(matches!(result.as_ref(), TypeTerm::Primitive(_)) || primitive_reference(result)) {
             return Ok(false);
         }
-        self.budget.step(2)?;
-        let Some(function) = self
-            .typed
-            .inventory()
-            .type_facts()
-            .declarations
-            .get(call.callee)
-        else {
+        let declarations = &self.typed.inventory().type_facts().declarations;
+        keyed::charge(&call.callee.module, declarations.len(), self.budget)?;
+        let Some(function) = declarations.get(call.callee) else {
             return Ok(false);
         };
         let DeclarationShape::Function {
@@ -1276,14 +1268,9 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         if !Self::direct_application_call(call) {
             return Err(Stop::Pending(node));
         }
-        self.budget.step(1)?;
-        let signature = self
-            .typed
-            .inventory()
-            .type_facts()
-            .declarations
-            .get(call.callee)
-            .ok_or(Stop::Pending(node))?;
+        let declarations = &self.typed.inventory().type_facts().declarations;
+        keyed::charge(&call.callee.module, declarations.len(), self.budget)?;
+        let signature = declarations.get(call.callee).ok_or(Stop::Pending(node))?;
         let DeclarationShape::Function { parameters, result } = &signature.shape else {
             return Err(Stop::Pending(node));
         };
@@ -1622,9 +1609,10 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         if declaration.module.origin != Origin::Application || !arguments.is_empty() {
             return Ok(None);
         }
-        self.budget.step(1)?;
         let inventory = self.typed.inventory();
-        let Some(facts) = inventory.type_facts().declarations.get(declaration) else {
+        let declarations = &inventory.type_facts().declarations;
+        keyed::charge(&declaration.module, declarations.len(), self.budget)?;
+        let Some(facts) = declarations.get(declaration) else {
             return Ok(None);
         };
         let DeclarationShape::Record { fields } = &facts.shape else {
@@ -6817,14 +6805,9 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         {
             return Err(Stop::Pending(node));
         }
-        self.budget.step(1)?;
-        let header = self
-            .typed
-            .inventory()
-            .type_facts()
-            .declarations
-            .get(call.callee)
-            .ok_or(Stop::Pending(node))?;
+        let declarations = &self.typed.inventory().type_facts().declarations;
+        keyed::charge(&call.callee.module, declarations.len(), self.budget)?;
+        let header = declarations.get(call.callee).ok_or(Stop::Pending(node))?;
         let (formal, contents) =
             retained_two_hop_bool_contract(header).ok_or(Stop::Pending(node))?;
         if self.normal_value(*input)?.ty != *contents {
@@ -7584,9 +7567,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             return Err(pending());
         }
         let headers = &self.typed.inventory().type_facts().declarations;
-        // A comparison may read the whole path. Bound every candidate
-        // comparison without depending on the ordered map's fanout.
-        graph::charge_key(&call.callee.module, headers.len(), self.budget)?;
+        keyed::charge(&call.callee.module, headers.len(), self.budget)?;
         let header = headers
             .get(call.callee)
             .filter(|header| std::ptr::eq(call.callee, &header.declaration.id))
@@ -7745,7 +7726,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             return Err(pending());
         }
         let headers = &self.typed.inventory().type_facts().declarations;
-        graph::charge_key(&call.callee.module, headers.len(), self.budget)?;
+        keyed::charge(&call.callee.module, headers.len(), self.budget)?;
         let header = headers
             .get(call.callee)
             .filter(|header| std::ptr::eq(call.callee, &header.declaration.id))
@@ -7865,7 +7846,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             .and_then(|id| self.typed.bodies().goal(id).ok())
             .ok_or_else(pending)?;
         let metadata = self.typed.inventory().headers();
-        graph::charge_key(&call.callee.module, metadata.len(), self.budget)?;
+        keyed::charge(&call.callee.module, metadata.len(), self.budget)?;
         let metadata = metadata.get(call.callee).ok_or_else(pending)?;
         let [requirement] = metadata.requirements.as_slice() else {
             return Err(pending());
@@ -7980,12 +7961,9 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         {
             return Err(pending());
         }
-        // The family's captured facts hold each implementation's declared
-        // signature. The map is keyed by a declaration identity holding the
-        // module path, so charge the probe like the header lookups.
         let typed = self.typed;
         let ordinary = typed.inventory();
-        graph::charge_key(&call.callee.module, ordinary.family_probes(), self.budget)?;
+        keyed::charge(&call.callee.module, ordinary.family_probes(), self.budget)?;
         let family = ordinary.captured_family(call.callee).ok_or_else(pending)?;
         self.budget.step(family.implementations.len())?;
         let header = &family

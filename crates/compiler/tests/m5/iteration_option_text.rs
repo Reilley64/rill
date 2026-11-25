@@ -156,27 +156,27 @@ fn unsupported_carrier_borrow_and_unopened_sibling_keep_the_source_pending() {
     for (source, work, entries) in [
         (
             "function probe(xs: List<Option<string>>): Option<bool> { for (let item of xs) { let _ = &item; break; } return Option.Some(true); }",
-            1855,
+            1865,
             19,
         ),
         (
             "function probe(xs: List<Option<string>>, spare: List<string>): Option<bool> { for (let item of xs) { let text = item?; let _ = &text; } return Option.Some(true); }",
-            1866,
+            1876,
             24,
         ),
         (
             "function probe(xs: List<Option<string>>, spare: List<bool>): Option<bool> { for (let item of xs) { let text = item?; let _ = &text; } return Option.Some(true); }",
-            1866,
+            1876,
             24,
         ),
         (
             "function probe(xs: List<Option<string>>): Option<bool> { for (let item of xs) { let _ = &item; let text = item?; let _ = &text; } return Option.Some(true); }",
-            1863,
+            1873,
             23,
         ),
         (
             "function probe(xs: List<Option<string>>): void { for (let item of xs) { let _ = &item; break; } }",
-            1847,
+            1857,
             15,
         ),
     ] {
@@ -307,7 +307,7 @@ fn unrelated_and_unadmitted_option_lists_keep_the_first_blocker() {
             }
             assert_pre_equality_graph_cap(receipt, (189_508, 4_050, 3));
             let stats = Statistics {
-                work: 189_857,
+                work: 192_349,
                 entries: 4_184,
                 max_depth: 5,
             };
@@ -321,10 +321,10 @@ fn unrelated_and_unadmitted_option_lists_keep_the_first_blocker() {
                 crate::limit::assert_graph_limit(&limited);
             }
             for (name, work, entries) in [
-                ("unused", 1_955, 69),
-                ("arbitrary", 1_958, 70),
-                ("sibling", 1_958, 70),
-                ("unadmitted", 1_955, 69),
+                ("unused", 1_965, 69),
+                ("arbitrary", 1_968, 70),
+                ("sibling", 1_968, 70),
+                ("unadmitted", 1_965, 69),
             ] {
                 let function = module
                     .declarations
@@ -417,12 +417,12 @@ const REVIEW_COUNTEREXAMPLES: [(
         "function probe(xs: List<Option<string>>): Option<bool> { for (let item of xs) { let _ = &item; break; } return Option.Some(true); }",
         None,
         Statistics {
-            work: 1_855,
+            work: 1_865,
             entries: 19,
             max_depth: 0,
         },
         Statistics {
-            work: 186_318,
+            work: 188_810,
             entries: 4_114,
             max_depth: 5,
         },
@@ -434,12 +434,12 @@ const REVIEW_COUNTEREXAMPLES: [(
         "function probe(xs: List<Option<string>>, spare: List<string>): Option<bool> { for (let item of xs) { let text = item?; break; } return Option.Some(true); }",
         None,
         Statistics {
-            work: 1_864,
+            work: 1_874,
             entries: 23,
             max_depth: 0,
         },
         Statistics {
-            work: 186_509,
+            work: 189_001,
             entries: 4_118,
             max_depth: 5,
         },
@@ -450,12 +450,12 @@ const REVIEW_COUNTEREXAMPLES: [(
         "function probe(xs: List<Option<string>>, spare: List<bool>): Option<bool> { for (let item of xs) { let text = item?; let _ = &text; } return Option.Some(true); }",
         None,
         Statistics {
-            work: 1_866,
+            work: 1_876,
             entries: 24,
             max_depth: 0,
         },
         Statistics {
-            work: 186_571,
+            work: 189_063,
             entries: 4_119,
             max_depth: 5,
         },
@@ -466,12 +466,12 @@ const REVIEW_COUNTEREXAMPLES: [(
         "function probe(xs: List<Option<string>>): Option<bool> { for (let item of xs) { let s = \"owned\"; let moved = s; let again = s; break; } return Option.Some(true); }",
         Some("again = s"),
         Statistics {
-            work: 4_722,
+            work: 4_732,
             entries: 721,
             max_depth: 5,
         },
         Statistics {
-            work: 189_430,
+            work: 191_922,
             entries: 4_817,
             max_depth: 5,
         },
@@ -481,12 +481,12 @@ const REVIEW_COUNTEREXAMPLES: [(
         "function probe(xs: List<Option<string>>): void { for (let item of xs) { let s = \"owned\"; let moved = s; let again = s; break; } }",
         Some("again = s"),
         Statistics {
-            work: 3_540,
+            work: 3_550,
             entries: 474,
             max_depth: 5,
         },
         Statistics {
-            work: 188_008,
+            work: 190_500,
             entries: 4_570,
             max_depth: 5,
         },

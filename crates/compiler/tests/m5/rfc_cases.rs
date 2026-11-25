@@ -516,26 +516,26 @@ expect shifted(Point { x: 2, y: 3 }).x == 3i32;
     // root's attributed work and entries removed (8913, 1139).
     outcome: Outcome::Receipt {
         typed_stats: (326069, 48655, 12),
-        graph: (GraphCompletion::Incomplete, (190796, 5184, 6)),
+        graph: (GraphCompletion::Incomplete, (193702, 5184, 6)),
         pre_equality_graph: Some((181846, 4044, 6)),
         roots: &[
             Root {
                 name: "increment",
                 want: Want::Checked,
                 graph: None,
-                stats: (2183, 183, 3),
+                stats: (2193, 183, 3),
             },
             Root {
                 name: "shifted",
                 want: Want::Checked,
                 graph: None,
-                stats: (5809, 722, 6),
+                stats: (6205, 722, 6),
             },
             Root {
                 name: "expect",
                 want: Want::Checked,
                 graph: None,
-                stats: (8917, 1140, 6),
+                stats: (9531, 1140, 6),
             },
         ],
     },
@@ -563,26 +563,26 @@ expect selected() == 9i32;
     // attributed work and entries removed (8410, 961).
     outcome: Outcome::Receipt {
         typed_stats: (326776, 48821, 12),
-        graph: (GraphCompletion::Incomplete, (190852, 5004, 6)),
+        graph: (GraphCompletion::Incomplete, (193689, 5004, 6)),
         pre_equality_graph: Some((182404, 4043, 6)),
         roots: &[
             Root {
                 name: "remember",
                 want: Want::Checked,
                 graph: None,
-                stats: (2468, 167, 3),
+                stats: (2478, 167, 3),
             },
             Root {
                 name: "selected",
                 want: Want::Checked,
                 graph: None,
-                stats: (6378, 855, 6),
+                stats: (6843, 855, 6),
             },
             Root {
                 name: "expect",
                 want: Want::Checked,
                 graph: None,
-                stats: (8415, 961, 6),
+                stats: (8960, 961, 6),
             },
         ],
     },
@@ -600,7 +600,7 @@ expect carried() == 42i32;
 "#,
     outcome: Outcome::Receipt {
         typed_stats: (323890, 48451, 12),
-        graph: (GraphCompletion::Incomplete, (187017, 4212, 5)),
+        graph: (GraphCompletion::Incomplete, (189509, 4212, 5)),
         pre_equality_graph: Some((186482, 4013, 3)),
         roots: &[
             Root {
@@ -611,7 +611,7 @@ expect carried() == 42i32;
                 graph: Some(Want::Incomplete {
                     blocker: r####"function identity<T>(value: T): T { return value; }"####,
                 }),
-                stats: (1863, 23, 0),
+                stats: (1873, 23, 0),
             },
             Root {
                 name: "carried",
@@ -619,7 +619,7 @@ expect carried() == 42i32;
                     blocker: r####"identity(&owner)"####,
                 },
                 graph: None,
-                stats: (1903, 40, 3),
+                stats: (1913, 40, 3),
             },
             Root {
                 name: "expect",
@@ -629,7 +629,7 @@ expect carried() == 42i32;
                     blocker: r####"identity(&owner)"####,
                 },
                 graph: None,
-                stats: (3901, 127, 3),
+                stats: (3991, 127, 3),
             },
         ],
     },
@@ -645,7 +645,7 @@ function invalidMove(): string {
 "#,
     outcome: Outcome::Receipt {
         typed_stats: (321942, 48190, 12),
-        graph: (GraphCompletion::SourceRejected, (185919, 4186, 5)),
+        graph: (GraphCompletion::SourceRejected, (188411, 4186, 5)),
         pre_equality_graph: Some((185568, 4052, 3)),
         roots: &[Root {
             name: "invalidMove",
@@ -655,7 +655,7 @@ function invalidMove(): string {
                 related: r####"first"####,
             },
             graph: None,
-            stats: (1994, 90, 3),
+            stats: (2004, 90, 3),
         }],
     },
 }];
@@ -675,20 +675,20 @@ expect separate() == 6i32;
 "#,
     outcome: Outcome::Receipt {
         typed_stats: (325589, 48706, 12),
-        graph: (GraphCompletion::Incomplete, (190075, 5288, 5)),
+        graph: (GraphCompletion::Incomplete, (192705, 5288, 5)),
         pre_equality_graph: Some((187506, 4084, 3)),
         roots: &[
             Root {
                 name: "separate",
                 want: Want::Checked,
                 graph: None,
-                stats: (4317, 1121, 4),
+                stats: (4465, 1121, 4),
             },
             Root {
                 name: "expect",
                 want: Want::Checked,
                 graph: None,
-                stats: (6341, 1221, 4),
+                stats: (6569, 1221, 4),
             },
         ],
     },
@@ -781,26 +781,26 @@ function wholeReadWhileLive(): i32 {
 "#,
     outcome: Outcome::Receipt {
         typed_stats: (347068, 51999, 12),
-        graph: (GraphCompletion::SourceRejected, (214313, 9734, 5)),
+        graph: (GraphCompletion::SourceRejected, (218603, 9734, 5)),
         pre_equality_graph: Some((205449, 5349, 5)),
         roots: &[
             Root {
                 name: "onlyLeft",
                 want: Want::Checked,
                 graph: None,
-                stats: (3804, 869, 4),
+                stats: (3952, 869, 4),
             },
             Root {
                 name: "otherRead",
                 want: Want::Checked,
                 graph: None,
-                stats: (3565, 749, 4),
+                stats: (3713, 749, 4),
             },
             Root {
                 name: "wholeReadAfter",
                 want: Want::Checked,
                 graph: None,
-                stats: (5497, 1596, 4),
+                stats: (5714, 1596, 4),
             },
             Root {
                 name: "readLive",
@@ -810,7 +810,7 @@ function wholeReadWhileLive(): i32 {
                     related: r####"&mut pair.left"####,
                 },
                 graph: None,
-                stats: (3251, 598, 4),
+                stats: (3399, 598, 4),
             },
             Root {
                 name: "sameField",
@@ -820,7 +820,7 @@ function wholeReadWhileLive(): i32 {
                     related: r####"&mut pair.left"####,
                 },
                 graph: None,
-                stats: (3336, 636, 4),
+                stats: (3484, 636, 4),
             },
             Root {
                 name: "wholeBeforeFirst",
@@ -830,7 +830,7 @@ function wholeReadWhileLive(): i32 {
                     related: r####"&mut pair"####,
                 },
                 graph: None,
-                stats: (3180, 561, 4),
+                stats: (3328, 561, 4),
             },
             Root {
                 name: "wholeBeforeSecond",
@@ -840,7 +840,7 @@ function wholeReadWhileLive(): i32 {
                     related: r####"&mut pair"####,
                 },
                 graph: None,
-                stats: (3854, 900, 4),
+                stats: (4002, 900, 4),
             },
             Root {
                 name: "wholeBetween",
@@ -850,7 +850,7 @@ function wholeReadWhileLive(): i32 {
                     related: r####"&mut pair.left"####,
                 },
                 graph: None,
-                stats: (3186, 563, 4),
+                stats: (3334, 563, 4),
             },
             Root {
                 name: "sharedWholeBeforeFirst",
@@ -860,7 +860,7 @@ function wholeReadWhileLive(): i32 {
                     related: r####"&pair"####,
                 },
                 graph: None,
-                stats: (3181, 561, 4),
+                stats: (3329, 561, 4),
             },
             Root {
                 name: "wholeReadWhileLive",
@@ -870,7 +870,7 @@ function wholeReadWhileLive(): i32 {
                     related: r####"&mut pair.left"####,
                 },
                 graph: None,
-                stats: (3508, 615, 4),
+                stats: (3725, 615, 4),
             },
         ],
     },
@@ -896,32 +896,32 @@ expect result() == 3i32;
     // root's attributed work and entries removed (8642, 688).
     outcome: Outcome::Receipt {
         typed_stats: (325935, 48579, 12),
-        graph: (GraphCompletion::Incomplete, (189127, 4699, 6)),
+        graph: (GraphCompletion::Incomplete, (191619, 4699, 6)),
         pre_equality_graph: Some((180449, 4011, 6)),
         roots: &[
             Root {
                 name: "change",
                 want: Want::Checked,
                 graph: None,
-                stats: (2191, 187, 3),
+                stats: (2201, 187, 3),
             },
             Root {
                 name: "twice",
                 want: Want::Checked,
                 graph: None,
-                stats: (4414, 394, 3),
+                stats: (4564, 394, 3),
             },
             Root {
                 name: "result",
                 want: Want::Checked,
                 graph: None,
-                stats: (6618, 587, 6),
+                stats: (6898, 587, 6),
             },
             Root {
                 name: "expect",
                 want: Want::Checked,
                 graph: None,
-                stats: (8645, 688, 6),
+                stats: (9005, 688, 6),
             },
         ],
     },
@@ -939,7 +939,7 @@ function overlap(): i32 {
 "#,
     outcome: Outcome::Receipt {
         typed_stats: (324416, 48529, 12),
-        graph: (GraphCompletion::SourceRejected, (187485, 4378, 5)),
+        graph: (GraphCompletion::SourceRejected, (190115, 4378, 5)),
         pre_equality_graph: Some((186712, 4049, 3)),
         roots: &[Root {
             name: "overlap",
@@ -949,7 +949,7 @@ function overlap(): i32 {
                 related: r####"&mut value"####,
             },
             graph: None,
-            stats: (2655, 282, 5),
+            stats: (2803, 282, 5),
         }],
     },
 }];
@@ -978,26 +978,26 @@ function poison(slot: &mut &Point): void {
     // pins it. `pre_equality_graph` removes the expectation root (8494, 1003).
     outcome: Outcome::Receipt {
         typed_stats: (328583, 49057, 12),
-        graph: (GraphCompletion::SourceRejected, (192753, 5271, 6)),
+        graph: (GraphCompletion::SourceRejected, (195728, 5271, 6)),
         pre_equality_graph: Some((184219, 4268, 6)),
         roots: &[
             Root {
                 name: "remember",
                 want: Want::Checked,
                 graph: None,
-                stats: (2496, 181, 3),
+                stats: (2506, 181, 3),
             },
             Root {
                 name: "selected",
                 want: Want::Checked,
                 graph: None,
-                stats: (6434, 883, 6),
+                stats: (6899, 883, 6),
             },
             Root {
                 name: "expect",
                 want: Want::Checked,
                 graph: None,
-                stats: (8499, 1003, 6),
+                stats: (9044, 1003, 6),
             },
             Root {
                 name: "poison",
@@ -1007,7 +1007,7 @@ function poison(slot: &mut &Point): void {
                     related: "&local",
                 },
                 graph: None,
-                stats: (2817, 302, 4),
+                stats: (2965, 302, 4),
             },
         ],
     },
@@ -1030,14 +1030,14 @@ function local(dst: &mut List<&User>): void {
     // `o09_pre_list_contents_caps_now_give_resource_limit` pins them.
     outcome: Outcome::Receipt {
         typed_stats: (329240, 49228, 12),
-        graph: (GraphCompletion::SourceRejected, (192343, 4641, 6)),
+        graph: (GraphCompletion::SourceRejected, (193613, 4641, 6)),
         pre_equality_graph: Some((189147, 4103, 3)),
         roots: &[
             Root {
                 name: "forwarded",
                 want: Want::Checked,
                 graph: None,
-                stats: (3332, 243, 5),
+                stats: (2662, 243, 5),
             },
             Root {
                 name: "local",
@@ -1047,7 +1047,7 @@ function local(dst: &mut List<&User>): void {
                     related: "&user",
                 },
                 graph: None,
-                stats: (3728, 332, 6),
+                stats: (3196, 332, 6),
             },
         ],
     },
@@ -1064,13 +1064,13 @@ function extract(users: List<&User>): Option<&User> {
 "#,
         outcome: Outcome::Receipt {
             typed_stats: (323986, 48499, 12),
-            graph: (GraphCompletion::Incomplete, (188072, 4612, 6)),
+            graph: (GraphCompletion::Incomplete, (190564, 4612, 6)),
             pre_equality_graph: Some((187721, 4478, 3)),
             roots: &[Root {
                 name: "extract",
                 want: Want::Checked,
                 graph: None,
-                stats: (3541, 513, 6),
+                stats: (3551, 513, 6),
             }],
         },
     },
@@ -1082,7 +1082,7 @@ function slot(users: List<&User>): Option<&&User> { return get(&users, 0u64); }
 "#,
         outcome: Outcome::Receipt {
             typed_stats: (325755, 48716, 12),
-            graph: (GraphCompletion::SourceRejected, (187349, 4363, 5)),
+            graph: (GraphCompletion::SourceRejected, (189841, 4363, 5)),
             pre_equality_graph: Some((186999, 4229, 5)),
             roots: &[Root {
                 name: "slot",
@@ -1092,7 +1092,7 @@ function slot(users: List<&User>): Option<&&User> { return get(&users, 0u64); }
                     related: "get(&users, 0u64)",
                 },
                 graph: None,
-                stats: (3060, 267, 5),
+                stats: (3070, 267, 5),
             }],
         },
     },
@@ -1104,7 +1104,7 @@ function indexed(users: List<&User>, index: u64): Option<&&User> { return get(&u
 "#,
         outcome: Outcome::Receipt {
             typed_stats: (325678, 48667, 12),
-            graph: (GraphCompletion::SourceRejected, (187433, 4374, 5)),
+            graph: (GraphCompletion::SourceRejected, (189925, 4374, 5)),
             pre_equality_graph: Some((187082, 4240, 5)),
             roots: &[Root {
                 name: "indexed",
@@ -1114,7 +1114,7 @@ function indexed(users: List<&User>, index: u64): Option<&&User> { return get(&u
                     related: "get(&users, index)",
                 },
                 graph: None,
-                stats: (3083, 278, 5),
+                stats: (3093, 278, 5),
             }],
         },
     },
@@ -1175,7 +1175,7 @@ function discarded(users: List<&User>): void { get(&users, 0u64); }
 "#,
     outcome: Outcome::Receipt {
         typed_stats: (342727, 51606, 12),
-        graph: (GraphCompletion::Incomplete, (191131, 4248, 5)),
+        graph: (GraphCompletion::Incomplete, (193623, 4248, 5)),
         pre_equality_graph: Some((190775, 4114, 3)),
         roots: &[
             Root {
@@ -1184,7 +1184,7 @@ function discarded(users: List<&User>): void { get(&users, 0u64); }
                     blocker: "get(&users, index + 1u64)",
                 },
                 graph: None,
-                stats: (2011, 93, 2),
+                stats: (2021, 93, 2),
             },
             Root {
                 name: "grouped",
@@ -1192,7 +1192,7 @@ function discarded(users: List<&User>): void { get(&users, 0u64); }
                     blocker: "get(&users, (0u64))",
                 },
                 graph: None,
-                stats: (2004, 89, 2),
+                stats: (2014, 89, 2),
             },
             Root {
                 name: "view",
@@ -1200,7 +1200,7 @@ function discarded(users: List<&User>): void { get(&users, 0u64); }
                     blocker: "get(users, 0u64)",
                 },
                 graph: None,
-                stats: (1993, 89, 2),
+                stats: (2003, 89, 2),
             },
             Root {
                 name: "head",
@@ -1208,13 +1208,13 @@ function discarded(users: List<&User>): void { get(&users, 0u64); }
                     blocker: "first(&users)",
                 },
                 graph: None,
-                stats: (2004, 89, 2),
+                stats: (2014, 89, 2),
             },
             Root {
                 name: "bound",
                 want: Want::Incomplete { blocker: "found" },
                 graph: None,
-                stats: (2003, 89, 1),
+                stats: (2013, 89, 1),
             },
             Root {
                 name: "discarded",
@@ -1222,7 +1222,7 @@ function discarded(users: List<&User>): void { get(&users, 0u64); }
                     blocker: "get(&users, 0u64)",
                 },
                 graph: None,
-                stats: (2012, 89, 3),
+                stats: (2022, 89, 3),
             },
         ],
     },
@@ -1318,7 +1318,7 @@ function ordered(input: List<i32>): i32 {
 "#,
     outcome: Outcome::Receipt {
         typed_stats: (328690, 49089, 12),
-        graph: (GraphCompletion::SourceRejected, (191919, 4600, 6)),
+        graph: (GraphCompletion::SourceRejected, (193051, 4600, 6)),
         // The caps before ri-2s0.6 (metering rule 11, third case): the family
         // call now reaches its contract, so they give `ResourceLimit`.
         pre_equality_graph: Some((189575, 4219, 5)),
@@ -1331,13 +1331,13 @@ function ordered(input: List<i32>): i32 {
                     related: r####"&mut owned"####,
                 },
                 graph: None,
-                stats: (3032, 202, 6),
+                stats: (2362, 202, 6),
             },
             Root {
                 name: "ordered",
                 want: Want::Checked,
                 graph: None,
-                stats: (3321, 336, 6),
+                stats: (2651, 336, 6),
             },
         ],
     },
@@ -1358,7 +1358,7 @@ function count(input: List<i32>): i32 {
 "#,
         outcome: Outcome::Receipt {
             typed_stats: (325530, 48594, 12),
-            graph: (GraphCompletion::Incomplete, (187838, 4148, 5)),
+            graph: (GraphCompletion::Incomplete, (190330, 4148, 5)),
             pre_equality_graph: Some((187486, 4014, 4)),
             roots: &[Root {
                 name: "count",
@@ -1366,7 +1366,7 @@ function count(input: List<i32>): i32 {
                     blocker: r####"editAndCount(&mut owned)"####,
                 },
                 graph: None,
-                stats: (1950, 47, 3),
+                stats: (1960, 47, 3),
             }],
         },
     },
@@ -1382,7 +1382,7 @@ function shared(input: List<i32>): i32 {
 "#,
         outcome: Outcome::Receipt {
             typed_stats: (325696, 48642, 12),
-            graph: (GraphCompletion::Incomplete, (188024, 4151, 5)),
+            graph: (GraphCompletion::Incomplete, (190516, 4151, 5)),
             pre_equality_graph: Some((187672, 4017, 4)),
             roots: &[Root {
                 name: "shared",
@@ -1390,7 +1390,7 @@ function shared(input: List<i32>): i32 {
                     blocker: r####"readView(&owned)"####,
                 },
                 graph: None,
-                stats: (1956, 50, 3),
+                stats: (1966, 50, 3),
             }],
         },
     },
@@ -1406,7 +1406,7 @@ function grouped(input: List<i32>): i32 {
 "#,
         outcome: Outcome::Receipt {
             typed_stats: (326228, 48714, 12),
-            graph: (GraphCompletion::Incomplete, (188087, 4152, 5)),
+            graph: (GraphCompletion::Incomplete, (190579, 4152, 5)),
             pre_equality_graph: Some((187735, 4018, 4)),
             roots: &[Root {
                 name: "grouped",
@@ -1414,7 +1414,7 @@ function grouped(input: List<i32>): i32 {
                     blocker: r####"editAndView((&mut owned))"####,
                 },
                 graph: None,
-                stats: (1959, 51, 3),
+                stats: (1969, 51, 3),
             }],
         },
     },
@@ -1433,7 +1433,7 @@ function looped(input: List<i32>): i32 {
 "#,
         outcome: Outcome::Receipt {
             typed_stats: (325783, 48683, 12),
-            graph: (GraphCompletion::Incomplete, (188348, 4167, 5)),
+            graph: (GraphCompletion::Incomplete, (190840, 4167, 5)),
             pre_equality_graph: Some((187996, 4033, 4)),
             roots: &[Root {
                 name: "looped",
@@ -1441,7 +1441,7 @@ function looped(input: List<i32>): i32 {
                     blocker: r####"editAndView(&mut owned)"####,
                 },
                 graph: None,
-                stats: (1980, 66, 5),
+                stats: (1990, 66, 5),
             }],
         },
     },
@@ -1484,7 +1484,7 @@ function escaped(input: List<i32>): &i32 {
 "#,
     outcome: Outcome::Receipt {
         typed_stats: (338144, 50421, 12),
-        graph: (GraphCompletion::SourceRejected, (198354, 5020, 6)),
+        graph: (GraphCompletion::SourceRejected, (197446, 5020, 6)),
         pre_equality_graph: None,
         roots: &[
             Root {
@@ -1495,7 +1495,7 @@ function escaped(input: List<i32>): &i32 {
                     related: r####"&mut owned"####,
                 },
                 graph: None,
-                stats: (3178, 275, 6),
+                stats: (2508, 275, 6),
             },
             Root {
                 name: "reborrowed",
@@ -1505,7 +1505,7 @@ function escaped(input: List<i32>): &i32 {
                     related: r####"&mut owned"####,
                 },
                 graph: None,
-                stats: (3123, 248, 6),
+                stats: (2453, 248, 6),
             },
             Root {
                 name: "disposed",
@@ -1515,7 +1515,7 @@ function escaped(input: List<i32>): &i32 {
                     related: r####"&mut owned"####,
                 },
                 graph: None,
-                stats: (3161, 258, 6),
+                stats: (2491, 258, 6),
             },
             Root {
                 name: "moved",
@@ -1525,7 +1525,7 @@ function escaped(input: List<i32>): &i32 {
                     related: r####"&mut owned"####,
                 },
                 graph: None,
-                stats: (3141, 248, 6),
+                stats: (2471, 248, 6),
             },
             Root {
                 name: "escaped",
@@ -1535,7 +1535,7 @@ function escaped(input: List<i32>): &i32 {
                     related: r####"owned"####,
                 },
                 graph: None,
-                stats: (3094, 237, 6),
+                stats: (2424, 237, 6),
             },
         ],
     },
@@ -1554,20 +1554,20 @@ function literal(): &string { return &"static"; }
 "#,
     outcome: Outcome::Receipt {
         typed_stats: (327954, 48743, 12),
-        graph: (GraphCompletion::SourceRejected, (191218, 5092, 9)),
+        graph: (GraphCompletion::SourceRejected, (194469, 5092, 9)),
         pre_equality_graph: Some((188491, 4251, 4)),
         roots: &[
             Root {
                 name: "shifted",
                 want: Want::Checked,
                 graph: None,
-                stats: (2811, 253, 3),
+                stats: (3028, 253, 3),
             },
             Root {
                 name: "within",
                 want: Want::Checked,
                 graph: None,
-                stats: (5915, 661, 9),
+                stats: (6518, 661, 9),
             },
             Root {
                 name: "stored",
@@ -1577,13 +1577,13 @@ function literal(): &string { return &"static"; }
                     related: r####"&shifted(Point { x: 1, y: 2 })"####,
                 },
                 graph: None,
-                stats: (2991, 361, 7),
+                stats: (3277, 361, 7),
             },
             Root {
                 name: "literal",
                 want: Want::Checked,
                 graph: None,
-                stats: (1949, 66, 4),
+                stats: (1959, 66, 4),
             },
         ],
     },
@@ -1607,7 +1607,7 @@ function loops(flag: bool, left: string, seed: &string): void {
 "#,
         outcome: Outcome::Receipt {
             typed_stats: (326772, 48819, 12),
-            graph: (GraphCompletion::SourceRejected, (190137, 5031, 6)),
+            graph: (GraphCompletion::SourceRejected, (192629, 5031, 6)),
             pre_equality_graph: Some((189777, 4897, 6)),
             roots: &[
                 Root {
@@ -1618,7 +1618,7 @@ function loops(flag: bool, left: string, seed: &string): void {
                         related: r####"&left"####,
                     },
                     graph: None,
-                    stats: (2675, 447, 6),
+                    stats: (2685, 447, 6),
                 },
                 Root {
                     name: "loops",
@@ -1628,7 +1628,7 @@ function loops(flag: bool, left: string, seed: &string): void {
                         related: r####"&left"####,
                     },
                     graph: None,
-                    stats: (2844, 532, 6),
+                    stats: (2854, 532, 6),
                 },
             ],
         },
@@ -1648,14 +1648,14 @@ function joined(flag: bool, left: string, right: string, seed: &string): void {
 "#,
         outcome: Outcome::Receipt {
             typed_stats: (331969, 49632, 12),
-            graph: (GraphCompletion::SourceRejected, (193235, 5097, 8)),
+            graph: (GraphCompletion::SourceRejected, (194436, 5097, 8)),
             pre_equality_graph: Some((189687, 4102, 3)),
             roots: &[
                 Root {
                     name: "clear",
                     want: Want::Checked,
                     graph: None,
-                    stats: (2048, 114, 1),
+                    stats: (2058, 114, 1),
                 },
                 Root {
                     name: "joined",
@@ -1665,7 +1665,7 @@ function joined(flag: bool, left: string, right: string, seed: &string): void {
                         related: r####"&left"####,
                     },
                     graph: None,
-                    stats: (5156, 931, 8),
+                    stats: (3875, 931, 8),
                 },
             ],
         },
@@ -1704,20 +1704,20 @@ function released(flag: bool, left: string, right: string, seed: &string): void 
 "#,
     outcome: Outcome::Receipt {
         typed_stats: (336837, 49967, 12),
-        graph: (GraphCompletion::SourceRejected, (203602, 7569, 8)),
+        graph: (GraphCompletion::SourceRejected, (206966, 7569, 8)),
         pre_equality_graph: None,
         roots: &[
             Root {
                 name: "remember",
                 want: Want::Checked,
                 graph: None,
-                stats: (2236, 202, 1),
+                stats: (2246, 202, 1),
             },
             Root {
                 name: "clear",
                 want: Want::Checked,
                 graph: None,
-                stats: (2184, 182, 1),
+                stats: (2194, 182, 1),
             },
             Root {
                 name: "joined",
@@ -1727,7 +1727,7 @@ function released(flag: bool, left: string, right: string, seed: &string): void 
                     related: r####"&left"####,
                 },
                 graph: None,
-                stats: (3752, 999, 8),
+                stats: (3969, 999, 8),
             },
             Root {
                 name: "loops",
@@ -1737,13 +1737,13 @@ function released(flag: bool, left: string, right: string, seed: &string): void 
                     related: r####"&left"####,
                 },
                 graph: None,
-                stats: (3796, 1018, 8),
+                stats: (3944, 1018, 8),
             },
             Root {
                 name: "released",
                 want: Want::Checked,
                 graph: None,
-                stats: (9208, 1887, 8),
+                stats: (9725, 1887, 8),
             },
         ],
     },
@@ -1774,7 +1774,7 @@ function released(flag: bool, left: string, right: string, seed: &string): void 
 "#,
     outcome: Outcome::Receipt {
         typed_stats: (337589, 50492, 12),
-        graph: (GraphCompletion::SourceRejected, (202624, 6570, 8)),
+        graph: (GraphCompletion::SourceRejected, (203534, 6570, 8)),
         pre_equality_graph: None,
         roots: &[
             Root {
@@ -1785,13 +1785,13 @@ function released(flag: bool, left: string, right: string, seed: &string): void 
                     related: r####"&left"####,
                 },
                 graph: None,
-                stats: (4496, 983, 8),
+                stats: (3895, 983, 8),
             },
             Root {
                 name: "released",
                 want: Want::Checked,
                 graph: None,
-                stats: (8413, 1630, 8),
+                stats: (7272, 1630, 8),
             },
         ],
     },
@@ -1816,7 +1816,7 @@ function gated(flag: bool, left: string, seed: &string): void {
 "#,
         outcome: Outcome::Receipt {
             typed_stats: (328343, 49155, 12),
-            graph: (GraphCompletion::Incomplete, (188710, 4174, 5)),
+            graph: (GraphCompletion::Incomplete, (191202, 4174, 5)),
             pre_equality_graph: Some((188671, 4174, 5)),
             roots: &[Root {
                 name: "gated",
@@ -1824,7 +1824,7 @@ function gated(flag: bool, left: string, seed: &string): void {
                     blocker: r####"remember(&mut slot, &left, flag)"####,
                 },
                 graph: None,
-                stats: (1974, 73, 3),
+                stats: (1984, 73, 3),
             }],
         },
     },
@@ -1841,7 +1841,7 @@ function triple(left: string, middle: string, right: string, seed: &string): voi
 "#,
         outcome: Outcome::Receipt {
             typed_stats: (331109, 49869, 12),
-            graph: (GraphCompletion::Incomplete, (189218, 4186, 5)),
+            graph: (GraphCompletion::Incomplete, (191710, 4186, 5)),
             pre_equality_graph: Some((189178, 4186, 5)),
             roots: &[Root {
                 name: "triple",
@@ -1849,7 +1849,7 @@ function triple(left: string, middle: string, right: string, seed: &string): voi
                     blocker: r####"remember(&mut slot, &left, &middle, &right)"####,
                 },
                 graph: None,
-                stats: (1998, 85, 3),
+                stats: (2008, 85, 3),
             }],
         },
     },
@@ -1866,7 +1866,7 @@ function grouped(left: string, seed: &string): void {
 "#,
         outcome: Outcome::Receipt {
             typed_stats: (328150, 49081, 12),
-            graph: (GraphCompletion::Incomplete, (188513, 4167, 5)),
+            graph: (GraphCompletion::Incomplete, (191005, 4167, 5)),
             pre_equality_graph: Some((188475, 4167, 5)),
             roots: &[Root {
                 name: "grouped",
@@ -1874,7 +1874,7 @@ function grouped(left: string, seed: &string): void {
                     blocker: r####"remember((&mut slot), &left)"####,
                 },
                 graph: None,
-                stats: (1961, 66, 3),
+                stats: (1971, 66, 3),
             }],
         },
     },
@@ -1899,14 +1899,14 @@ function stale(old: Owner, next: string): void {
 "#,
     outcome: Outcome::Receipt {
         typed_stats: (328196, 48784, 12),
-        graph: (GraphCompletion::SourceRejected, (193474, 5361, 5)),
+        graph: (GraphCompletion::SourceRejected, (198476, 5361, 5)),
         pre_equality_graph: Some((192262, 5227, 4)),
         roots: &[
             Root {
                 name: "replace",
                 want: Want::Checked,
                 graph: None,
-                stats: (6926, 882, 4),
+                stats: (8686, 882, 4),
             },
             Root {
                 name: "stale",
@@ -1916,7 +1916,7 @@ function stale(old: Owner, next: string): void {
                     related: r####"&slot"####,
                 },
                 graph: None,
-                stats: (3460, 442, 4),
+                stats: (4280, 442, 4),
             },
         ],
     },
@@ -1938,20 +1938,20 @@ expect counter() == 12i32;
 "#,
     outcome: Outcome::Receipt {
         typed_stats: (323509, 48580, 12),
-        graph: (GraphCompletion::Incomplete, (188022, 4496, 6)),
+        graph: (GraphCompletion::Incomplete, (190514, 4496, 6)),
         pre_equality_graph: Some((187543, 4297, 6)),
         roots: &[
             Root {
                 name: "counter",
                 want: Want::Checked,
                 graph: None,
-                stats: (2508, 329, 6),
+                stats: (2518, 329, 6),
             },
             Root {
                 name: "expect",
                 want: Want::Checked,
                 graph: None,
-                stats: (4523, 425, 6),
+                stats: (4613, 425, 6),
             },
         ],
     },
@@ -1975,26 +1975,26 @@ expect joinedOrder();
 "#,
     outcome: Outcome::Receipt {
         typed_stats: (434074, 50764, 12),
-        graph: (GraphCompletion::Incomplete, (226906, 25858, 10)),
+        graph: (GraphCompletion::Incomplete, (229398, 25858, 10)),
         pre_equality_graph: Some((225238, 25046, 10)),
         roots: &[
             Root {
                 name: "joined",
                 want: Want::Checked,
                 graph: None,
-                stats: (32421, 20901, 10),
+                stats: (32431, 20901, 10),
             },
             Root {
                 name: "joinedOrder",
                 want: Want::Checked,
                 graph: None,
-                stats: (36066, 21717, 10),
+                stats: (36186, 21717, 10),
             },
             Root {
                 name: "expect",
                 want: Want::Checked,
                 graph: None,
-                stats: (38105, 21797, 10),
+                stats: (38305, 21797, 10),
             },
         ],
     },
@@ -2029,7 +2029,7 @@ function repeated(left: string, right: string): [string, string] {
 "#,
         outcome: Outcome::Receipt {
             typed_stats: (323526, 48423, 12),
-            graph: (GraphCompletion::SourceRejected, (187751, 4500, 5)),
+            graph: (GraphCompletion::SourceRejected, (190243, 4500, 5)),
             pre_equality_graph: Some((187399, 4366, 5)),
             roots: &[Root {
                 name: "repeated",
@@ -2039,7 +2039,7 @@ function repeated(left: string, right: string): [string, string] {
                     related: r####"job()"####,
                 },
                 graph: None,
-                stats: (3105, 404, 5),
+                stats: (3115, 404, 5),
             }],
         },
     },
@@ -2056,14 +2056,14 @@ function custom(value: Custom): string { return value.keep; }
 "#,
     outcome: Outcome::Receipt {
         typed_stats: (329004, 48596, 12),
-        graph: (GraphCompletion::SourceRejected, (187961, 4372, 5)),
+        graph: (GraphCompletion::SourceRejected, (190907, 4372, 5)),
         pre_equality_graph: Some((187610, 4238, 3)),
         roots: &[
             Root {
                 name: "plain",
                 want: Want::Checked,
                 graph: None,
-                stats: (2389, 160, 3),
+                stats: (2537, 160, 3),
             },
             Root {
                 name: "custom",
@@ -2073,7 +2073,7 @@ function custom(value: Custom): string { return value.keep; }
                     related: r####"value: Custom"####,
                 },
                 graph: None,
-                stats: (2316, 129, 3),
+                stats: (2642, 129, 3),
             },
         ],
     },
@@ -2092,13 +2092,13 @@ function ordered(seed: &string): void {
 "#,
     outcome: Outcome::Receipt {
         typed_stats: (326274, 48579, 12),
-        graph: (GraphCompletion::Incomplete, (189358, 4794, 5)),
+        graph: (GraphCompletion::Incomplete, (192976, 4794, 5)),
         pre_equality_graph: Some((186874, 4059, 3)),
         roots: &[Root {
             name: "ordered",
             want: Want::Checked,
             graph: None,
-            stats: (6126, 711, 5),
+            stats: (7422, 711, 5),
         }],
     },
 }];
@@ -2110,13 +2110,13 @@ function render(outer: Outer): string { return `${outer.value}-${outer.value}`; 
 "#,
     outcome: Outcome::Receipt {
         typed_stats: (325153, 48668, 12),
-        graph: (GraphCompletion::Incomplete, (186766, 4311, 5)),
+        graph: (GraphCompletion::Incomplete, (189396, 4311, 5)),
         pre_equality_graph: Some((186048, 4042, 3)),
         roots: &[Root {
             name: "render",
             want: Want::Checked,
             graph: None,
-            stats: (2500, 215, 4),
+            stats: (2648, 215, 4),
         }],
     },
 }];
@@ -2234,7 +2234,7 @@ function ended(owner: string): void {
 "#,
         outcome: Outcome::Receipt {
             typed_stats: (325268, 48571, 12),
-            graph: (GraphCompletion::SourceRejected, (188326, 4569, 5)),
+            graph: (GraphCompletion::SourceRejected, (190818, 4569, 5)),
             pre_equality_graph: Some((187969, 4435, 5)),
             roots: &[
                 Root {
@@ -2245,13 +2245,13 @@ function ended(owner: string): void {
                         related: r####"&owner"####,
                     },
                     graph: None,
-                    stats: (2307, 237, 4),
+                    stats: (2317, 237, 4),
                 },
                 Root {
                     name: "ended",
                     want: Want::Checked,
                     graph: None,
-                    stats: (2387, 264, 4),
+                    stats: (2397, 264, 4),
                 },
             ],
         },
@@ -2267,7 +2267,7 @@ function aliased(owner: string): void {
 "#,
         outcome: Outcome::Receipt {
             typed_stats: (322737, 48306, 12),
-            graph: (GraphCompletion::SourceRejected, (186396, 4240, 5)),
+            graph: (GraphCompletion::SourceRejected, (188888, 4240, 5)),
             pre_equality_graph: Some((186043, 4106, 4)),
             roots: &[Root {
                 name: "aliased",
@@ -2277,7 +2277,7 @@ function aliased(owner: string): void {
                     related: r####"&owner"####,
                 },
                 graph: None,
-                stats: (2109, 144, 4),
+                stats: (2119, 144, 4),
             }],
         },
     },
@@ -2296,14 +2296,14 @@ function released(owner: string): void {
 "#,
         outcome: Outcome::Receipt {
             typed_stats: (324973, 48470, 12),
-            graph: (GraphCompletion::SourceRejected, (188494, 4447, 5)),
+            graph: (GraphCompletion::SourceRejected, (191066, 4447, 5)),
             pre_equality_graph: Some((188140, 4313, 5)),
             roots: &[
                 Root {
                     name: "released",
                     want: Want::Checked,
                     graph: None,
-                    stats: (2246, 217, 4),
+                    stats: (2256, 217, 4),
                 },
                 Root {
                     name: "reused",
@@ -2313,7 +2313,7 @@ function released(owner: string): void {
                         related: r####"dispose(view)"####,
                     },
                     graph: None,
-                    stats: (2119, 155, 4),
+                    stats: (2129, 155, 4),
                 },
             ],
         },
@@ -2360,14 +2360,14 @@ function childLocal(input: &i32): [&i32, &i32] {
 "#,
     outcome: Outcome::Receipt {
         typed_stats: (441761, 51602, 12),
-        graph: (GraphCompletion::SourceRejected, (224551, 21166, 10)),
+        graph: (GraphCompletion::SourceRejected, (227203, 21166, 10)),
         pre_equality_graph: Some((224187, 21032, 10)),
         roots: &[
             Root {
                 name: "joined",
                 want: Want::Checked,
                 graph: None,
-                stats: (26149, 15547, 7),
+                stats: (26159, 15547, 7),
             },
             Root {
                 name: "released",
@@ -2377,13 +2377,13 @@ function childLocal(input: &i32): [&i32, &i32] {
                     related: r####"&first"####,
                 },
                 graph: None,
-                stats: (3326, 548, 6),
+                stats: (3416, 548, 6),
             },
             Root {
                 name: "afterUse",
                 want: Want::Checked,
                 graph: None,
-                stats: (32603, 16627, 7),
+                stats: (33110, 16627, 7),
             },
             Root {
                 name: "childLocal",
@@ -2393,7 +2393,7 @@ function childLocal(input: &i32): [&i32, &i32] {
                     related: r####"local"####,
                 },
                 graph: None,
-                stats: (2720, 315, 10),
+                stats: (2730, 315, 10),
             },
         ],
     },
@@ -2491,14 +2491,14 @@ function viaLocal(value: &mut i32): void { let view = value; *view += 1i32; }
 "#,
     outcome: Outcome::Receipt {
         typed_stats: (335114, 49231, 12),
-        graph: (GraphCompletion::Incomplete, (192871, 4858, 5)),
+        graph: (GraphCompletion::Incomplete, (195643, 4858, 5)),
         pre_equality_graph: Some((190538, 4622, 5)),
         roots: &[
             Root {
                 name: "control",
                 want: Want::Checked,
                 graph: None,
-                stats: (2289, 236, 3),
+                stats: (2299, 236, 3),
             },
             Root {
                 name: "groupedTarget",
@@ -2506,7 +2506,7 @@ function viaLocal(value: &mut i32): void { let view = value; *view += 1i32; }
                     blocker: r####"(*value) += 1i32;"####,
                 },
                 graph: None,
-                stats: (1999, 92, 2),
+                stats: (2009, 92, 2),
             },
             Root {
                 name: "groupedOperand",
@@ -2514,7 +2514,7 @@ function viaLocal(value: &mut i32): void { let view = value; *view += 1i32; }
                     blocker: r####"*value += (1i32);"####,
                 },
                 graph: None,
-                stats: (1999, 92, 2),
+                stats: (2009, 92, 2),
             },
             Root {
                 name: "groupedDescriptor",
@@ -2522,25 +2522,25 @@ function viaLocal(value: &mut i32): void { let view = value; *view += 1i32; }
                     blocker: r####"*(value) += 1i32;"####,
                 },
                 graph: None,
-                stats: (1999, 92, 2),
+                stats: (2009, 92, 2),
             },
             Root {
                 name: "scoped",
                 want: Want::Checked,
                 graph: None,
-                stats: (2291, 236, 4),
+                stats: (2301, 236, 4),
             },
             Root {
                 name: "looped",
                 want: Want::Checked,
                 graph: None,
-                stats: (2512, 340, 5),
+                stats: (2522, 340, 5),
             },
             Root {
                 name: "dead",
                 want: Want::Checked,
                 graph: None,
-                stats: (2056, 118, 2),
+                stats: (2066, 118, 2),
             },
             Root {
                 name: "computed",
@@ -2548,7 +2548,7 @@ function viaLocal(value: &mut i32): void { let view = value; *view += 1i32; }
                     blocker: r####"*value += step;"####,
                 },
                 graph: None,
-                stats: (2006, 96, 2),
+                stats: (2016, 96, 2),
             },
             Root {
                 name: "viaLocal",
@@ -2556,7 +2556,7 @@ function viaLocal(value: &mut i32): void { let view = value; *view += 1i32; }
                     blocker: r####"*view += 1i32;"####,
                 },
                 graph: None,
-                stats: (2010, 101, 2),
+                stats: (2020, 101, 2),
             },
         ],
     },
@@ -2584,14 +2584,14 @@ function looped(flag: bool): bool { while (flag) { return mk().x == 2i32; } retu
 "#,
     outcome: Outcome::Receipt {
         typed_stats: (339875, 49665, 12),
-        graph: (GraphCompletion::Incomplete, (197959, 5956, 6)),
+        graph: (GraphCompletion::Incomplete, (201283, 5956, 6)),
         pre_equality_graph: Some((193367, 4510, 5)),
         roots: &[
             Root {
                 name: "mk",
                 want: Want::Checked,
                 graph: None,
-                stats: (2517, 231, 4),
+                stats: (2596, 231, 4),
             },
             Root {
                 name: "wrap",
@@ -2599,31 +2599,31 @@ function looped(flag: bool): bool { while (flag) { return mk().x == 2i32; } retu
                     blocker: r####"Outer { inner: mk() }"####,
                 },
                 graph: None,
-                stats: (2366, 155, 2),
+                stats: (2445, 155, 2),
             },
             Root {
                 name: "bare",
                 want: Want::Checked,
                 graph: None,
-                stats: (5193, 548, 4),
+                stats: (5451, 548, 4),
             },
             Root {
                 name: "grouped",
                 want: Want::Checked,
                 graph: None,
-                stats: (5198, 548, 5),
+                stats: (5456, 548, 5),
             },
             Root {
                 name: "both",
                 want: Want::Checked,
                 graph: None,
-                stats: (5707, 689, 4),
+                stats: (6064, 689, 4),
             },
             Root {
                 name: "viaLocal",
                 want: Want::Checked,
                 graph: None,
-                stats: (5284, 594, 4),
+                stats: (5542, 594, 4),
             },
             Root {
                 name: "bound",
@@ -2631,7 +2631,7 @@ function looped(flag: bool): bool { while (flag) { return mk().x == 2i32; } retu
                     blocker: r####"mk().x"####,
                 },
                 graph: None,
-                stats: (2039, 108, 3),
+                stats: (2049, 108, 3),
             },
             Root {
                 name: "nested",
@@ -2639,19 +2639,19 @@ function looped(flag: bool): bool { while (flag) { return mk().x == 2i32; } retu
                     blocker: r####"wrap().inner.x == 2i32"####,
                 },
                 graph: None,
-                stats: (2017, 98, 3),
+                stats: (2027, 98, 3),
             },
             Root {
                 name: "dead",
                 want: Want::Checked,
                 graph: None,
-                stats: (2071, 127, 3),
+                stats: (2081, 127, 3),
             },
             Root {
                 name: "looped",
                 want: Want::Checked,
                 graph: None,
-                stats: (5495, 721, 6),
+                stats: (5753, 721, 6),
             },
         ],
     },
@@ -3092,14 +3092,14 @@ function nonList(input: Box): i32 {
 }
 "####,
                         typed_stats: (326272, 48621, 12),
-                        graph: (GraphCompletion::Incomplete, (188640, 4266, 5)),
+                        graph: (GraphCompletion::Incomplete, (191339, 4266, 5)),
                         roots: &[Root {
                             name: "nonList",
                             want: Want::Incomplete {
                                 blocker: r####"viewOf(&mut owned)"####,
                             },
                             graph: None,
-                            stats: (2628, 165, 3),
+                            stats: (2845, 165, 3),
                         }],
                     },
                     o12::Case {
@@ -3113,14 +3113,14 @@ function scalar(input: i32): i32 {
 }
 "####,
                         typed_stats: (325434, 48570, 12),
-                        graph: (GraphCompletion::Incomplete, (187862, 4149, 5)),
+                        graph: (GraphCompletion::Incomplete, (190354, 4149, 5)),
                         roots: &[Root {
                             name: "scalar",
                             want: Want::Incomplete {
                                 blocker: r####"viewOf(&mut owned)"####,
                             },
                             graph: None,
-                            stats: (1914, 48, 3),
+                            stats: (1924, 48, 3),
                         }],
                     },
                 ],
@@ -3149,14 +3149,14 @@ function id(x: i32): i32 { return x; }
 function decidedLeft(a: i32, b: i32): bool { return id(if (true) stop() else 1i32) == b && a == b; }
 "####,
                     typed_stats: (326574, 48538, 12),
-                    graph: (GraphCompletion::Incomplete, (187502, 4246, 5)),
+                    graph: (GraphCompletion::Incomplete, (189994, 4246, 5)),
                     roots: &[Root {
                         name: "decidedLeft",
                         want: Want::Incomplete {
                             blocker: r####"id(if (true) stop() else 1i32) == b && a == b"####,
                         },
                         graph: None,
-                        stats: (1899, 42, 3),
+                        stats: (1909, 42, 3),
                     }],
                 }],
             );
@@ -3178,14 +3178,14 @@ function id(x: i32): i32 { return x; }
 function decidedRight(a: i32, b: i32): bool { return a == b && id(if (true) stop() else 1i32) == b; }
 "####,
                     typed_stats: (326581, 48544, 12),
-                    graph: (GraphCompletion::Incomplete, (187502, 4246, 5)),
+                    graph: (GraphCompletion::Incomplete, (189994, 4246, 5)),
                     roots: &[Root {
                         name: "decidedRight",
                         want: Want::Incomplete {
                             blocker: r####"a == b && id(if (true) stop() else 1i32) == b"####,
                         },
                         graph: None,
-                        stats: (1899, 42, 3),
+                        stats: (1909, 42, 3),
                     }],
                 }],
             );
@@ -3258,7 +3258,7 @@ fn o13_pre_retained_string_caps_now_give_resource_limit() {
                     .find(|m| m.key.origin == Origin::Application && m.key.path == "main.rill")
                     .unwrap();
                 let receipt = typed.receipt().unwrap();
-                for (name, old) in [("clear", (1994, 88, 1)), ("joined", (2015, 97, 3))] {
+                for (name, old) in [("clear", (2004, 88, 1)), ("joined", (2015, 97, 3))] {
                     let root = module
                         .declarations
                         .iter()
@@ -3842,7 +3842,7 @@ fn o19_neighbours_reject_an_earlier_ending_source() {
                     &format!("test_mode {test_mode}"),
                     &typed,
                     module,
-                    (GraphCompletion::SourceRejected, (201548, 6580, 7)),
+                    (GraphCompletion::SourceRejected, (208007, 6580, 7)),
                     &[
                         Root {
                             name: "scoped",
@@ -3852,7 +3852,7 @@ fn o19_neighbours_reject_an_earlier_ending_source() {
                                 related: r####"&source"####,
                             },
                             graph: None,
-                            stats: (3402, 541, 7),
+                            stats: (4015, 541, 7),
                         },
                         Root {
                             name: "early",
@@ -3862,19 +3862,19 @@ fn o19_neighbours_reject_an_earlier_ending_source() {
                                 related: r####"&source"####,
                             },
                             graph: None,
-                            stats: (3387, 522, 5),
+                            stats: (4000, 522, 5),
                         },
                         Root {
                             name: "grouped",
                             want: Want::Checked,
                             graph: None,
-                            stats: (6560, 897, 7),
+                            stats: (7936, 897, 7),
                         },
                         Root {
                             name: "looped",
                             want: Want::Checked,
                             graph: None,
-                            stats: (7092, 1138, 7),
+                            stats: (8528, 1138, 7),
                         },
                         Root {
                             name: "exclusive",
@@ -3882,7 +3882,7 @@ fn o19_neighbours_reject_an_earlier_ending_source() {
                                 blocker: r####"holder"####,
                             },
                             graph: None,
-                            stats: (2446, 185, 1),
+                            stats: (2792, 185, 1),
                         },
                         Root {
                             name: "deep",
@@ -3890,7 +3890,7 @@ fn o19_neighbours_reject_an_earlier_ending_source() {
                                 blocker: r####"holder"####,
                             },
                             graph: None,
-                            stats: (2441, 182, 1),
+                            stats: (2787, 182, 1),
                         },
                     ],
                 );
@@ -3925,10 +3925,10 @@ fn field_through_reference_charges_its_local_probe() {
                     o12::Case {
                         text: FIELD_THROUGH_REFERENCE,
                         typed_stats: (325240, 48451, 12),
-                        graph: (GraphCompletion::Incomplete, (187332, 4397, 5)),
+                        graph: (GraphCompletion::Incomplete, (189824, 4397, 5)),
                         roots: &[
-                            record_contents::checked("viaParam", (1996, 88, 3)),
-                            record_contents::checked("afterLocals", (2282, 232, 3)),
+                            record_contents::checked("viaParam", (2006, 88, 3)),
+                            record_contents::checked("afterLocals", (2292, 232, 3)),
                         ],
                     }
                 }],
@@ -3967,13 +3967,13 @@ fn call_field_equality_reserves_its_scratch() {
                     o12::Case {
                         text: CALL_FIELD_SCRATCH,
                         typed_stats: (329581, 48820, 12),
-                        graph: (GraphCompletion::Incomplete, (191514, 5128, 5)),
+                        graph: (GraphCompletion::Incomplete, (194351, 5128, 5)),
                         roots: &[
-                            record_contents::checked("a", (2407, 176, 4)),
-                            record_contents::checked("b", (2407, 176, 4)),
-                            record_contents::checked("same", (7896, 756, 4)),
-                            record_contents::checked("one", (4973, 438, 4)),
-                            record_contents::checked("plain", (2111, 152, 4)),
+                            record_contents::checked("a", (2486, 176, 4)),
+                            record_contents::checked("b", (2486, 176, 4)),
+                            record_contents::checked("same", (8422, 756, 4)),
+                            record_contents::checked("one", (5231, 438, 4)),
+                            record_contents::checked("plain", (2121, 152, 4)),
                         ],
                     }
                 }],
