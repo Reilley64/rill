@@ -384,12 +384,11 @@ fn field_type<'a, 'g>(
         return Ok(None);
     }
     let headers = &typed.inventory().type_facts().declarations;
-    keyed::charge(&declaration.module, headers.len(), budget)?;
     let Some(DeclarationFacts {
         binders,
         shape: DeclarationShape::Record { fields },
         ..
-    }) = headers.get(*declaration)
+    }) = headers.get(declaration)
     else {
         return Ok(None);
     };

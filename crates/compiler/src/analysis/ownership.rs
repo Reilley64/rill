@@ -1531,8 +1531,6 @@ fn checked_graph<'g>(
                     .dispose_role()
                     .ok_or((module, Stop::Pending(root_site)))?;
                 let families = typed.inventory();
-                keyed::charge(&role.id.module, families.family_probes(), budget)
-                    .map_err(|()| (target, Stop::Limit))?;
                 let family = families
                     .captured_family(&role.id)
                     .ok_or((module, Stop::Pending(root_site)))?;
@@ -1547,8 +1545,6 @@ fn checked_graph<'g>(
                 (selected, Frame::ActiveDisposer)
             } else {
                 let declarations = &typed.inventory().type_facts().declarations;
-                keyed::charge(&id.module, declarations.len(), budget)
-                    .map_err(|()| (target, Stop::Limit))?;
                 (declarations.get(id), Frame::OrdinaryFunction)
             };
             lower(
@@ -1975,7 +1971,6 @@ fn lower_implementation<'a, 'g>(
     {
         return Err(Stop::Pending(site));
     }
-    keyed::charge(&source.family.module, inventory.family_probes(), budget)?;
     let family = inventory
         .captured_family(&source.family)
         .ok_or(Stop::Pending(site))?;
