@@ -9,7 +9,6 @@ use std::sync::Arc;
 mod collect;
 mod filesystem;
 mod installed;
-#[expect(dead_code)]
 pub(crate) mod keyed;
 mod resolve;
 use filesystem::Host;

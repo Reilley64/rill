@@ -7,6 +7,7 @@ pub(crate) trait Meter {
     fn step(&mut self, n: usize) -> Result<(), ()>;
 }
 
+#[cfg_attr(not(test), expect(dead_code))]
 pub(crate) trait PathKey {
     fn path(&self) -> &ModuleKey;
 }
@@ -55,6 +56,7 @@ pub(crate) fn module_position(
     Ok(modules.binary_search_by(|module| module.key.cmp(key)).ok())
 }
 
+#[cfg_attr(not(test), expect(dead_code))]
 pub(crate) struct PathMap<K, V>(BTreeMap<K, V>);
 
 impl<K, V> Default for PathMap<K, V> {
@@ -63,6 +65,7 @@ impl<K, V> Default for PathMap<K, V> {
     }
 }
 
+#[cfg_attr(not(test), expect(dead_code))]
 impl<K: PathKey + Ord, V> PathMap<K, V> {
     pub(crate) fn new() -> Self {
         Self::default()
@@ -145,6 +148,7 @@ impl<K: fmt::Debug, V: fmt::Debug> fmt::Debug for PathMap<K, V> {
     }
 }
 
+#[cfg_attr(not(test), expect(dead_code))]
 pub(crate) struct PathSet<K>(BTreeSet<K>);
 
 impl<K> Default for PathSet<K> {
@@ -153,6 +157,7 @@ impl<K> Default for PathSet<K> {
     }
 }
 
+#[cfg_attr(not(test), expect(dead_code))]
 impl<K: PathKey + Ord> PathSet<K> {
     pub(crate) fn new() -> Self {
         Self::default()
@@ -331,6 +336,16 @@ mod tests {
         assert_eq!(map.values().count(), 3);
         assert!(!map.is_empty() && PathMap::<ModuleKey, ()>::new().is_empty());
         assert_eq!(meter.spent, spent);
+        let mut set = PathSet::new();
+        for path in ["b", "a", "c"] {
+            set.insert(key(path), &mut meter).unwrap();
+        }
+        let spent_with_set = meter.spent;
+        let order: Vec<&str> = set.iter().map(|k| k.path.as_str()).collect();
+        assert_eq!(order, ["a", "b", "c"]);
+        assert_eq!(set.len(), 3);
+        assert!(!set.is_empty() && PathSet::<ModuleKey>::new().is_empty());
+        assert_eq!(meter.spent, spent_with_set);
     }
 
     #[test]
