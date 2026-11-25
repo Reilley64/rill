@@ -280,8 +280,6 @@ pub(super) fn implementation_frame<'g>(
     Ok(frame)
 }
 
-/// A `log` or `panic` implementation over its one private output operation:
-/// `string` or `&string` in, `void` (flowing on) or `never` (diverging) out.
 fn output_frame<'g>(
     typed: &TypedReport<'g>,
     implementation: &ImplementationFacts<'g>,

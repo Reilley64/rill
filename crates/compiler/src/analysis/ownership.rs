@@ -2925,9 +2925,7 @@ enum CallResult<'a, 'g> {
     RetainsExclusiveInput,
     RetainsOptionCarrier(&'a DeclarationFacts<'g>),
     TransfersCallable(&'a DeclarationFacts<'g>),
-    /// The private `writeLine` binding: one staged `&string`, `void` result.
     WriteLine,
-    /// The private `panicText` binding: one staged `&string`, `never` result.
     Panic,
 }
 

@@ -364,7 +364,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 Some(InputPremise::HypotheticalConversionRole)
             }
             RequirementTarget::Family(id)
-                if self.has_installed_ordinary_scope(id)
+                if self.has_installed_ordinary_scope(id)?
                     || self.ordinary_scalar_role(id).is_some() =>
             {
                 None
@@ -549,7 +549,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         let Some(substitutions) = &body.substitution else {
             return Ok(None);
         };
-        let installed_ordinary = self.has_installed_ordinary_scope(&source.family);
+        let installed_ordinary = self.has_installed_ordinary_scope(&source.family)?;
         // The closed installed role inventory also permits checking a canonical
         // disposer in the module that defines its monomorphic record. The
         // typed receipt still requires the separate protection inventory.
@@ -1569,7 +1569,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             && let Some(state) = self.assumption_output(goal, &family.header, &inputs, &filters)?
         {
             // The assumed contract does not prove a concrete dispatch target.
-            if self.has_installed_ordinary_scope(id) {
+            if self.has_installed_ordinary_scope(id)? {
                 self.evidence.goals[goal].selection = None;
             }
             return Ok(state);
@@ -1782,7 +1782,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         };
         let selected = (|| {
             let admitted = admitted_role
-                || self.has_installed_ordinary_scope(family)
+                || self.has_installed_ordinary_scope_within(family, &mut budget)?
                 || self.ordinary_scalar_role(family).is_some();
             let inventory = self.input.ordinary.unwrap();
             let facts = if admitted {
@@ -2001,7 +2001,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             &routes,
             false,
         )?;
-        if self.has_installed_ordinary_scope(family)
+        if self.has_installed_ordinary_scope(family)?
             && let Some(premise) = premise
         {
             self.add_goal_premise(&id, premise);
@@ -2058,7 +2058,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 continue;
             };
             if let GoalJudgment::Instantiate { family, .. } = self.evidence.goals[goal].judgment
-                && !self.has_installed_ordinary_scope(family)
+                && !self.has_installed_ordinary_scope(family)?
             {
                 self.add_goal_premise(&child, InputPremise::HypotheticalOrdinaryRole);
             }

@@ -8087,9 +8087,6 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         self.expression(*argument, Some(stage), call_pc, depth + 1)
     }
 
-    /// A statement call into the pinned output module whose result is
-    /// `never`. It does not reach the normal-flow discard, which needs a
-    /// result that flows on. Decided from the written types alone, free.
     fn output_call_statement(
         &self,
         node: NodeId,
@@ -8102,10 +8099,6 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             .then_some((facts, call))
     }
 
-    /// A call into the pinned output module: the private `writeLine` and
-    /// `panicText` bindings with one staged `&string`, or `log` with a
-    /// `string` moved in or a `&string` borrowed, calling its selected
-    /// implementation. Every other shape stays at this call.
     fn call_output(
         &mut self,
         node: NodeId,

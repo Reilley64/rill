@@ -568,7 +568,6 @@ fn check_binding<'g>(
     Ok(None)
 }
 
-/// An exported `name<S>(S): result` family of the pinned output module.
 fn check_output_family<'g>(
     inventory: &OrdinaryAnalysis<'g>,
     module: &'g Module,
@@ -609,7 +608,6 @@ fn check_output_family<'g>(
     )
 }
 
-/// A private bodyless `name(&string): result` in the pinned output module.
 fn check_output_binding<'g>(
     inventory: &OrdinaryAnalysis<'g>,
     module: &'g Module,
