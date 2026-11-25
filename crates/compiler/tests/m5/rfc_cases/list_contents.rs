@@ -946,11 +946,11 @@ fn list_destination_siblings_keep_their_outcomes_and_blockers() {
                         Case {
                             text: NAMED,
                             typed_stats: (326516, 48743, 12),
-                            graph: (GraphCompletion::Incomplete, (188274, 4146, 5)),
+                            graph: (GraphCompletion::Incomplete, (188126, 4143, 5)),
                             roots: &[incomplete(
                                 "forwarded",
                                 "retain(dst, source)",
-                                (2052, 45, 3),
+                                (1904, 42, 3),
                             )],
                         }
                     },
@@ -958,11 +958,11 @@ fn list_destination_siblings_keep_their_outcomes_and_blockers() {
                         Case {
                             text: NESTED,
                             typed_stats: (327520, 48791, 12),
-                            graph: (GraphCompletion::Incomplete, (188340, 4147, 5)),
+                            graph: (GraphCompletion::Incomplete, (188192, 4144, 5)),
                             roots: &[incomplete(
                                 "forwarded",
                                 "retain(dst, source)",
-                                (2054, 46, 3),
+                                (1906, 43, 3),
                             )],
                         }
                     },
@@ -1063,8 +1063,6 @@ fn list_destination_siblings_keep_their_outcomes_and_blockers() {
             old_root_caps(
                 &request,
                 &[
-                    (NAMED, &[("forwarded", (1904, 42, 3))], (188126, 4143, 5)),
-                    (NESTED, &[("forwarded", (1906, 43, 3))], (188192, 4144, 5)),
                     (FLAG, &[("forwarded", (1917, 49, 3))], (188322, 4150, 5)),
                     (GROUPED, &[("grouped", (1905, 42, 3))], (188126, 4143, 5)),
                 ],
@@ -1074,9 +1072,9 @@ fn list_destination_siblings_keep_their_outcomes_and_blockers() {
 }
 
 #[test]
-fn list_parameter_siblings_pay_their_lookup_and_keep_their_outcomes() {
+fn list_parameter_siblings_keep_their_parent_caps_and_outcomes() {
     installed(
-        "rfc_cases::list_contents::list_parameter_siblings_pay_their_lookup_and_keep_their_outcomes",
+        "rfc_cases::list_contents::list_parameter_siblings_keep_their_parent_caps_and_outcomes",
         |request| {
             check_cases(
                 &request,
@@ -1085,10 +1083,10 @@ fn list_parameter_siblings_pay_their_lookup_and_keep_their_outcomes() {
                         Case {
                             text: NAMED_BORROW,
                             typed_stats: (331068, 49093, 12),
-                            graph: (GraphCompletion::Incomplete, (192013, 4322, 5)),
+                            graph: (GraphCompletion::Incomplete, (191869, 4322, 5)),
                             roots: &[
-                                checked("touch", (2071, 91, 1)),
-                                checked("touchTwo", (2114, 109, 1)),
+                                checked("touch", (1999, 91, 1)),
+                                checked("touchTwo", (2042, 109, 1)),
                                 incomplete("f", "users", (2303, 121, 1)),
                             ],
                         }
@@ -1097,11 +1095,11 @@ fn list_parameter_siblings_pay_their_lookup_and_keep_their_outcomes() {
                         Case {
                             text: NAMED_LONE,
                             typed_stats: (331108, 49031, 12),
-                            graph: (GraphCompletion::Incomplete, (191375, 4263, 5)),
+                            graph: (GraphCompletion::Incomplete, (191084, 4261, 5)),
                             roots: &[
-                                checked("touch", (2057, 84, 1)),
-                                checked("touchTwo", (2100, 102, 1)),
-                                incomplete("f", "touchOne(dst)", (2087, 62, 3)),
+                                checked("touch", (1985, 84, 1)),
+                                checked("touchTwo", (2028, 102, 1)),
+                                incomplete("f", "touchOne(dst)", (1940, 60, 3)),
                             ],
                         }
                     },
@@ -1109,11 +1107,11 @@ fn list_parameter_siblings_pay_their_lookup_and_keep_their_outcomes() {
                         Case {
                             text: NAMED_FORWARDED,
                             typed_stats: (331355, 49137, 12),
-                            graph: (GraphCompletion::Incomplete, (191571, 4271, 5)),
+                            graph: (GraphCompletion::Incomplete, (191279, 4268, 5)),
                             roots: &[
-                                checked("touch", (2063, 87, 1)),
-                                checked("touchTwo", (2106, 105, 1)),
-                                incomplete("f", "touchF(dst, s)", (2102, 70, 3)),
+                                checked("touch", (1991, 87, 1)),
+                                checked("touchTwo", (2034, 105, 1)),
+                                incomplete("f", "touchF(dst, s)", (1954, 67, 3)),
                             ],
                         }
                     },
@@ -1121,11 +1119,11 @@ fn list_parameter_siblings_pay_their_lookup_and_keep_their_outcomes() {
                         Case {
                             text: NAMED_FORWARDED_PIPE,
                             typed_stats: (331365, 49141, 12),
-                            graph: (GraphCompletion::Incomplete, (191497, 4268, 5)),
+                            graph: (GraphCompletion::Incomplete, (191281, 4268, 5)),
                             roots: &[
-                                checked("touch", (2063, 87, 1)),
-                                checked("touchTwo", (2106, 105, 1)),
-                                incomplete("f", "dst |> touchF(s)", (2028, 67, 3)),
+                                checked("touch", (1991, 87, 1)),
+                                checked("touchTwo", (2034, 105, 1)),
+                                incomplete("f", "dst |> touchF(s)", (1956, 67, 3)),
                             ],
                         }
                     },
@@ -1133,11 +1131,11 @@ fn list_parameter_siblings_pay_their_lookup_and_keep_their_outcomes() {
                         Case {
                             text: NAMED_DIRECT_EMPTY,
                             typed_stats: (330675, 48942, 12),
-                            graph: (GraphCompletion::Incomplete, (191442, 4264, 5)),
+                            graph: (GraphCompletion::Incomplete, (191154, 4264, 5)),
                             roots: &[
-                                checked("touch", (2059, 85, 1)),
-                                checked("touchTwo", (2102, 103, 1)),
-                                incomplete("f", "dst", (2094, 63, 3)),
+                                checked("touch", (1987, 85, 1)),
+                                checked("touchTwo", (2030, 103, 1)),
+                                incomplete("f", "dst", (1950, 63, 3)),
                             ],
                         }
                     },
@@ -1145,11 +1143,11 @@ fn list_parameter_siblings_pay_their_lookup_and_keep_their_outcomes() {
                         Case {
                             text: NAMED_DIRECT_PAIR,
                             typed_stats: (330883, 48997, 12),
-                            graph: (GraphCompletion::Incomplete, (191638, 4272, 5)),
+                            graph: (GraphCompletion::Incomplete, (191350, 4272, 5)),
                             roots: &[
-                                checked("touch", (2065, 88, 1)),
-                                checked("touchTwo", (2108, 106, 1)),
-                                incomplete("f", "dst", (2109, 71, 3)),
+                                checked("touch", (1993, 88, 1)),
+                                checked("touchTwo", (2036, 106, 1)),
+                                incomplete("f", "dst", (1965, 71, 3)),
                             ],
                         }
                     },
@@ -1157,78 +1155,14 @@ fn list_parameter_siblings_pay_their_lookup_and_keep_their_outcomes() {
                         Case {
                             text: NAMED_PIPED_PAIR,
                             typed_stats: (330893, 49001, 12),
-                            graph: (GraphCompletion::Incomplete, (191638, 4269, 5)),
+                            graph: (GraphCompletion::Incomplete, (191350, 4269, 5)),
                             roots: &[
-                                checked("touch", (2065, 88, 1)),
-                                checked("touchTwo", (2108, 106, 1)),
-                                incomplete("f", "dst |> touchTwo(s)", (2109, 68, 3)),
+                                checked("touch", (1993, 88, 1)),
+                                checked("touchTwo", (2036, 106, 1)),
+                                incomplete("f", "dst |> touchTwo(s)", (1965, 68, 3)),
                             ],
                         }
                     },
-                ],
-            );
-            old_root_caps(
-                &request,
-                &[
-                    (
-                        NAMED_BORROW,
-                        &[("touch", (1999, 91, 1)), ("touchTwo", (2042, 109, 1))],
-                        (191869, 4322, 5),
-                    ),
-                    (
-                        NAMED_LONE,
-                        &[
-                            ("touch", (1985, 84, 1)),
-                            ("touchTwo", (2028, 102, 1)),
-                            ("f", (1940, 60, 3)),
-                        ],
-                        (191084, 4261, 5),
-                    ),
-                    (
-                        NAMED_FORWARDED,
-                        &[
-                            ("touch", (1991, 87, 1)),
-                            ("touchTwo", (2034, 105, 1)),
-                            ("f", (1954, 67, 3)),
-                        ],
-                        (191279, 4268, 5),
-                    ),
-                    (
-                        NAMED_FORWARDED_PIPE,
-                        &[
-                            ("touch", (1991, 87, 1)),
-                            ("touchTwo", (2034, 105, 1)),
-                            ("f", (1956, 67, 3)),
-                        ],
-                        (191281, 4268, 5),
-                    ),
-                    (
-                        NAMED_DIRECT_EMPTY,
-                        &[
-                            ("touch", (1987, 85, 1)),
-                            ("touchTwo", (2030, 103, 1)),
-                            ("f", (1950, 63, 3)),
-                        ],
-                        (191154, 4264, 5),
-                    ),
-                    (
-                        NAMED_DIRECT_PAIR,
-                        &[
-                            ("touch", (1993, 88, 1)),
-                            ("touchTwo", (2036, 106, 1)),
-                            ("f", (1965, 71, 3)),
-                        ],
-                        (191350, 4272, 5),
-                    ),
-                    (
-                        NAMED_PIPED_PAIR,
-                        &[
-                            ("touch", (1993, 88, 1)),
-                            ("touchTwo", (2036, 106, 1)),
-                            ("f", (1965, 68, 3)),
-                        ],
-                        (191350, 4269, 5),
-                    ),
                 ],
             );
         },
@@ -1236,9 +1170,9 @@ fn list_parameter_siblings_pay_their_lookup_and_keep_their_outcomes() {
 }
 
 #[test]
-fn list_parameter_siblings_of_nested_records_and_enums_pay_their_lookup() {
+fn list_parameter_siblings_of_nested_records_and_enums_keep_their_parent_caps() {
     installed(
-        "rfc_cases::list_contents::list_parameter_siblings_of_nested_records_and_enums_pay_their_lookup",
+        "rfc_cases::list_contents::list_parameter_siblings_of_nested_records_and_enums_keep_their_parent_caps",
         |request| {
             check_cases(
                 &request,
@@ -1247,10 +1181,10 @@ fn list_parameter_siblings_of_nested_records_and_enums_pay_their_lookup() {
                         Case {
                             text: NESTED_BORROW,
                             typed_stats: (332187, 49185, 12),
-                            graph: (GraphCompletion::Incomplete, (192502, 4382, 5)),
+                            graph: (GraphCompletion::Incomplete, (192358, 4382, 5)),
                             roots: &[
-                                checked("touch", (2075, 93, 1)),
-                                checked("touchTwo", (2118, 111, 1)),
+                                checked("touch", (2003, 93, 1)),
+                                checked("touchTwo", (2046, 111, 1)),
                                 incomplete("f", "users", (2668, 181, 1)),
                             ],
                         }
@@ -1259,11 +1193,11 @@ fn list_parameter_siblings_of_nested_records_and_enums_pay_their_lookup() {
                         Case {
                             text: NESTED_LONE,
                             typed_stats: (332128, 49079, 12),
-                            graph: (GraphCompletion::Incomplete, (191441, 4264, 5)),
+                            graph: (GraphCompletion::Incomplete, (191150, 4262, 5)),
                             roots: &[
-                                checked("touch", (2059, 85, 1)),
-                                checked("touchTwo", (2102, 103, 1)),
-                                incomplete("f", "touchOne(dst)", (2089, 63, 3)),
+                                checked("touch", (1987, 85, 1)),
+                                checked("touchTwo", (2030, 103, 1)),
+                                incomplete("f", "touchOne(dst)", (1942, 61, 3)),
                             ],
                         }
                     },
@@ -1271,11 +1205,11 @@ fn list_parameter_siblings_of_nested_records_and_enums_pay_their_lookup() {
                         Case {
                             text: NESTED_FORWARDED,
                             typed_stats: (332374, 49185, 12),
-                            graph: (GraphCompletion::Incomplete, (191637, 4272, 5)),
+                            graph: (GraphCompletion::Incomplete, (191345, 4269, 5)),
                             roots: &[
-                                checked("touch", (2065, 88, 1)),
-                                checked("touchTwo", (2108, 106, 1)),
-                                incomplete("f", "touchF(dst, s)", (2104, 71, 3)),
+                                checked("touch", (1993, 88, 1)),
+                                checked("touchTwo", (2036, 106, 1)),
+                                incomplete("f", "touchF(dst, s)", (1956, 68, 3)),
                             ],
                         }
                     },
@@ -1283,11 +1217,11 @@ fn list_parameter_siblings_of_nested_records_and_enums_pay_their_lookup() {
                         Case {
                             text: NESTED_FORWARDED_PIPE,
                             typed_stats: (332384, 49189, 12),
-                            graph: (GraphCompletion::Incomplete, (191563, 4269, 5)),
+                            graph: (GraphCompletion::Incomplete, (191347, 4269, 5)),
                             roots: &[
-                                checked("touch", (2065, 88, 1)),
-                                checked("touchTwo", (2108, 106, 1)),
-                                incomplete("f", "dst |> touchF(s)", (2030, 68, 3)),
+                                checked("touch", (1993, 88, 1)),
+                                checked("touchTwo", (2036, 106, 1)),
+                                incomplete("f", "dst |> touchF(s)", (1958, 68, 3)),
                             ],
                         }
                     },
@@ -1295,11 +1229,11 @@ fn list_parameter_siblings_of_nested_records_and_enums_pay_their_lookup() {
                         Case {
                             text: NESTED_DIRECT_EMPTY,
                             typed_stats: (331695, 48990, 12),
-                            graph: (GraphCompletion::Incomplete, (191508, 4265, 5)),
+                            graph: (GraphCompletion::Incomplete, (191220, 4265, 5)),
                             roots: &[
-                                checked("touch", (2061, 86, 1)),
-                                checked("touchTwo", (2104, 104, 1)),
-                                incomplete("f", "dst", (2096, 64, 3)),
+                                checked("touch", (1989, 86, 1)),
+                                checked("touchTwo", (2032, 104, 1)),
+                                incomplete("f", "dst", (1952, 64, 3)),
                             ],
                         }
                     },
@@ -1307,11 +1241,11 @@ fn list_parameter_siblings_of_nested_records_and_enums_pay_their_lookup() {
                         Case {
                             text: NESTED_DIRECT_PAIR,
                             typed_stats: (331902, 49045, 12),
-                            graph: (GraphCompletion::Incomplete, (191704, 4273, 5)),
+                            graph: (GraphCompletion::Incomplete, (191416, 4273, 5)),
                             roots: &[
-                                checked("touch", (2067, 89, 1)),
-                                checked("touchTwo", (2110, 107, 1)),
-                                incomplete("f", "dst", (2111, 72, 3)),
+                                checked("touch", (1995, 89, 1)),
+                                checked("touchTwo", (2038, 107, 1)),
+                                incomplete("f", "dst", (1967, 72, 3)),
                             ],
                         }
                     },
@@ -1319,11 +1253,11 @@ fn list_parameter_siblings_of_nested_records_and_enums_pay_their_lookup() {
                         Case {
                             text: NESTED_PIPED_PAIR,
                             typed_stats: (331912, 49049, 12),
-                            graph: (GraphCompletion::Incomplete, (191704, 4270, 5)),
+                            graph: (GraphCompletion::Incomplete, (191416, 4270, 5)),
                             roots: &[
-                                checked("touch", (2067, 89, 1)),
-                                checked("touchTwo", (2110, 107, 1)),
-                                incomplete("f", "dst |> touchTwo(s)", (2111, 69, 3)),
+                                checked("touch", (1995, 89, 1)),
+                                checked("touchTwo", (2038, 107, 1)),
+                                incomplete("f", "dst |> touchTwo(s)", (1967, 69, 3)),
                             ],
                         }
                     },
@@ -1411,70 +1345,6 @@ fn list_parameter_siblings_of_nested_records_and_enums_pay_their_lookup() {
                             ],
                         }
                     },
-                ],
-            );
-            old_root_caps(
-                &request,
-                &[
-                    (
-                        NESTED_BORROW,
-                        &[("touch", (2003, 93, 1)), ("touchTwo", (2046, 111, 1))],
-                        (192358, 4382, 5),
-                    ),
-                    (
-                        NESTED_LONE,
-                        &[
-                            ("touch", (1987, 85, 1)),
-                            ("touchTwo", (2030, 103, 1)),
-                            ("f", (1942, 61, 3)),
-                        ],
-                        (191150, 4262, 5),
-                    ),
-                    (
-                        NESTED_FORWARDED,
-                        &[
-                            ("touch", (1993, 88, 1)),
-                            ("touchTwo", (2036, 106, 1)),
-                            ("f", (1956, 68, 3)),
-                        ],
-                        (191345, 4269, 5),
-                    ),
-                    (
-                        NESTED_FORWARDED_PIPE,
-                        &[
-                            ("touch", (1993, 88, 1)),
-                            ("touchTwo", (2036, 106, 1)),
-                            ("f", (1958, 68, 3)),
-                        ],
-                        (191347, 4269, 5),
-                    ),
-                    (
-                        NESTED_DIRECT_EMPTY,
-                        &[
-                            ("touch", (1989, 86, 1)),
-                            ("touchTwo", (2032, 104, 1)),
-                            ("f", (1952, 64, 3)),
-                        ],
-                        (191220, 4265, 5),
-                    ),
-                    (
-                        NESTED_DIRECT_PAIR,
-                        &[
-                            ("touch", (1995, 89, 1)),
-                            ("touchTwo", (2038, 107, 1)),
-                            ("f", (1967, 72, 3)),
-                        ],
-                        (191416, 4273, 5),
-                    ),
-                    (
-                        NESTED_PIPED_PAIR,
-                        &[
-                            ("touch", (1995, 89, 1)),
-                            ("touchTwo", (2038, 107, 1)),
-                            ("f", (1967, 69, 3)),
-                        ],
-                        (191416, 4270, 5),
-                    ),
                 ],
             );
         },

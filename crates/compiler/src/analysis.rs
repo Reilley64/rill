@@ -113,11 +113,6 @@ fn retained_record_candidate<'a, 'g>(ty: &'a TypeTerm<'g>) -> Option<&'a Type<'g
     .then_some(referent)
 }
 
-// The record candidate's declaration is a record of `i32` fields. The lookup
-// is keyed by the declaration's module path, so it is charged by path length
-// per comparison (metering rule 3), after the free type screen (rule 1). The
-// body that holds the candidate's reference slot stays on its old path for
-// any other shape.
 fn retained_record_contents<'a, 'g>(
     inventory: &ordinary::OrdinaryAnalysis<'g>,
     ty: &'a TypeTerm<'g>,
@@ -129,8 +124,6 @@ fn retained_record_contents<'a, 'g>(
     retained_i32_record(inventory, contents, budget)
 }
 
-// `contents` is `&R`: the same charged lookup of `R`'s declaration, for a
-// `&mut &R` destination and for the element of a `&mut List<&R>` (rule R1).
 fn retained_i32_record<'a, 'g>(
     inventory: &ordinary::OrdinaryAnalysis<'g>,
     contents: &'a Type<'g>,
@@ -142,6 +135,12 @@ fn retained_i32_record<'a, 'g>(
     let TypeTerm::Nominal { declaration, .. } = referent.as_ref() else {
         return Ok(None);
     };
+    if matches!(
+        inventory.field_class(declaration),
+        declarations::FieldClass::Text | declarations::FieldClass::Other
+    ) {
+        return Ok(None);
+    }
     let declarations = &inventory.type_facts().declarations;
     let probes = (usize::BITS - declarations.len().leading_zeros() + 1) as usize;
     budget.step(

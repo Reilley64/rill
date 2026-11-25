@@ -1,6 +1,6 @@
 //! Scoped ownership checking and cleanup MIR over a typed capture.
 use super::DeclarationFacts;
-use super::declarations::Budget;
+use super::declarations::{Budget, FieldClass};
 use super::scalars::{BodyOwner, NodeFactKind, NodeFacts, Site};
 use super::typed::{CollectionProvider, CollectionRepresentation, TypedReceipt, TypedReport};
 use super::{
@@ -2136,9 +2136,6 @@ fn retained_contract<'a, 'g>(
     )
 }
 
-// The contents a retained destination type holds. A `bool` or `string`
-// descriptor is read from the type alone; a reference to a record of `i32`
-// fields needs its declaration, charged after the free type screen.
 fn retained_contents_of<'a, 'g>(
     typed: &TypedReport<'g>,
     ty: &'a TypeTerm<'g>,
@@ -2150,10 +2147,6 @@ fn retained_contents_of<'a, 'g>(
     Ok(retained_record_contents(typed.inventory(), ty, budget)?)
 }
 
-// `retained_contents_of`, and the element contents of a `&mut List<&R>`
-// destination (rule R1). Only the destination routes use it: the screen that
-// looks for a retained parameter by its descriptor contents keeps
-// `retained_contents_of`, so a list parameter pays its record lookup once.
 fn retained_destination_contents<'a, 'g>(
     typed: &TypedReport<'g>,
     ty: &'a TypeTerm<'g>,
@@ -2196,10 +2189,14 @@ fn retained_list_candidate<'a, 'g>(
         return None;
     };
     matches!(element.as_ref(), TypeTerm::Reference { mutable: false, referent: record }
-        if matches!(record.as_ref(), TypeTerm::Nominal { declaration, arguments }
-            if declaration.kind == DeclarationKind::Record
-                && declaration.module.origin == crate::loader::Origin::Application
-                && arguments.is_empty()))
+    if matches!(record.as_ref(), TypeTerm::Nominal { declaration, arguments }
+        if declaration.kind == DeclarationKind::Record
+            && declaration.module.origin == crate::loader::Origin::Application
+            && arguments.is_empty()
+            && !matches!(
+                typed.inventory().field_class(declaration),
+                FieldClass::Text | FieldClass::Other
+            )))
     .then_some(element)
 }
 
