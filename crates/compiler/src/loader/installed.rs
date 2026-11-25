@@ -186,10 +186,7 @@ impl InstalledProfile {
     }
 }
 
-/// Facade names that load their module only when a program imports one of them:
-/// `(facade, module, names)`. The loader fabricates `export import module::{names}`
-/// inside the facade, for every request, installed or source-only. Interim: ri-qlh.26
-/// deletes it.
+// ri-qlh.26
 pub(super) const ON_DEMAND: &[(&str, &str, &[&str])] = &[("std.rill", "output", &["log", "panic"])];
 
 pub(super) fn demands(import: &Import) -> bool {

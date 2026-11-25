@@ -1433,7 +1433,6 @@ fn entry_and_explicit_prelude_reuse_m1_m2_snapshots() {
     assert_eq!(graph.prelude().dispose.module.path, "core.rill");
 }
 
-/// The repository's standard sources, as the source-only path reads them from a root.
 fn real_stdlib(f: &Fixture) {
     let stdlib = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../stdlib");
     for name in include_str!("../../../tests/installed/typed/stdlib-sources.txt")

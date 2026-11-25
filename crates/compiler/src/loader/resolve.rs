@@ -990,8 +990,6 @@ impl Engine {
             starts: Vec::new(),
         };
         self.discover(&mut import)?;
-        // A source-only standard root need not carry the module; the program's
-        // own import then reports what is missing.
         if !import.starts.is_empty() {
             self.imports.push(import);
         }
