@@ -32,12 +32,12 @@ depends = ["check:rust", "check:m5", "check:docs", "check:comments", "check:fixt
 [tasks."check:rust"]
 description = "Check Rust formatting and LLVM-free clippy"
 depends = ["doctor"]
-run = ["cargo fmt --all -- --check", "cargo clippy --locked --no-default-features -p compiler -p ide -p lsp -p cli -p rill-collection -p rill-error-storage --all-targets -- -D warnings"]
+run = ["cargo fmt --all -- --check", "cargo clippy --locked --no-default-features -p compiler -p ide -p lsp -p cli -p rill-collection -p rill-error-storage -p rill-runtime --all-targets -- -D warnings"]
 
 [tasks.test]
 description = "Run implemented LLVM-free Rust component tests, not complete Rill product acceptance"
 depends = ["doctor"]
-run = "cargo test --locked --no-default-features -p compiler -p ide -p lsp -p cli -p rill-collection -p rill-error-storage"
+run = "cargo test --locked --no-default-features -p compiler -p ide -p lsp -p cli -p rill-collection -p rill-error-storage -p rill-runtime"
 
 [tasks."test:compiler"]
 description = "Run compiler unit, integration and documentation tests without LLVM"
