@@ -3,8 +3,8 @@ use super::*;
 use crate::analysis::conversions::RegistrationIssueKind;
 use crate::analysis::ordinary::DeclarationIssue;
 use crate::analysis::scalars::{BodyOwner, Site};
+use crate::loader::keyed::{DeclarationTable, PathSet};
 use crate::loader::{DeclarationKind, Module};
-use std::collections::BTreeSet;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TypedCompletion {
@@ -108,24 +108,36 @@ fn accounted_for(
     overlaps: &[OwnershipOverlap<'_>],
     budget: &mut Budget,
 ) -> Work<bool> {
-    let mut checked = BTreeSet::new();
+    let count = graph.declaration_count();
+    budget.reserve(count)?;
+    let mut declarations = DeclarationTable::new();
+    declarations.size_for(graph.id(), count);
+    let mut startups = PathSet::new();
     for body in bodies.checked_bodies() {
         budget.reserve(1)?;
-        if body.flow.pending || !checked.insert((body.site.module, body.owner)) {
+        if body.flow.pending {
+            return Ok(false);
+        }
+        let first = match body.owner {
+            BodyOwner::Startup => startups.insert(body.site.module, budget)?,
+            BodyOwner::Declaration(id) => {
+                debug_assert_eq!(&id.module, body.site.module);
+                declarations.insert(id, ()).is_none()
+            }
+        };
+        if !first {
             return Ok(false);
         }
     }
     for module in graph.modules() {
         budget.step(1)?;
-        if !checked.contains(&(&module.key, BodyOwner::Startup))
-            && !has_finding(bodies, module, None, budget)?
-        {
+        if !startups.contains(&module.key, budget)? && !has_finding(bodies, module, None, budget)? {
             return Ok(false);
         }
         for declaration in &module.declarations {
             budget.step(1)?;
             if body_root(declaration.id.kind)
-                && !checked.contains(&(&module.key, BodyOwner::Declaration(&declaration.id)))
+                && !declarations.contains_key(&declaration.id)
                 && !has_finding(bodies, module, Some(declaration.node), budget)?
                 && !overlap_rejected(overlaps, &declaration.id, budget)?
             {

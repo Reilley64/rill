@@ -351,6 +351,10 @@ impl<'g, V> DeclarationTable<'g, V> {
         self.slots = vec![None; count];
     }
 
+    pub(crate) fn is_sized(&self) -> bool {
+        self.context.is_some()
+    }
+
     fn index(&self, id: &DeclarationId) -> Option<usize> {
         if self.context.as_ref() != Some(&id.context) {
             return None;
