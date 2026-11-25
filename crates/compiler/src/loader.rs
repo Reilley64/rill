@@ -347,6 +347,7 @@ pub struct Graph {
     modules: Vec<Module>,
     routine_index: Option<usize>,
     declaration_count: usize,
+    implementation_at: Vec<Option<usize>>,
     prelude: PreludeIdentities,
     bindings: Vec<Binding>,
     imports: Vec<ImportOutcome>,
@@ -422,6 +423,11 @@ impl Graph {
     }
     pub fn implementations(&self) -> &[Implementation] {
         &self.implementations
+    }
+    /// The implementation a declaration is, by its ordinal.
+    pub fn implementation(&self, id: &DeclarationId) -> Option<&Implementation> {
+        let index = (*self.implementation_at.get(id.ordinal.index())?)?;
+        self.implementations.get(index)
     }
     pub fn expectations(&self) -> Vec<&Declaration> {
         self.modules

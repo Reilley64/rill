@@ -2933,8 +2933,13 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         if produced.path.is_some()
             || produced.access != Access::Owned
             || !matches!(produced.ty.as_ref(), TypeTerm::Nominal { .. })
-            || !self.scalar_record(&produced.ty)?
         {
+            return Ok(None);
+        }
+        if self.scalar_record_with_custom_disposer(&produced.ty) {
+            return Err(Stop::Pending(value));
+        }
+        if !self.scalar_record(&produced.ty)? {
             return Ok(None);
         }
         let (borrow, depth) = self.ungroup_expression_at(base, depth + 1)?;
@@ -3025,8 +3030,13 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         }
         let boolean = matches!(produced.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "bool");
         if !boolean {
-            // A flat record of scalars: O12's borrowed temporary (RFC 0007).
-            if read.is_some() || !self.scalar_record(&produced.ty)? {
+            if read.is_some() {
+                return Ok(None);
+            }
+            if self.scalar_record_with_custom_disposer(&produced.ty) {
+                return Err(Stop::Pending(call_node));
+            }
+            if !self.scalar_record(&produced.ty)? {
                 return Ok(None);
             }
             let (_, result) = self.direct_application_signature(call_node, call)?;
@@ -5901,6 +5911,15 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             _ => return Err(Stop::Pending(node)),
         };
         self.emit(node, action, Edges::Next(next))
+    }
+
+    fn scalar_record_with_custom_disposer(&self, ty: &Type<'g>) -> bool {
+        let TypeTerm::Nominal { declaration, .. } = ty.as_ref() else {
+            return false;
+        };
+        let inventory = self.typed.inventory();
+        inventory.field_class(declaration) == FieldClass::TextFreeScalars
+            && inventory.custom_dispose(declaration)
     }
 
     /// An application record whose fields are all scalars, so that ending its

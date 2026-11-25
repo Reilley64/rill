@@ -76,6 +76,13 @@ pub(super) fn load(
                 .collect(),
             routine_index,
             declaration_count: engine.next_ordinal,
+            implementation_at: {
+                let mut at = vec![None; engine.next_ordinal];
+                for (index, implementation) in implementations.iter().enumerate() {
+                    at[implementation.declaration.ordinal.index()] = Some(index);
+                }
+                at
+            },
             bindings,
             imports: engine.outcomes,
             implementations,

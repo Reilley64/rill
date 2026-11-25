@@ -131,7 +131,7 @@ fn record_yield_cleans_the_partial_item_then_the_suffix() {
             }
 
             assert_pre_equality_graph_cap(receipt, (234_907, 13_094, 9));
-            let graph_stats = stats(235_220, 13_228, 9);
+            let graph_stats = stats(234_848, 13_167, 9);
             let (exact, short) = limits(graph_stats);
             let graph = analyze_ownership(receipt, exact);
             assert_eq!(graph.statistics(), graph_stats);
@@ -165,7 +165,7 @@ fn record_yield_cleans_the_partial_item_then_the_suffix() {
                 ("onPostfix", Completion::Incomplete, stats(3_649, 562, 4)),
                 ("textLiteral", Completion::Incomplete, stats(2_512, 350, 2)),
                 ("mixed", Completion::Incomplete, stats(2_512, 350, 2)),
-                ("custom", Completion::Incomplete, stats(2_894, 419, 2)),
+                ("custom", Completion::Incomplete, stats(2_522, 358, 2)),
             ] {
                 let function = module
                     .declarations
@@ -243,14 +243,6 @@ fn record_yield_cleans_the_partial_item_then_the_suffix() {
                     }
                 }
             }
-            let custom = module
-                .declarations
-                .iter()
-                .find(|d| d.name.as_deref() == Some("custom"))
-                .unwrap();
-            let limited =
-                lower_body(receipt, module, &custom.id, limits(stats(2_522, 358, 2)).0).unwrap();
-            crate::limit::assert_body_limit(&limited);
         },
     );
 }
