@@ -73,7 +73,7 @@ fn installed_i32_equality_checks_the_loaded_source_root() {
             assert_eq!(
                 target.statistics(),
                 Statistics {
-                    work: 2427,
+                    work: 2429,
                     entries: 310,
                     max_depth: 5
                 }
@@ -158,7 +158,7 @@ fn other_compare_bodies_keep_their_pre_equality_caps() {
             let [old, ..] = caps(before);
             crate::limit::assert_graph_limit(&analyze_ownership(receipt, old));
             let after = Statistics {
-                work: before.work + 316,
+                work: before.work + 356,
                 entries: before.entries + 134,
                 max_depth: 5,
             };

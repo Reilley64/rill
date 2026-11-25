@@ -1492,7 +1492,7 @@ pub(super) struct CancellationTrace<'a, 'g> {
     params: Vec<Slot>,
     retained: BTreeMap<Slot, RetainedContents>,
     facts: BuildFacts<'a, 'g>,
-    bindings: BTreeMap<&'g DeclarationId, Slot>,
+    bindings: OrdinalMap<Slot>,
     code: Vec<Instruction<'g>>,
     calls: Vec<Call<'a, 'g>>,
     known: KnownStates,

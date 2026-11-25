@@ -209,6 +209,10 @@ impl<'g> OrdinaryAnalysis<'g> {
         self.summaries.fields(id)
     }
 
+    pub(super) fn custom_dispose(&self, id: &DeclarationId) -> bool {
+        self.summaries.custom_dispose(id)
+    }
+
     pub(super) fn family_probes(&self) -> usize {
         self.families.len()
     }

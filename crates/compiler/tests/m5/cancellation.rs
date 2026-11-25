@@ -29,21 +29,21 @@ fn ordinary_only_list_loops_keep_the_pre_delivery_caps() {
             // Metering rule 11 (ri-785.9): the whole-graph cap was
             // 191,781/4,867/6 until the i32 equality source root (+316/+134).
             crate::limit::assert_graph_limit(&analyze_ownership(receipt, limits(191781, 4867, 6)));
-            let graph = analyze_ownership(receipt, limits(192097, 5001, 6));
+            let graph = analyze_ownership(receipt, limits(192142, 5001, 6));
             assert_eq!(
                 graph.statistics(),
                 compiler::analysis::Statistics {
-                    work: 192097,
+                    work: 192142,
                     entries: 5001,
                     max_depth: 6
                 }
             );
             for (name, work, entries, depth) in [
-                ("entryOnly", 2197, 175, 6),
-                ("across", 4353, 344, 5),
-                ("veto", 2400, 276, 5),
-                ("impossible", 2195, 180, 6),
-                ("nested", 2364, 254, 5),
+                ("entryOnly", 2198, 175, 6),
+                ("across", 4355, 344, 5),
+                ("veto", 2403, 276, 5),
+                ("impossible", 2197, 180, 6),
+                ("nested", 2368, 254, 5),
             ] {
                 let d = module
                     .declarations
@@ -448,9 +448,9 @@ fn installed_guard_release_on_budget_delivery() {
             };
             let stats = |s: Statistics| (s.work, s.entries, s.max_depth);
             for (name, (work, entries, depth)) in [
-                ("hold", (2252, 203, 4)),
-                ("released", (2294, 223, 4)),
-                ("moved", (2311, 223, 4)),
+                ("hold", (2254, 203, 4)),
+                ("released", (2296, 223, 4)),
+                ("moved", (2314, 223, 4)),
             ] {
                 let measured = lower(name, AnalysisLimits::default()).statistics();
                 assert_eq!(stats(measured), (work, entries, depth), "{name}");
@@ -464,7 +464,7 @@ fn installed_guard_release_on_budget_delivery() {
                     crate::limit::assert_body_limit(&short);
                 }
             }
-            let (work, entries, depth) = (188887, 4635, 5);
+            let (work, entries, depth) = (188927, 4635, 5);
             assert_eq!(stats(graph.statistics()), (work, entries, depth));
             let exact = limits(work, entries, depth);
             let exact_graph = analyze_ownership(receipt, exact);
@@ -523,18 +523,18 @@ fn guard_loops_without_a_proof_keep_their_parent_caps() {
                     },
                 ]
             };
-            let graph_exact = limits(190495, 4613, 6);
+            let graph_exact = limits(190540, 4613, 6);
             let graph = analyze_ownership(receipt, graph_exact);
             assert_eq!(graph.completion(), GraphCompletion::Incomplete);
             for cap in shorts(graph_exact) {
                 crate::limit::assert_graph_limit(&analyze_ownership(receipt, cap));
             }
             for (name, work, entries, depth, completion) in [
-                ("entryOnly", 1992, 83, 1, Completion::Checked),
-                ("across", 4131, 245, 4, Completion::Checked),
-                ("veto", 2209, 192, 4, Completion::Checked),
-                ("impossible", 2162, 166, 6, Completion::Checked),
-                ("nested", 2012, 86, 5, Completion::Incomplete),
+                ("entryOnly", 1993, 83, 1, Completion::Checked),
+                ("across", 4133, 245, 4, Completion::Checked),
+                ("veto", 2212, 192, 4, Completion::Checked),
+                ("impossible", 2164, 166, 6, Completion::Checked),
+                ("nested", 2016, 86, 5, Completion::Incomplete),
             ] {
                 let d = module
                     .declarations
@@ -602,7 +602,7 @@ fn guard_returned_after_a_loop_keeps_its_parent_caps() {
                 ]
             };
             let graph_exact = AnalysisLimits {
-                max_work: 186_018,
+                max_work: 186_053,
                 max_entries: 4_120,
                 max_depth: 5,
             };
@@ -619,7 +619,7 @@ fn guard_returned_after_a_loop_keeps_its_parent_caps() {
                 .find(|d| d.name.as_deref() == Some("pass"))
                 .unwrap();
             let exact = AnalysisLimits {
-                max_work: 1_888,
+                max_work: 1_890,
                 max_entries: 25,
                 max_depth: 2,
             };
@@ -1368,7 +1368,7 @@ function outsideSubset(value: bool): void {
                 if !covered {
                     // Exact ordinary stats from 0fbf765 for this unchanged capture.
                     let exact = AnalysisLimits {
-                        max_work: 4022,
+                        max_work: 4024,
                         max_entries: 197,
                         ..AnalysisLimits::default()
                     };
@@ -1507,7 +1507,7 @@ fn aggregate_outside_cancellation_keeps_ordinary_budget() {
         |_, module, receipt, _| {
             // Both are the measured ordinary limits for this capture at 0fbf765.
             let limits = AnalysisLimits {
-                max_work: 2273,
+                max_work: 2274,
                 max_entries: 108,
                 ..Default::default()
             };

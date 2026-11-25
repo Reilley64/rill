@@ -2,7 +2,7 @@
 use super::*;
 use crate::analysis::typed::CollectionOperation;
 use crate::analysis::{ordinary::ImplementationFacts, scalars::BodyFacts};
-use crate::loader::{GraphId, ModuleKey, Origin};
+use crate::loader::{GraphId, ModuleKey, Origin, keyed};
 use std::collections::BTreeSet;
 
 mod closed_release;
@@ -482,22 +482,8 @@ fn record_finding<'g>(
     Ok(index)
 }
 
-// Modules are already sorted by the loader. Prepay the whole binary search
-// (one comparison per halving, plus the final equality check). Each comparison
-// can inspect at most the query path's byte length, even for a shared prefix.
-fn module_index(
-    modules: &[Module],
-    key: &ModuleKey,
-    budget: &mut Budget,
-) -> Result<Option<usize>, ()> {
-    let probes = usize::BITS - modules.len().leading_zeros() + 1;
-    charge_key(key, probes as usize, budget)?;
-    Ok(modules.binary_search_by(|module| module.key.cmp(key)).ok())
-}
-
 pub(super) fn charge_key(key: &ModuleKey, probes: usize, budget: &mut Budget) -> Result<(), ()> {
-    let width = key.path.len().checked_add(1).ok_or(())?;
-    budget.step(width.checked_mul(probes).ok_or(())?)
+    keyed::charge_probes(key, probes, budget)
 }
 
 // All keys below come from this receipt. After resolving a module by its
@@ -514,7 +500,7 @@ fn find_root(
     id: &DeclarationId,
     budget: &mut Budget,
 ) -> Result<Option<usize>, ()> {
-    let Some(module) = module_index(modules, &id.module, budget)? else {
+    let Some(module) = keyed::module_position(modules, &id.module, budget)? else {
         return Ok(None);
     };
     budget.step(1)?;
@@ -618,7 +604,7 @@ fn analyze<'g>(
     report.inventory_complete = true;
     for node in typed.bodies().typed_nodes() {
         budget.step(1)?;
-        if let Some(module) = module_index(modules, node.site.module, budget)? {
+        if let Some(module) = keyed::module_position(modules, node.site.module, budget)? {
             budget.reserve(1)?;
             facts[module].nodes.insert(node.site.node, node);
         }
@@ -626,7 +612,7 @@ fn analyze<'g>(
     for body in typed.bodies().checked_bodies() {
         budget.step(1)?;
         // BodyFacts pairs the canonical owner with a site in its own module.
-        if let Some(module) = module_index(modules, body.site.module, budget)? {
+        if let Some(module) = keyed::module_position(modules, body.site.module, budget)? {
             let index = match body.owner {
                 BodyOwner::Startup => Some(facts[module].startup),
                 BodyOwner::Declaration(id) => {
@@ -652,7 +638,7 @@ fn analyze<'g>(
     for source in graph.implementations() {
         budget.step(1)?;
         let id = &source.family;
-        let Some(module) = module_index(modules, &id.module, budget)? else {
+        let Some(module) = keyed::module_position(modules, &id.module, budget)? else {
             continue;
         };
         let key = local_key(module, id);

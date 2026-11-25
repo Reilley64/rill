@@ -90,11 +90,23 @@ pub(super) enum FieldClass {
     Text,
     Other,
 }
+#[derive(Clone, Copy, Debug, Default)]
+struct Summary {
+    fields: FieldClass,
+    custom_dispose: bool,
+}
 #[derive(Debug, Default)]
-pub(super) struct DeclarationSummaries(Vec<FieldClass>);
+pub(super) struct DeclarationSummaries(Vec<Summary>);
 impl DeclarationSummaries {
     pub(super) fn fields(&self, id: &DeclarationId) -> FieldClass {
-        self.0.get(id.ordinal.index()).copied().unwrap_or_default()
+        self.0
+            .get(id.ordinal.index())
+            .map_or_else(FieldClass::default, |summary| summary.fields)
+    }
+    pub(super) fn custom_dispose(&self, id: &DeclarationId) -> bool {
+        self.0
+            .get(id.ordinal.index())
+            .is_some_and(|summary| summary.custom_dispose)
     }
 }
 #[derive(Debug)]
@@ -234,6 +246,11 @@ impl Budget {
         self.step(n)?;
         self.statistics.entries = next;
         Ok(())
+    }
+}
+impl crate::loader::keyed::Meter for Budget {
+    fn step(&mut self, n: usize) -> Work<()> {
+        Budget::step(self, n)
     }
 }
 #[derive(Clone, Copy)]
@@ -438,10 +455,27 @@ impl<'r, 'g> Checker<'r, 'g> {
     fn layout_inputs(&mut self) -> Work<()> {
         let count = self.graph.declaration_count();
         self.budget.reserve(count)?;
-        self.facts.summaries = DeclarationSummaries(vec![FieldClass::Unclassified; count]);
+        self.facts.summaries = DeclarationSummaries(vec![Summary::default(); count]);
         for facts in self.types.declarations() {
             self.budget.step(1)?;
-            if matches!(facts.shape, DeclarationShape::Function { .. }) {
+            if let DeclarationShape::Function { parameters, .. } = &facts.shape {
+                if let [formal] = parameters.as_slice()
+                    && let TypeTerm::Nominal {
+                        declaration,
+                        arguments,
+                    } = formal.ty.as_ref()
+                    && arguments.is_empty()
+                    && facts.binders.is_empty()
+                    && facts.declaration.id.module.origin == crate::loader::Origin::Application
+                    && self
+                        .graph
+                        .implementation(&facts.declaration.id)
+                        .is_some_and(|implementation| {
+                            implementation.family.ordinal == self.graph.prelude().dispose.ordinal
+                        })
+                {
+                    self.facts.summaries.0[declaration.ordinal.index()].custom_dispose = true;
+                }
                 continue;
             }
             let origin = &facts.declaration.id;
@@ -468,7 +502,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                     if origin.module.origin == crate::loader::Origin::Application
                         && facts.binders.is_empty()
                     {
-                        self.facts.summaries.0[origin.ordinal.index()] = if scalars {
+                        self.facts.summaries.0[origin.ordinal.index()].fields = if scalars {
                             FieldClass::TextFreeScalars
                         } else if text {
                             FieldClass::Text

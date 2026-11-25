@@ -313,7 +313,7 @@ fn installed_postfix_keeps_unadmitted_loop_shapes_pending() {
 
             assert_pre_equality_graph_cap(receipt, (191_179, 4_263, 4));
             let graph_stats = Statistics {
-                work: 191_495,
+                work: 191_530,
                 entries: 4_397,
                 max_depth: 5,
             };
@@ -329,7 +329,7 @@ fn installed_postfix_keeps_unadmitted_loop_shapes_pending() {
             for (name, work, entries, max_depth) in [
                 ("complex", 1_976, 79, 0),
                 ("owningOperand", 1_976, 79, 0),
-                ("constructed", 3_085, 282, 4),
+                ("constructed", 3_087, 282, 4),
                 ("ordinaryConstructor", 1_973, 78, 0),
             ] {
                 let function = module
@@ -388,7 +388,7 @@ function siblingPostfix(xs: List<string>, unrelated: List<string>, gate: Option<
         |_, module, receipt| {
             assert_pre_equality_graph_cap(receipt, (187_799, 4_016, 3));
             let graph_stats = Statistics {
-                work: 188_115,
+                work: 188_148,
                 entries: 4_150,
                 max_depth: 5,
             };
