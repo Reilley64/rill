@@ -52,6 +52,10 @@ _Avoid_: byte, grapheme, UTF-16 code unit
 Construction of a new error wrapper that retains the original failure as its cause. Propagating an unchanged error does not wrap it. The M6 baseline uses `inner ? outer`. The [post-M6 rule](docs/rfcs/0008-errors-propagation-and-caused-by-wrapping.md#post-m6-wraperr-and-postfix-propagation) separates wrapping with `wrapErr` from propagation with postfix `?`.
 _Avoid_: error mapping, propagation report
 
+**Compilable program**:
+A program whose entry startup and every body reachable from it are `Checked`, with their MIR and active disposers, although the whole ownership graph has no complete state. The compiler decides this in one place; a valid program that is not compilable fails with the unsupported-shape diagnostic R0605, which names the first blocking span. A source finding or a resource limit is never reported as R0605.
+_Avoid_: complete graph, fully checked program, supported program
+
 **Controlled TCP view**:
 A borrowed TCP view carrying explicit network control for the I/O operations it permits. It retains access dependencies without owning closure of the underlying resource.
 _Avoid_: new connection, owning socket, ambient context
