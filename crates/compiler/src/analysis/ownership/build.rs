@@ -5907,7 +5907,10 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
     /// storage is its whole cleanup. A different shape stays where it was.
     fn scalar_record(&mut self, ty: &Type<'g>) -> ResultOf<bool> {
         if let TypeTerm::Nominal { declaration, .. } = ty.as_ref()
-            && self.typed.inventory().field_class(declaration) == FieldClass::Other
+            && matches!(
+                self.typed.inventory().field_class(declaration),
+                FieldClass::Text | FieldClass::Other
+            )
         {
             return Ok(false);
         }

@@ -131,7 +131,7 @@ fn record_yield_cleans_the_partial_item_then_the_suffix() {
             }
 
             assert_pre_equality_graph_cap(receipt, (234_907, 13_094, 9));
-            let graph_stats = stats(235_223, 13_228, 9);
+            let graph_stats = stats(235_220, 13_228, 9);
             let (exact, short) = limits(graph_stats);
             let graph = analyze_ownership(receipt, exact);
             assert_eq!(graph.statistics(), graph_stats);
@@ -147,15 +147,6 @@ fn record_yield_cleans_the_partial_item_then_the_suffix() {
             let lane = Lane::new(module, typed);
             let loop_head: &[u8] =
                 b"for (let item of [Entry{take: a, keep: b}, Entry{take: c, keep: d}])";
-            // From `dead` on, the caps are the parent's, measured at 057c5005
-            // before the record lane, except `mixed` (parent 2,512/350/2) and
-            // `custom` (parent 2,522/358/2). Rejecting those element types
-            // reads the record's fields and selects its disposer; no earlier
-            // fact supplies either. Rule 1 exception (chief of staff,
-            // 2026-11-23, ri-2s0.10): each parent cap, measured at 057c5005
-            // in a scratch worktree, now gives `ResourceLimit` (asserted
-            // after this table). The dead and pruned loops are never
-            // lowered, so they open no List.
             for (name, expected, cap) in [
                 ("onBreak", Completion::Checked, stats(5_605, 1_356, 7)),
                 ("grouped", Completion::Checked, stats(5_611, 1_356, 8)),
@@ -173,7 +164,7 @@ fn record_yield_cleans_the_partial_item_then_the_suffix() {
                 ("pruned", Completion::Checked, stats(2_738, 456, 4)),
                 ("onPostfix", Completion::Incomplete, stats(3_649, 562, 4)),
                 ("textLiteral", Completion::Incomplete, stats(2_512, 350, 2)),
-                ("mixed", Completion::Incomplete, stats(2_515, 350, 2)),
+                ("mixed", Completion::Incomplete, stats(2_512, 350, 2)),
                 ("custom", Completion::Incomplete, stats(2_894, 419, 2)),
             ] {
                 let function = module
@@ -252,18 +243,14 @@ fn record_yield_cleans_the_partial_item_then_the_suffix() {
                     }
                 }
             }
-            for (name, parent) in [
-                ("mixed", stats(2_512, 350, 2)),
-                ("custom", stats(2_522, 358, 2)),
-            ] {
-                let function = module
-                    .declarations
-                    .iter()
-                    .find(|d| d.name.as_deref() == Some(name))
-                    .unwrap();
-                let limited = lower_body(receipt, module, &function.id, limits(parent).0).unwrap();
-                crate::limit::assert_body_limit(&limited);
-            }
+            let custom = module
+                .declarations
+                .iter()
+                .find(|d| d.name.as_deref() == Some("custom"))
+                .unwrap();
+            let limited =
+                lower_body(receipt, module, &custom.id, limits(stats(2_522, 358, 2)).0).unwrap();
+            crate::limit::assert_body_limit(&limited);
         },
     );
 }
