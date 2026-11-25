@@ -2,6 +2,9 @@ name: "Release: Trimmed LLVM archives"
 
 # Hand-triggered only. Builds LLVM from source, so nothing runs it on push or pull request.
 on:
+  push:
+    branches: [m6-1-hello/llvm-release]
+    paths: ['.github/workflows/llvm-release.yml']
   workflow_dispatch:
 
 permissions:
