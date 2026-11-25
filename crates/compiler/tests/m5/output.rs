@@ -279,13 +279,9 @@ fn startup_report<'g>(
     (module, report)
 }
 
-const SIBLINGS: [(
-    &str,
-    &str,
-    &str,
-    (usize, usize, usize),
-    (usize, usize, usize),
-); 7] = [
+type Triple = (usize, usize, usize);
+
+const SIBLINGS: [(&str, &str, &str, Triple, Triple); 7] = [
     (
         "piped",
         "import std::log;\n\"x\" |> log();\n",
