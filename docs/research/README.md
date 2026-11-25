@@ -16,6 +16,7 @@ These reports predate later Rill decisions. Their original report-only commits a
 
 - [Rill M5 and other compiler implementations](m5-compiler-implementation-comparison.md) compares ownership, borrows, cleanup and early exits at a pinned M5 revision.
 - [M6 prerequisites](m6-prerequisites.md) lists what the documents decide, leave open or leave unowned for execution, ABI, target gates, test and command contracts, and run-time cleanup and cancellation.
+- [Standard-library analysis cost](std-analysis-cost.md) attributes the cap movement of one added standard module to passes and call sites, measured at a pinned revision, and compares ways to make cost follow what a program reaches.
 
 ## Repository and toolchain setup
 
