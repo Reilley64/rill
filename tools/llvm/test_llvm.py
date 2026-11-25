@@ -216,11 +216,26 @@ class LLVMTests(unittest.TestCase):
 
     def test_unset_pin_fails_naming_the_pin_before_any_work(self):
         args = argparse.Namespace()
-        with patch.object(setup, "download") as download, self.assertRaisesRegex(ValueError, "checksum pin for macos-x64.*unset"):
+        unset = {name: (asset, size, None) for name, (asset, size, _) in setup.ARTIFACTS.items()}
+        with patch.dict(setup.ARTIFACTS, unset), patch.object(setup, "download") as download, \
+                self.assertRaisesRegex(ValueError, "checksum pin for macos-x64.*unset"):
             setup.provision(args, "macos-x64", self.root / "output")
         download.assert_not_called()
         self.assertFalse((self.root / "output.lock").exists())
         self.assertFalse(self.root.joinpath("output").exists())
+
+    def test_wrong_checksum_pin_fails_the_download_path_and_leaves_nothing(self):
+        archive = self.archive([("prefix/bin/llvm-config", tarfile.REGTYPE, b"fixture")])
+        output = self.root / "output"
+        wrong = {"linux-x64": ("fixture.tar.xz", archive.stat().st_size, DIGEST)}
+        with patch.dict(setup.ARTIFACTS, wrong), \
+                patch.object(setup.shutil, "disk_usage", return_value=SimpleNamespace(free=100 * setup.GIB)), \
+                patch.object(setup.urllib.request, "urlopen", side_effect=lambda *_, **__: archive.open("rb")), \
+                patch.object(setup, "extract") as extract, self.assertRaisesRegex(ValueError, "archive SHA-256 mismatch"):
+            setup.provision(argparse.Namespace(), "linux-x64", output)
+        extract.assert_not_called()
+        self.assertFalse(output.exists())
+        self.assertFalse((self.root / "output.lock").exists())
 
     def test_resource_failure_precedes_download(self):
         args = argparse.Namespace()
