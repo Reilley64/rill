@@ -1,7 +1,7 @@
 #!/bin/sh
 # PROTOTYPE (ci-ajns): build the prototype against a trimmed LLVM prefix, emit
 # an object, link it with the host cc, run it and assert stdout and exit status.
-# Usage: run.sh <llvm-prefix>
+# Usage: [FEATURES=no-libffi] [RUN_OUT=dir] [CARGO_TARGET_DIR=dir] run.sh <llvm-prefix>
 set -eu
 
 prefix=$(cd "$1" && pwd)
@@ -15,7 +15,7 @@ export LLVM_SYS_231_STRICT_VERSIONING=1
 export CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-$here/target}
 
 start=$(date +%s)
-cargo build --locked --release
+cargo build --locked --release ${FEATURES:+--features "$FEATURES"}
 built=$(date +%s)
 echo "prototype_build_seconds=$((built - start))" | tee "$out/timing.txt"
 

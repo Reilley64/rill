@@ -12,6 +12,10 @@ publish = false
 # force-static: fail rather than fall back to libLLVM shared libraries.
 inkwell = { version = "=0.11.0", default-features = false, features = ["llvm23-1-force-static"] }
 
+[features]
+# inkwell's build script links libffi unconditionally; this drops it.
+no-libffi = ["inkwell/no-libffi-linking"]
+
 # The default `target-all` feature references every LLVMInitialize* symbol,
 # which cannot link against a single-backend LLVM. Enable only the native one.
 [target.'cfg(target_arch = "x86_64")'.dependencies]

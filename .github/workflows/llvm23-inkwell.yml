@@ -115,10 +115,18 @@ jobs:
       - name: "Build and test: Emit, link and run Hello Ada"
         run: mise exec -- experiments/llvm23-inkwell/run.sh "$RUNNER_TEMP/llvm-prefix"
 
+      # Same prototype without inkwell's unconditional libffi link.
+      - name: "Build and test: Emit, link and run Hello Ada without libffi"
+        env:
+          FEATURES: no-libffi
+          RUN_OUT: ${{ github.workspace }}/experiments/llvm23-inkwell/target/run-variant
+          CARGO_TARGET_DIR: ${{ github.workspace }}/experiments/llvm23-inkwell/target-variant
+        run: mise exec -- experiments/llvm23-inkwell/run.sh "$RUNNER_TEMP/llvm-prefix"
+
       - name: "Publish: Upload the run outputs"
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: prototype-run-${{ matrix.os }}
-          path: experiments/llvm23-inkwell/target/run
+          path: experiments/llvm23-inkwell/target/run*
           if-no-files-found: ignore
