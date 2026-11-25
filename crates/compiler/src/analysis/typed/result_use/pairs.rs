@@ -135,7 +135,7 @@ pub(super) fn summary<'g>(
         return Ok(None);
     };
     let tuple = values::ungroup(module, tuple, budget)?;
-    let Some((_, facts)) = nodes.get(&(&module.key, tuple)) else {
+    let Some((_, facts)) = nodes.get(&module.key, tuple) else {
         return Ok(None);
     };
     let NodeFactKind::Expression(value) = &facts.kind else {
@@ -209,7 +209,7 @@ fn summarize<'g>(
         }
     }
     let syntax = &module.syntax.nodes;
-    let fact = |node| nodes.get(&(&module.key, node)).map(|&(_, f)| f);
+    let fact = |node| nodes.get(&module.key, node).map(|&(_, f)| f);
     let expression = |node| match &fact(node)?.kind {
         NodeFactKind::Expression(value) if value.ordinary_context.is_none() => Some(value),
         _ => None,
@@ -348,7 +348,7 @@ pub(super) fn scoped_summary<'g>(
             .children
             .get(1)?;
         let (returned, operation) = single_return(module, body)?;
-        let fact = |n| nodes.get(&(&module.key, n)).map(|&(_, f)| f);
+        let fact = |n| nodes.get(&module.key, n).map(|&(_, f)| f);
         if !matches!(fact(returned)?.kind, NodeFactKind::Return { target } if *target == role.implementation.id)
         {
             return None;
@@ -774,7 +774,7 @@ impl<'a, 'g> Check<'a, 'g> {
                 unreachable!("proved both scoped slots")
             };
             self.budget.step(self.module.key.path.len() + 2)?;
-            let index = self.nodes[&(&self.module.key, node)].0;
+            let index = self.nodes.get(&self.module.key, node).unwrap().0;
             if let std::collections::btree_map::Entry::Vacant(entry) =
                 self.report.pair_calls.entry(index)
             {
@@ -788,7 +788,7 @@ impl<'a, 'g> Check<'a, 'g> {
             }
         } else if let [Some(first), Some(second)] = children {
             self.budget.step(self.module.key.path.len() + 2)?;
-            let index = self.nodes[&(&self.module.key, node)].0;
+            let index = self.nodes.get(&self.module.key, node).unwrap().0;
             if let std::collections::btree_map::Entry::Vacant(entry) =
                 self.report.pair_calls.entry(index)
             {
@@ -973,7 +973,7 @@ impl<'a, 'g> Check<'a, 'g> {
         // The restricted child can only read its proved Result-free List
         // referent and construct its result. No owned input is substituted in
         // the body. Keep the output's actual residence (including test tags).
-        let mut proof = self.callable_check(self.module)?;
+        let mut proof = self.callable_check(self.module, self.table)?;
         let mut alternatives = proof.expression(body, Residence::default(), depth + 1)?;
         let [state] = alternatives.as_mut_slice() else {
             return Ok(None);

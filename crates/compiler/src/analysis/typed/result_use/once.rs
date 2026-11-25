@@ -328,8 +328,8 @@ impl<'a, 'g> Check<'a, 'g> {
                 return None;
             };
             let fact = |node| {
-                self.nodes
-                    .get(&(&self.module.key, node))
+                self.table
+                    .and_then(|table| table.get(&node))
                     .map(|&(_, fact)| fact)
             };
             if syntax[*body].kind != NodeKind::Block

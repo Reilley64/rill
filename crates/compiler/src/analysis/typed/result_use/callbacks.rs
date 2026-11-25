@@ -395,7 +395,7 @@ impl<'a, 'g> Check<'a, 'g> {
         else {
             return Ok(false);
         };
-        let mut proof = self.callable_check(self.module)?;
+        let mut proof = self.callable_check(self.module, self.table)?;
         proof.arrow_body(origin, arrow, entry, depth + 1)?;
         Ok(!unknown_environment && arrow.mode.is_some() && !proof.has_pending)
     }
@@ -435,13 +435,18 @@ impl<'a, 'g> Check<'a, 'g> {
             arguments,
             outer: self.substitution,
         };
-        let mut proof = self.callable_check(module)?;
+        let table = self.nodes.module(&module.key, self.budget)?;
+        let mut proof = self.callable_check(module, table)?;
         proof.substitution = Some(&substitution);
         proof.function_body(signature, depth + 1)?;
         Ok(!proof.has_pending)
     }
 
-    pub(super) fn callable_check(&mut self, module: &'g Module) -> Work<Check<'_, 'g>> {
+    pub(super) fn callable_check(
+        &mut self,
+        module: &'g Module,
+        table: Option<&'a NodeTable<'a, 'g>>,
+    ) -> Work<Check<'_, 'g>> {
         let sources = Sources {
             inventory: self.inventory,
             bodies: self.bodies,
@@ -454,7 +459,14 @@ impl<'a, 'g> Check<'a, 'g> {
             release_parameters: self.release_parameters,
             core: self.core,
         };
-        let mut check = Check::new(sources, module, self.contracts, self.budget, self.report)?;
+        let mut check = Check::new(
+            sources,
+            module,
+            table,
+            self.contracts,
+            self.budget,
+            self.report,
+        )?;
         check.substitution = self.substitution;
         check.proving_callable = true;
         Ok(check)

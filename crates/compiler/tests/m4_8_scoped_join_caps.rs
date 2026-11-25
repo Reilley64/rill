@@ -178,7 +178,7 @@ fn unsupported_result_joins_keep_parent_caps_and_blockers() {
         (
             IMPORTS,
             "enum Fake<T,E> { Ok(T), Err(E) } function joined(): [Fake<bool,i32>, bool] { return join([(): Fake<bool,i32> => Fake.Ok(true), () => false]); }\n",
-            428340,
+            428121,
             49094,
             12,
             0,

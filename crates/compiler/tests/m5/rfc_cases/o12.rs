@@ -305,7 +305,7 @@ function viewField(): i32 { let view = &shifted(Point { x: 1, y: 2 }); return vi
                 &request,
                 &[Case {
                     text: VIEW,
-                    typed_stats: (325209, 47806, 12),
+                    typed_stats: (324976, 47806, 12),
                     graph: (GraphCompletion::SourceRejected, (188588, 4666, 7)),
                     roots: &[
                         Root {
@@ -384,7 +384,7 @@ function backtick(): &string { return &`tick`; }
 function boundLiteral(): &string { let view = &"static"; return view; }
 function literal(): &string { return &"static"; }
 "####,
-            typed_stats: (345632, 49873, 14),
+            typed_stats: (345293, 49873, 14),
             graph: (GraphCompletion::SourceRejected, (206060, 7452, 11)),
             roots: &[
                 Root {
@@ -503,7 +503,7 @@ function number(): &i32 { return &1i32; }
 function owner(): &string { let text = "x"; return &text; }
 function flag(b: bool): &string { return &`a${b}`; }
 "####,
-            typed_stats: (333771, 48779, 12),
+            typed_stats: (333507, 48779, 12),
             graph: (GraphCompletion::SourceRejected, (191338, 4565, 5)),
             roots: &[
                 Root {
@@ -589,7 +589,7 @@ function textBind(): void { let view = &named(); }
                 &request,
                 &[Case {
                     text: TEXT,
-                    typed_stats: (326215, 47827, 12),
+                    typed_stats: (325980, 47827, 12),
                     graph: (GraphCompletion::Incomplete, (187427, 4277, 5)),
                     roots: &[
                         Root {
@@ -674,7 +674,7 @@ function bound(): void { let v = &make(); }
                 &request,
                 &[Case {
                     text: DISPOSER,
-                    typed_stats: (327240, 47914, 12),
+                    typed_stats: (327006, 47914, 12),
                     graph: (GraphCompletion::Incomplete, (188398, 4386, 6)),
                     roots: &[
                         Root {
