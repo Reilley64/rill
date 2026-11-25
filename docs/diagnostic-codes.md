@@ -110,6 +110,9 @@ Arguments, report destination mode or code lookup are invalid. Explain usage wit
 ### R0604. Driver I/O/report failure
 Reading or writing the requested inputs, artifacts or report failed. This is a nonzero operation failure, not successful analysis or automatically an internal compiler defect.
 
+### R0605. Unsupported program shape
+The source is valid, but a body reachable from startup has a shape the compiler cannot compile yet. This is not a source error: it names the first blocking span and is distinct from R0200 to R0502. It never replaces a finding or a resource limit. See [the compilable-program rule](diagnostic-contracts.md#compilable-programs).
+
 ### R0700. Unreachable executable statement
 Required flow analysis establishes that a statement cannot execute. This is advisory only. Declarations are not runtime statements, and unreachable code is still checked.
 

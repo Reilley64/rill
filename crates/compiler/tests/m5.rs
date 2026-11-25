@@ -16,6 +16,8 @@ use std::{
 mod cancellation;
 #[path = "m5/captures.rs"]
 mod captures;
+#[path = "m5/compilable.rs"]
+mod compilable;
 #[path = "m5/disposers.rs"]
 mod disposers;
 #[path = "m5/field_routes.rs"]
