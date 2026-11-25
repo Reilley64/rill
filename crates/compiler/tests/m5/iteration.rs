@@ -226,7 +226,7 @@ fn scalar_iteration_screens_unsupported_bodies_and_charges_binder_depth() {
             };
             // Exact targeted caps of the published pre-iteration compiler, 72452b3.
             for (name, max_work, max_entries) in
-                [("propagates", 3063, 261), ("arithmetic", 1972, 68)]
+                [("propagates", 3073, 261), ("arithmetic", 1982, 68)]
             {
                 let pending = run(
                     name,

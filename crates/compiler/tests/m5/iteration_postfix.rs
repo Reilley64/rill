@@ -59,9 +59,9 @@ fn postfix_must_be_reachable_in_an_admissible_loop_body() {
         |_, module, receipt| {
             let graph = analyze_ownership(receipt, AnalysisLimits::default());
             for (name, max_work, max_entries) in [
-                ("dead", 1966, 74),
-                ("pruned", 1966, 74),
-                ("nested", 1968, 75),
+                ("dead", 1976, 74),
+                ("pruned", 1976, 74),
+                ("nested", 1978, 75),
             ] {
                 let d = module
                     .declarations
@@ -313,7 +313,7 @@ fn installed_postfix_keeps_unadmitted_loop_shapes_pending() {
 
             assert_pre_equality_graph_cap(receipt, (191_179, 4_263, 4));
             let graph_stats = Statistics {
-                work: 191_530,
+                work: 194_022,
                 entries: 4_397,
                 max_depth: 5,
             };
@@ -327,10 +327,10 @@ fn installed_postfix_keeps_unadmitted_loop_shapes_pending() {
                 crate::limit::assert_graph_limit(&limited);
             }
             for (name, work, entries, max_depth) in [
-                ("complex", 1_976, 79, 0),
-                ("owningOperand", 1_976, 79, 0),
-                ("constructed", 3_087, 282, 4),
-                ("ordinaryConstructor", 1_973, 78, 0),
+                ("complex", 1_986, 79, 0),
+                ("owningOperand", 1_986, 79, 0),
+                ("constructed", 3_097, 282, 4),
+                ("ordinaryConstructor", 1_983, 78, 0),
             ] {
                 let function = module
                     .declarations
@@ -388,7 +388,7 @@ function siblingPostfix(xs: List<string>, unrelated: List<string>, gate: Option<
         |_, module, receipt| {
             assert_pre_equality_graph_cap(receipt, (187_799, 4_016, 3));
             let graph_stats = Statistics {
-                work: 188_148,
+                work: 190_640,
                 entries: 4_150,
                 max_depth: 5,
             };
@@ -401,7 +401,7 @@ function siblingPostfix(xs: List<string>, unrelated: List<string>, gate: Option<
                 let limited = analyze_ownership(receipt, cap);
                 crate::limit::assert_graph_limit(&limited);
             }
-            for (name, work, entries) in [("deadPostfix", 1_912, 47), ("siblingPostfix", 1_914, 48)]
+            for (name, work, entries) in [("deadPostfix", 1_922, 47), ("siblingPostfix", 1_924, 48)]
             {
                 let function = module
                     .declarations

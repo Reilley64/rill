@@ -67,9 +67,9 @@ impl<'a, 'g> TargetIndex<'a, 'g> {
         site: NodeId,
         budget: &mut Budget,
     ) -> ResultOf<()> {
-        budget.step(1)?;
-        let family = typed
-            .inventory()
+        let inventory = typed.inventory();
+        keyed::charge(&family.module, inventory.family_probes(), budget)?;
+        let family = inventory
             .captured_family(family)
             .ok_or(Stop::Pending(site))?;
         for implementation in &family.implementations {
@@ -268,10 +268,9 @@ pub(super) fn implementation_frame<'g>(
     {
         return Err(pending);
     }
-    budget.step(1)?;
-    if !typed
-        .inventory()
-        .headers()
+    let headers = typed.inventory().headers();
+    keyed::charge(&declaration.id.module, headers.len(), budget)?;
+    if !headers
         .get(&declaration.id)
         .is_some_and(|metadata| metadata.defaults.is_empty() && metadata.requirements.is_empty())
     {
@@ -315,8 +314,7 @@ fn output_frame<'g>(
         return Err(pending);
     }
     let headers = typed.inventory().headers();
-    let probes = (usize::BITS - headers.len().leading_zeros() + 1) as usize;
-    graph::charge_key(&declaration.id.module, probes, budget)?;
+    keyed::charge(&declaration.id.module, headers.len(), budget)?;
     if !headers
         .get(&declaration.id)
         .is_some_and(|metadata| metadata.defaults.is_empty() && metadata.requirements.is_empty())
@@ -424,10 +422,9 @@ pub(super) fn call_target<'g>(
     {
         return Err(pending());
     }
-    let family = typed
-        .inventory()
-        .captured_family(family_id)
-        .ok_or_else(pending)?;
+    let inventory = typed.inventory();
+    keyed::charge(&family_id.module, inventory.family_probes(), budget)?;
+    let family = inventory.captured_family(family_id).ok_or_else(pending)?;
     let [binder] = family.header.binders.as_slice() else {
         return Err(pending());
     };

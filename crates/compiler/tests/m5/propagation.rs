@@ -203,7 +203,7 @@ fn owned_option_postfix_preserves_shared_text_backing() {
             }
             // Keep the shared routes at the bounds measured before exclusive forwarding.
             for (name, work, entries, depth) in
-                [("forward", 3712, 607, 4), ("ended", 5242, 1037, 5)]
+                [("forward", 3722, 607, 4), ("ended", 5252, 1037, 5)]
             {
                 let exact = AnalysisLimits {
                     max_work: work,
@@ -793,7 +793,7 @@ fn shared_option_copies_keep_the_named_carrier_and_its_backing() {
             let default = AnalysisLimits::default();
             // The unsupported producer fit these exact limits before shared payload storage.
             let limit = AnalysisLimits {
-                max_work: 2055,
+                max_work: 2065,
                 max_entries: 120,
                 max_depth: 2,
             };
@@ -1007,7 +1007,7 @@ fn option_postfix_returns_through_initialized_cleanup() {
             }
             // Bounds for the unchanged scalar route before exclusive payload support.
             let limits = AnalysisLimits {
-                max_work: 9238,
+                max_work: 9388,
                 max_entries: 2151,
                 max_depth: 5,
             };
@@ -1669,10 +1669,10 @@ fn wrapping_rhs_keeps_ordinary_and_unadmitted_budgets() {
                 lower_body(receipt, module, &d.id, limit).unwrap()
             };
             for (name, work, entries, depth, expected) in [
-                ("wrapCall", 6092, 900, 6, Completion::Checked),
-                ("postfix", 3692, 604, 4, Completion::Checked),
-                ("nested", 3239, 352, 4, Completion::Incomplete),
-                ("pipe", 3239, 352, 4, Completion::Incomplete),
+                ("wrapCall", 6212, 900, 6, Completion::Checked),
+                ("postfix", 3702, 604, 4, Completion::Checked),
+                ("nested", 3249, 352, 4, Completion::Incomplete),
+                ("pipe", 3249, 352, 4, Completion::Incomplete),
             ] {
                 let limit = AnalysisLimits {
                     max_work: work,
@@ -2023,7 +2023,7 @@ fn returning_wrap_rhs_forwards_instead_of_wrapping() {
                     // Row C3 (ri-vgz.5): the scalar retirement keeps its cap.
                     assert_eq!(
                         (stats.work, stats.entries, stats.max_depth),
-                        (12_580, 2_472, 6)
+                        (12_830, 2_472, 6)
                     );
                 }
                 let limits = AnalysisLimits {
@@ -2058,7 +2058,7 @@ fn returning_wrap_rhs_forwards_instead_of_wrapping() {
             let ordinary = check(
                 "scalarWrap",
                 AnalysisLimits {
-                    max_work: 4083,
+                    max_work: 4093,
                     max_entries: 801,
                     max_depth: 4,
                 },
@@ -5551,7 +5551,7 @@ fn option_text_propagation_moves_or_drops_the_owned_payload() {
             let named = lower(
                 "named",
                 AnalysisLimits {
-                    max_work: 7467,
+                    max_work: 7587,
                     max_entries: 1249,
                     max_depth: 5,
                 },
@@ -8742,7 +8742,7 @@ fn nonpropagating_named_text_pair_keeps_the_ordinary_work_limit() {
                 .unwrap();
             // Measured at ddb5df7; there is no propagating argument to check.
             let exact = AnalysisLimits {
-                max_work: 4890,
+                max_work: 5010,
                 max_entries: 394,
                 ..Default::default()
             };

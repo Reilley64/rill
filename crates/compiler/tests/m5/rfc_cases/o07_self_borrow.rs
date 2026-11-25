@@ -34,7 +34,7 @@ function writeWhileMemberLive(): i32 {
 }
 "#,
     typed_stats: (340237, 50960, 12),
-    graph: (GraphCompletion::SourceRejected, (205221, 7678, 6)),
+    graph: (GraphCompletion::SourceRejected, (209162, 7678, 6)),
     roots: &[
         Root {
             name: "p1WriteAfterCopy",
@@ -44,7 +44,7 @@ function writeWhileMemberLive(): i32 {
                 related: r####"&h.v"####,
             },
             graph: None,
-            stats: (3587, 647, 5),
+            stats: (3804, 647, 5),
         },
         Root {
             name: "p2ReplaceAfterCopy",
@@ -54,7 +54,7 @@ function writeWhileMemberLive(): i32 {
                 related: r####"&h.v"####,
             },
             graph: None,
-            stats: (4205, 837, 5),
+            stats: (4491, 837, 5),
         },
         Root {
             name: "p6WriteAfterCallCopy",
@@ -64,7 +64,7 @@ function writeWhileMemberLive(): i32 {
                 related: r####"&h.v"####,
             },
             graph: None,
-            stats: (3671, 698, 5),
+            stats: (3888, 698, 5),
         },
         Root {
             name: "p18InnerScopeDies",
@@ -74,7 +74,7 @@ function writeWhileMemberLive(): i32 {
                 related: r####"&h2.v"####,
             },
             graph: None,
-            stats: (5336, 1324, 6),
+            stats: (5829, 1324, 6),
         },
         Root {
             name: "writeWhileMemberLive",
@@ -84,7 +84,7 @@ function writeWhileMemberLive(): i32 {
                 related: r####"&h.v"####,
             },
             graph: None,
-            stats: (3100, 521, 5),
+            stats: (3248, 521, 5),
         },
     ],
     sequences: &[],
@@ -118,7 +118,7 @@ function returnTheRecord(): Own2 {
 }
 "#,
     typed_stats: (330765, 49327, 12),
-    graph: (GraphCompletion::SourceRejected, (195400, 5863, 5)),
+    graph: (GraphCompletion::SourceRejected, (198789, 5863, 5)),
     roots: &[
         Root {
             name: "p3ReturnTheCopy",
@@ -128,7 +128,7 @@ function returnTheRecord(): Own2 {
                 related: r####"&h.v"####,
             },
             graph: None,
-            stats: (3751, 615, 5),
+            stats: (4037, 615, 5),
         },
         Root {
             name: "p15ReturnTheCopysReference",
@@ -138,7 +138,7 @@ function returnTheRecord(): Own2 {
                 related: r####"&h.v"####,
             },
             graph: None,
-            stats: (3858, 674, 5),
+            stats: (4144, 674, 5),
         },
         Root {
             name: "returnTheRecord",
@@ -148,7 +148,7 @@ function returnTheRecord(): Own2 {
                 related: r####"&h.v"####,
             },
             graph: None,
-            stats: (3217, 461, 5),
+            stats: (3434, 461, 5),
         },
     ],
     sequences: &[],
@@ -180,7 +180,7 @@ function p13MoveWhileBorrowed(): i32 {
 }
 "#,
     typed_stats: (331527, 49449, 12),
-    graph: (GraphCompletion::SourceRejected, (194713, 5698, 5)),
+    graph: (GraphCompletion::SourceRejected, (197964, 5698, 5)),
     roots: &[
         Root {
             name: "p11MoveIntoCall",
@@ -190,7 +190,7 @@ function p13MoveWhileBorrowed(): i32 {
                 related: r####"&h.v"####,
             },
             graph: None,
-            stats: (3377, 547, 5),
+            stats: (3594, 547, 5),
         },
         Root {
             name: "p12MoveIntoLet",
@@ -200,7 +200,7 @@ function p13MoveWhileBorrowed(): i32 {
                 related: r####"&h.v"####,
             },
             graph: None,
-            stats: (3392, 549, 5),
+            stats: (3609, 549, 5),
         },
         Root {
             name: "p13MoveWhileBorrowed",
@@ -210,7 +210,7 @@ function p13MoveWhileBorrowed(): i32 {
                 related: r####"&h.v"####,
             },
             graph: None,
-            stats: (3252, 485, 5),
+            stats: (3469, 485, 5),
         },
     ],
     sequences: &[],
@@ -253,43 +253,43 @@ function deadLoanBeforeCopy(): i32 {
 }
 "#,
     typed_stats: (340843, 50673, 12),
-    graph: (GraphCompletion::Incomplete, (205615, 7723, 5)),
+    graph: (GraphCompletion::Incomplete, (209905, 7723, 5)),
     roots: &[
         Root {
             name: "p7CopyIntoLet",
             want: Want::Checked,
             graph: None,
-            stats: (3610, 638, 5),
+            stats: (3827, 638, 5),
         },
         Root {
             name: "p8CopyIntoCall",
             want: Want::Checked,
             graph: None,
-            stats: (6184, 910, 5),
+            stats: (6649, 910, 5),
         },
         Root {
             name: "p9CopyDeadBeforeWrite",
             want: Want::Checked,
             graph: None,
-            stats: (3839, 780, 5),
+            stats: (4056, 780, 5),
         },
         Root {
             name: "p10CopyWhileSharedBorrowed",
             want: Want::Checked,
             graph: None,
-            stats: (3741, 703, 5),
+            stats: (3958, 703, 5),
         },
         Root {
             name: "p17CopyIntoReferenceReturningCall",
             want: Want::Checked,
             graph: None,
-            stats: (6337, 977, 5),
+            stats: (6802, 977, 5),
         },
         Root {
             name: "deadLoanBeforeCopy",
             want: Want::Checked,
             graph: None,
-            stats: (6089, 861, 5),
+            stats: (6554, 861, 5),
         },
     ],
     sequences: &[
@@ -412,12 +412,12 @@ function p14MoveAfterLoanDied(): i32 {
 }
 "#,
     typed_stats: (326084, 48611, 12),
-    graph: (GraphCompletion::Incomplete, (189196, 4795, 5)),
+    graph: (GraphCompletion::Incomplete, (192033, 4795, 5)),
     roots: &[Root {
         name: "p14MoveAfterLoanDied",
         want: Want::Checked,
         graph: None,
-        stats: (5797, 722, 5),
+        stats: (6262, 722, 5),
     }],
     sequences: &[(
         "p14MoveAfterLoanDied",
@@ -463,7 +463,7 @@ function p16StoreIntoBox(): Box1 {
 }
 "#,
     typed_stats: (333998, 49641, 12),
-    graph: (GraphCompletion::Incomplete, (195048, 5054, 5)),
+    graph: (GraphCompletion::Incomplete, (198575, 5054, 5)),
     roots: &[
         Root {
             name: "p4ReturnThroughPass",
@@ -471,7 +471,7 @@ function p16StoreIntoBox(): Box1 {
                 blocker: r####"pass(h)"####,
             },
             graph: None,
-            stats: (2729, 218, 3),
+            stats: (2946, 218, 3),
         },
         Root {
             name: "p5WriteAfterPass",
@@ -479,7 +479,7 @@ function p16StoreIntoBox(): Box1 {
                 blocker: r####"pass(h)"####,
             },
             graph: None,
-            stats: (2767, 228, 3),
+            stats: (2984, 228, 3),
         },
         Root {
             name: "p16StoreIntoBox",
@@ -487,7 +487,7 @@ function p16StoreIntoBox(): Box1 {
                 blocker: r####"store(h)"####,
             },
             graph: None,
-            stats: (2726, 217, 3),
+            stats: (2943, 217, 3),
         },
     ],
     sequences: &[],
@@ -553,19 +553,19 @@ function ownMutMember(): i32 {
 }
 "#,
     typed_stats: (353739, 52319, 12),
-    graph: (GraphCompletion::SourceRejected, (213675, 8865, 5)),
+    graph: (GraphCompletion::SourceRejected, (218448, 8865, 5)),
     roots: &[
         Root {
             name: "replaceOwn",
             want: Want::Checked,
             graph: None,
-            stats: (3414, 658, 5),
+            stats: (3562, 658, 5),
         },
         Root {
             name: "replaceOwn2",
             want: Want::Checked,
             graph: None,
-            stats: (3149, 541, 5),
+            stats: (3297, 541, 5),
         },
         Root {
             name: "replaceOwnM",
@@ -573,7 +573,7 @@ function ownMutMember(): i32 {
                 blocker: r####"{\n  let mut a = 1i32; let mut h = OwnM { v: 1i32, m: &mut a }; h.m = &mut h.v;\n  return 0i32;\n}"####,
             },
             graph: None,
-            stats: (3109, 527, 5),
+            stats: (3257, 527, 5),
         },
         Root {
             name: "ownWrite",
@@ -583,7 +583,7 @@ function ownMutMember(): i32 {
                 related: r####"&h.v"####,
             },
             graph: None,
-            stats: (3498, 708, 5),
+            stats: (3646, 708, 5),
         },
         Root {
             name: "ownReturn",
@@ -593,7 +593,7 @@ function ownMutMember(): i32 {
                 related: r####"&h.v"####,
             },
             graph: None,
-            stats: (3759, 729, 5),
+            stats: (3976, 729, 5),
         },
         Root {
             name: "ownTake",
@@ -603,7 +603,7 @@ function ownMutMember(): i32 {
                 related: r####"&h.v"####,
             },
             graph: None,
-            stats: (3815, 760, 5),
+            stats: (4032, 760, 5),
         },
         Root {
             name: "ownLet",
@@ -613,7 +613,7 @@ function ownMutMember(): i32 {
                 related: r####"&h.v"####,
             },
             graph: None,
-            stats: (3829, 762, 5),
+            stats: (4046, 762, 5),
         },
         Root {
             name: "ownMTake",
@@ -623,7 +623,7 @@ function ownMutMember(): i32 {
                 related: r####"&mut h.v"####,
             },
             graph: None,
-            stats: (3543, 624, 5),
+            stats: (3760, 624, 5),
         },
         Root {
             name: "ownMutMember",
@@ -633,7 +633,7 @@ function ownMutMember(): i32 {
                 related: r####"&mut h.v"####,
             },
             graph: None,
-            stats: (3818, 760, 5),
+            stats: (4035, 760, 5),
         },
     ],
     sequences: &[
@@ -754,7 +754,7 @@ function moveMatchWrapper(): i32 {
 }
 "#,
     typed_stats: (365576, 54877, 12),
-    graph: (GraphCompletion::Incomplete, (216784, 6116, 5)),
+    graph: (GraphCompletion::Incomplete, (222385, 6116, 5)),
     roots: &[
         Root {
             name: "moveStructField",
@@ -762,7 +762,7 @@ function moveMatchWrapper(): i32 {
                 blocker: r####"w"####,
             },
             graph: None,
-            stats: (3228, 462, 1),
+            stats: (3583, 462, 1),
         },
         Root {
             name: "moveStructReturn",
@@ -770,7 +770,7 @@ function moveMatchWrapper(): i32 {
                 blocker: r####"Wrap { o: h }"####,
             },
             graph: None,
-            stats: (3231, 471, 2),
+            stats: (3448, 471, 2),
         },
         Root {
             name: "moveMemberStore",
@@ -778,7 +778,7 @@ function moveMatchWrapper(): i32 {
                 blocker: r####"w"####,
             },
             graph: None,
-            stats: (3228, 462, 1),
+            stats: (3583, 462, 1),
         },
         Root {
             name: "moveRecordUpdate",
@@ -786,7 +786,7 @@ function moveMatchWrapper(): i32 {
                 blocker: r####"Own2 { ...h, v: 2i32 }"####,
             },
             graph: None,
-            stats: (3265, 479, 3),
+            stats: (3551, 479, 3),
         },
         Root {
             name: "moveTuple",
@@ -794,7 +794,7 @@ function moveMatchWrapper(): i32 {
                 blocker: r####"t"####,
             },
             graph: None,
-            stats: (3232, 469, 2),
+            stats: (3380, 469, 2),
         },
         Root {
             name: "moveTupleReturn",
@@ -802,7 +802,7 @@ function moveMatchWrapper(): i32 {
                 blocker: r####"[h, 1i32]"####,
             },
             graph: None,
-            stats: (3241, 477, 2),
+            stats: (3389, 477, 2),
         },
         Root {
             name: "moveList",
@@ -810,7 +810,7 @@ function moveMatchWrapper(): i32 {
                 blocker: r####"l"####,
             },
             graph: None,
-            stats: (2868, 404, 1),
+            stats: (3016, 404, 1),
         },
         Root {
             name: "moveListReturn",
@@ -818,7 +818,7 @@ function moveMatchWrapper(): i32 {
                 blocker: r####"[h]"####,
             },
             graph: None,
-            stats: (2877, 412, 2),
+            stats: (3025, 412, 2),
         },
         Root {
             name: "moveWrapperReturn",
@@ -826,7 +826,7 @@ function moveMatchWrapper(): i32 {
                 blocker: r####"Option.Some(h)"####,
             },
             graph: None,
-            stats: (2877, 412, 2),
+            stats: (3025, 412, 2),
         },
         Root {
             name: "moveResultReturn",
@@ -834,7 +834,7 @@ function moveMatchWrapper(): i32 {
                 blocker: r####"Result.Ok(h)"####,
             },
             graph: None,
-            stats: (2877, 412, 2),
+            stats: (3025, 412, 2),
         },
         Root {
             name: "moveMatch",
@@ -842,7 +842,7 @@ function moveMatchWrapper(): i32 {
                 blocker: r####"match (h) { x => 0i32 }"####,
             },
             graph: None,
-            stats: (2900, 420, 3),
+            stats: (3048, 420, 3),
         },
         Root {
             name: "moveMatchCall",
@@ -850,7 +850,7 @@ function moveMatchWrapper(): i32 {
                 blocker: r####"match (take2(h)) { 0i32 => 0i32, _ => 1i32 }"####,
             },
             graph: None,
-            stats: (2900, 420, 3),
+            stats: (3048, 420, 3),
         },
         Root {
             name: "moveArrowCall",
@@ -858,7 +858,7 @@ function moveMatchWrapper(): i32 {
                 blocker: r####"f()"####,
             },
             graph: None,
-            stats: (2890, 419, 3),
+            stats: (3038, 419, 3),
         },
         Root {
             name: "moveWrapperLet",
@@ -866,7 +866,7 @@ function moveMatchWrapper(): i32 {
                 blocker: r####"o"####,
             },
             graph: None,
-            stats: (2868, 404, 1),
+            stats: (3016, 404, 1),
         },
         Root {
             name: "moveMatchWrapper",
@@ -874,7 +874,7 @@ function moveMatchWrapper(): i32 {
                 blocker: r####"match (Option.Some(h)) { Option.Some(x) => 0i32, Option.None => 1i32 }"####,
             },
             graph: None,
-            stats: (2900, 420, 3),
+            stats: (3048, 420, 3),
         },
     ],
     sequences: &[],

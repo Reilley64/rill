@@ -186,7 +186,7 @@ fn nested_owned_records_clean_initialized_leaves_on_exit() {
             assert_eq!(
                 custom_root.statistics(),
                 compiler::analysis::Statistics {
-                    work: 5_819,
+                    work: 6_829,
                     entries: 559,
                     max_depth: 1,
                 }
@@ -2366,7 +2366,7 @@ fn named_nested_record_cleanup_after_one_edge_child_move() {
                     let pinned = report.statistics();
                     assert_eq!(
                         (pinned.work, pinned.entries, pinned.max_depth),
-                        (4_014, 607, 5)
+                        (4_705, 607, 5)
                     );
                     let exact = AnalysisLimits {
                         max_work: pinned.work,

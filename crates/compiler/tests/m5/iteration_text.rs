@@ -88,9 +88,9 @@ fn unadmitted_text_parameters_keep_their_old_caps() {
             // Unused/discarded/incomplete formal coverage must still block
             // at the first text List under its pre-cursor cap.
             for (name, work, entries) in [
-                ("unused", 1963, 73),
-                ("wildcard", 1963, 73),
-                ("sibling", 1966, 74),
+                ("unused", 1973, 73),
+                ("wildcard", 1973, 73),
+                ("sibling", 1976, 74),
             ] {
                 let stats = Statistics {
                     work,
