@@ -2,6 +2,7 @@
 
 use std::collections::BTreeSet;
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::OnceLock;
@@ -331,4 +332,41 @@ fn build_refuses_to_overwrite_the_entry() {
         fs::read_to_string(workspace.work.join(&entry)).unwrap(),
         HELLO
     );
+}
+
+fn signal_cc(workspace: &Workspace, signal: &str) -> String {
+    let directory = workspace.work.join("fake-bin");
+    fs::create_dir_all(&directory).unwrap();
+    let cc = directory.join("cc");
+    fs::write(
+        &cc,
+        format!(
+            "#!/bin/sh\nprintf '#!/bin/sh\\nkill -{signal} $$\\n' > \"$2\"\n/bin/chmod +x \"$2\"\n"
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&cc, fs::Permissions::from_mode(0o755)).unwrap();
+    directory.into_os_string().into_string().unwrap()
+}
+
+#[test]
+fn run_returns_128_plus_the_signal_and_prints_nothing_when_the_program_dies_by_one() {
+    let workspace = Workspace::new("signal");
+    let entry = workspace.entry("hello-world.rill", HELLO);
+    let before = workspace.files();
+    for (signal, number) in [("KILL", 9), ("TERM", 15), ("ABRT", 6)] {
+        let path = signal_cc(&workspace, signal);
+        let output = workspace.command(&workspace.rill, &["run", &entry], Some(&path));
+        assert_eq!(
+            output.status.code(),
+            Some(128 + number),
+            "{signal}: {}",
+            stderr(&output)
+        );
+        assert!(output.stdout.is_empty(), "{signal}: {output:?}");
+        assert!(output.stderr.is_empty(), "{signal}: {output:?}");
+        workspace.assert_no_scratch();
+    }
+    fs::remove_dir_all(workspace.work.join("fake-bin")).unwrap();
+    assert_eq!(workspace.files(), before);
 }
