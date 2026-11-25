@@ -58,8 +58,8 @@ function overlapReversed(): i32 {
   return 0i32;
 }
 "#,
-    typed_stats: (449710, 48742, 12),
-    graph: (GraphCompletion::SourceRejected, (191331, 4475, 5)),
+    typed_stats: (432257, 53441, 12),
+    graph: (GraphCompletion::SourceRejected, (188531, 4475, 5)),
     roots: &[
         Root {
             name: "overlapConstruct",
@@ -69,7 +69,7 @@ function overlapReversed(): i32 {
                 related: r####"&mut value"####,
             },
             graph: None,
-            stats: (2612, 203, 5),
+            stats: (2472, 203, 5),
         },
         Root {
             name: "overlapReversed",
@@ -79,7 +79,7 @@ function overlapReversed(): i32 {
                 related: r####"&value"####,
             },
             graph: None,
-            stats: (2612, 203, 5),
+            stats: (2472, 203, 5),
         },
     ],
 };
@@ -143,8 +143,8 @@ function looped(flag: bool): i32 {
   return 0i32;
 }
 "#,
-    typed_stats: (460291, 50192, 12),
-    graph: (GraphCompletion::SourceRejected, (200387, 5724, 6)),
+    typed_stats: (442678, 55017, 12),
+    graph: (GraphCompletion::SourceRejected, (196887, 5724, 6)),
     roots: &[
         Root {
             name: "overlapNoUse",
@@ -154,7 +154,7 @@ function looped(flag: bool): i32 {
                 related: r####"&mut a"####,
             },
             graph: None,
-            stats: (2979, 385, 5),
+            stats: (2839, 385, 5),
         },
         Root {
             name: "replacesFirst",
@@ -164,7 +164,7 @@ function looped(flag: bool): i32 {
                 related: r####"&mut b"####,
             },
             graph: None,
-            stats: (2974, 384, 5),
+            stats: (2834, 384, 5),
         },
         Root {
             name: "sharedMember",
@@ -174,7 +174,7 @@ function looped(flag: bool): i32 {
                 related: r####"&mut a"####,
             },
             graph: None,
-            stats: (2979, 385, 5),
+            stats: (2839, 385, 5),
         },
         Root {
             name: "sharedFirst",
@@ -184,7 +184,7 @@ function looped(flag: bool): i32 {
                 related: r####"&mut a"####,
             },
             graph: None,
-            stats: (2974, 384, 5),
+            stats: (2834, 384, 5),
         },
         Root {
             name: "looped",
@@ -194,7 +194,7 @@ function looped(flag: bool): i32 {
                 related: r####"&mut a"####,
             },
             graph: None,
-            stats: (3225, 514, 6),
+            stats: (3085, 514, 6),
         },
     ],
 };
@@ -331,8 +331,8 @@ function reborrowSharedKept(): i32 {
   return *r;
 }
 "#,
-    typed_stats: (481546, 52896, 12),
-    graph: (GraphCompletion::SourceRejected, (219492, 8614, 6)),
+    typed_stats: (463420, 57917, 12),
+    graph: (GraphCompletion::SourceRejected, (215082, 8614, 6)),
     roots: &[
         Root {
             name: "reborrowDirect",
@@ -342,7 +342,7 @@ function reborrowSharedKept(): i32 {
                 related: r####"&mut *holder.x"####,
             },
             graph: None,
-            stats: (3381, 577, 5),
+            stats: (3241, 577, 5),
         },
         Root {
             name: "reborrowThenWrite",
@@ -352,7 +352,7 @@ function reborrowSharedKept(): i32 {
                 related: r####"&mut *holder.x"####,
             },
             graph: None,
-            stats: (3597, 684, 5),
+            stats: (3457, 684, 5),
         },
         Root {
             name: "reborrowLocal",
@@ -362,7 +362,7 @@ function reborrowSharedKept(): i32 {
                 related: r####"&mut *holder.x"####,
             },
             graph: None,
-            stats: (3494, 625, 5),
+            stats: (3354, 625, 5),
         },
         Root {
             name: "reborrowCall",
@@ -372,7 +372,7 @@ function reborrowSharedKept(): i32 {
                 related: r####"&mut *holder.x"####,
             },
             graph: None,
-            stats: (3476, 629, 6),
+            stats: (3336, 629, 6),
         },
         Root {
             name: "reborrowParam",
@@ -382,7 +382,7 @@ function reborrowSharedKept(): i32 {
                 related: r####"&mut *k.x"####,
             },
             graph: None,
-            stats: (3611, 545, 4),
+            stats: (3401, 545, 4),
         },
         Root {
             name: "reborrowShared",
@@ -392,7 +392,7 @@ function reborrowSharedKept(): i32 {
                 related: r####"&*holder.first"####,
             },
             graph: None,
-            stats: (3381, 577, 5),
+            stats: (3241, 577, 5),
         },
         Root {
             name: "siblingReplacedAfter",
@@ -402,31 +402,31 @@ function reborrowSharedKept(): i32 {
                 related: r####"&mut *holder.x"####,
             },
             graph: None,
-            stats: (4050, 908, 5),
+            stats: (3910, 908, 5),
         },
         Root {
             name: "reborrowKept",
             want: Want::Checked,
             graph: None,
-            stats: (3468, 611, 5),
+            stats: (3328, 611, 5),
         },
         Root {
             name: "reborrowRead",
             want: Want::Checked,
             graph: None,
-            stats: (3483, 613, 5),
+            stats: (3343, 613, 5),
         },
         Root {
             name: "reborrowPassed",
             want: Want::Checked,
             graph: None,
-            stats: (6024, 933, 6),
+            stats: (5814, 933, 6),
         },
         Root {
             name: "reborrowSharedKept",
             want: Want::Checked,
             graph: None,
-            stats: (3484, 613, 5),
+            stats: (3344, 613, 5),
         },
     ],
 };
@@ -456,14 +456,14 @@ function takeAfterReborrow(): i32 {
   return take(holder);
 }
 "#,
-    typed_stats: (448960, 48681, 12),
-    graph: (GraphCompletion::SourceRejected, (192112, 4708, 5)),
+    typed_stats: (431434, 53359, 12),
+    graph: (GraphCompletion::SourceRejected, (189242, 4708, 5)),
     roots: &[
         Root {
             name: "take",
             want: Want::Checked,
             graph: None,
-            stats: (2537, 168, 3),
+            stats: (2397, 168, 3),
         },
         Root {
             name: "takeAfterReborrow",
@@ -473,7 +473,7 @@ function takeAfterReborrow(): i32 {
                 related: r####"&mut *holder.x"####,
             },
             graph: None,
-            stats: (3475, 472, 5),
+            stats: (3265, 472, 5),
         },
     ],
 };
@@ -569,8 +569,8 @@ function storeSharedFromShared(): i32 {
   return 0i32;
 }
 "#,
-    typed_stats: (470361, 52580, 12),
-    graph: (GraphCompletion::SourceRejected, (217129, 9075, 5)),
+    typed_stats: (452680, 57531, 12),
+    graph: (GraphCompletion::SourceRejected, (212649, 9075, 5)),
     roots: &[
         Root {
             name: "storeFromBuilt",
@@ -580,7 +580,7 @@ function storeSharedFromShared(): i32 {
                 related: r####"&mut *holder.x"####,
             },
             graph: None,
-            stats: (4281, 820, 5),
+            stats: (4001, 820, 5),
         },
         Root {
             name: "storeFromBuiltThenWrite",
@@ -590,7 +590,7 @@ function storeSharedFromShared(): i32 {
                 related: r####"&mut *holder.x"####,
             },
             graph: None,
-            stats: (4543, 953, 5),
+            stats: (4263, 953, 5),
         },
         Root {
             name: "storeFromSetMember",
@@ -600,7 +600,7 @@ function storeSharedFromShared(): i32 {
                 related: r####"&mut *holder.x"####,
             },
             graph: None,
-            stats: (4735, 1037, 5),
+            stats: (4455, 1037, 5),
         },
         Root {
             name: "storeReborrowOfRead",
@@ -610,7 +610,7 @@ function storeSharedFromShared(): i32 {
                 related: r####"&mut *holder.x"####,
             },
             graph: None,
-            stats: (4722, 1039, 5),
+            stats: (4442, 1039, 5),
         },
         Root {
             name: "storeReborrowViaLocal",
@@ -620,7 +620,7 @@ function storeSharedFromShared(): i32 {
                 related: r####"&mut *holder.x"####,
             },
             graph: None,
-            stats: (4898, 1115, 5),
+            stats: (4618, 1115, 5),
         },
         Root {
             name: "storeSharedFromShared",
@@ -630,7 +630,7 @@ function storeSharedFromShared(): i32 {
                 related: r####"&*h.first"####,
             },
             graph: None,
-            stats: (4889, 1115, 5),
+            stats: (4609, 1115, 5),
         },
     ],
 };
@@ -662,8 +662,8 @@ function storePickedFirst(): i32 {
   return 0i32;
 }
 "#,
-    typed_stats: (449678, 48788, 12),
-    graph: (GraphCompletion::SourceRejected, (191918, 4707, 6)),
+    typed_stats: (432238, 53480, 12),
+    graph: (GraphCompletion::SourceRejected, (189258, 4707, 6)),
     roots: &[
         Root {
             name: "pickFirst",
@@ -679,7 +679,7 @@ function storePickedFirst(): i32 {
                 related: r####"&mut *holder.x"####,
             },
             graph: None,
-            stats: (3257, 519, 6),
+            stats: (3117, 519, 6),
         },
     ],
 };
@@ -785,14 +785,14 @@ function dupParam(p: &mut i32): i32 {
   return 0i32;
 }
 "#,
-    typed_stats: (453651, 48978, 12),
-    graph: (GraphCompletion::SourceRejected, (194926, 4990, 7)),
+    typed_stats: (436035, 53719, 12),
+    graph: (GraphCompletion::SourceRejected, (191776, 4990, 7)),
     roots: &[
         Root {
             name: "refFirst",
             want: Want::Checked,
             graph: None,
-            stats: (2580, 190, 3),
+            stats: (2440, 190, 3),
         },
         Root {
             name: "movedTwice",
@@ -802,7 +802,7 @@ function dupParam(p: &mut i32): i32 {
                 related: r####"h"####,
             },
             graph: None,
-            stats: (3634, 409, 5),
+            stats: (3354, 409, 5),
         },
         Root {
             name: "memberAndReferent",
@@ -812,7 +812,7 @@ function dupParam(p: &mut i32): i32 {
                 related: r####"&a"####,
             },
             graph: None,
-            stats: (2578, 223, 7),
+            stats: (2508, 223, 7),
         },
         Root {
             name: "dupParam",
@@ -822,7 +822,7 @@ function dupParam(p: &mut i32): i32 {
                 related: r####"p"####,
             },
             graph: None,
-            stats: (2611, 205, 4),
+            stats: (2471, 205, 4),
         },
     ],
 };
@@ -965,56 +965,56 @@ function reborrowed(): i32 {
   return 0i32;
 }
 "#,
-    typed_stats: (491699, 54785, 12),
-    graph: (GraphCompletion::SourceRejected, (233286, 11538, 7)),
+    typed_stats: (473455, 59925, 12),
+    graph: (GraphCompletion::SourceRejected, (228036, 11538, 7)),
     roots: &[
         Root {
             name: "disjoint",
             want: Want::Checked,
             graph: None,
-            stats: (4037, 886, 5),
+            stats: (3897, 886, 5),
         },
         Root {
             name: "twice",
             want: Want::Checked,
             graph: None,
-            stats: (4661, 1198, 5),
+            stats: (4521, 1198, 5),
         },
         Root {
             name: "endsBeforeSource",
             want: Want::Checked,
             graph: None,
-            stats: (4009, 882, 5),
+            stats: (3869, 882, 5),
         },
         Root {
             name: "twoOwners",
             want: Want::Checked,
             graph: None,
-            stats: (4724, 1214, 5),
+            stats: (4584, 1214, 5),
         },
         Root {
             name: "groupedBorrows",
             want: Want::Checked,
             graph: None,
-            stats: (3971, 872, 6),
+            stats: (3831, 872, 6),
         },
         Root {
             name: "looped",
             want: Want::Checked,
             graph: None,
-            stats: (4402, 1074, 5),
+            stats: (4262, 1074, 5),
         },
         Root {
             name: "replaced",
             want: Want::Checked,
             graph: None,
-            stats: (4951, 1209, 5),
+            stats: (4741, 1209, 5),
         },
         Root {
             name: "withText",
             want: Want::Checked,
             graph: None,
-            stats: (3815, 804, 5),
+            stats: (3675, 804, 5),
         },
         Root {
             name: "sameOwnerTwice",
@@ -1024,7 +1024,7 @@ function reborrowed(): i32 {
                 related: r####"&mut a"####,
             },
             graph: None,
-            stats: (3415, 600, 5),
+            stats: (3275, 600, 5),
         },
         Root {
             name: "readOwnerWhileHeld",
@@ -1034,7 +1034,7 @@ function reborrowed(): i32 {
                 related: r####"&mut a"####,
             },
             graph: None,
-            stats: (3656, 720, 5),
+            stats: (3516, 720, 5),
         },
         Root {
             name: "secondHeldOverFirst",
@@ -1044,7 +1044,7 @@ function reborrowed(): i32 {
                 related: r####"&b"####,
             },
             graph: None,
-            stats: (4239, 821, 5),
+            stats: (3959, 821, 5),
         },
         Root {
             name: "scopedOverlap",
@@ -1054,7 +1054,7 @@ function reborrowed(): i32 {
                 related: r####"&mut a"####,
             },
             graph: None,
-            stats: (3514, 662, 7),
+            stats: (3374, 662, 7),
         },
         Root {
             name: "assignThrough",
@@ -1062,7 +1062,7 @@ function reborrowed(): i32 {
                 blocker: r####"*holder.first"####,
             },
             graph: None,
-            stats: (3077, 438, 3),
+            stats: (2937, 438, 3),
         },
         Root {
             name: "groupedTarget",
@@ -1070,7 +1070,7 @@ function reborrowed(): i32 {
                 blocker: r####"*(holder.first) += 1i32;"####,
             },
             graph: None,
-            stats: (3075, 438, 3),
+            stats: (2935, 438, 3),
         },
         Root {
             name: "movedOut",
@@ -1078,7 +1078,7 @@ function reborrowed(): i32 {
                 blocker: r####"*moved += 1i32;"####,
             },
             graph: None,
-            stats: (3082, 443, 3),
+            stats: (2942, 443, 3),
         },
         Root {
             name: "reborrowed",
@@ -1086,7 +1086,7 @@ function reborrowed(): i32 {
                 blocker: r####"*view += 1i32;"####,
             },
             graph: None,
-            stats: (3082, 443, 3),
+            stats: (2942, 443, 3),
         },
     ],
 };
@@ -1134,8 +1134,8 @@ function guarded(): i32 {
   return 0i32;
 }
 "#,
-    typed_stats: (458176, 49221, 12),
-    graph: (GraphCompletion::Incomplete, (194233, 4432, 5)),
+    typed_stats: (440499, 53997, 12),
+    graph: (GraphCompletion::Incomplete, (190693, 4432, 5)),
     roots: &[
         Root {
             name: "boolMember",
@@ -1143,7 +1143,7 @@ function guarded(): i32 {
                 blocker: r####"h"####,
             },
             graph: None,
-            stats: (2452, 120, 1),
+            stats: (2312, 120, 1),
         },
         Root {
             name: "textMember",
@@ -1151,7 +1151,7 @@ function guarded(): i32 {
                 blocker: r####"h"####,
             },
             graph: None,
-            stats: (2450, 119, 1),
+            stats: (2310, 119, 1),
         },
         Root {
             name: "wideMember",
@@ -1159,7 +1159,7 @@ function guarded(): i32 {
                 blocker: r####"h"####,
             },
             graph: None,
-            stats: (2450, 119, 1),
+            stats: (2310, 119, 1),
         },
         Root {
             name: "guarded",
@@ -1167,7 +1167,7 @@ function guarded(): i32 {
                 blocker: r####"h"####,
             },
             graph: None,
-            stats: (2657, 121, 1),
+            stats: (2337, 121, 1),
         },
     ],
 };

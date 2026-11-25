@@ -153,7 +153,7 @@ fn rfc_counter_caps_include_the_charged_local_reads() {
                 receipt,
                 caps(statistics(187543, 4297, 6)).0,
             ));
-            let graph_stats = statistics(190514, 4496, 6);
+            let graph_stats = statistics(187994, 4496, 6);
             let (exact, short) = caps(graph_stats);
             let graph = analyze_ownership(receipt, exact);
             assert_eq!(graph.completion(), GraphCompletion::Incomplete);
@@ -212,7 +212,7 @@ fn counter_expectation_checks_past_its_incomplete_cap() {
                 let incomplete = query(caps(statistics(2279, 210, 1)).0);
                 crate::limit::assert_body_limit(&incomplete);
 
-                let stats = statistics(5365, 781, 6);
+                let stats = statistics(5295, 781, 6);
                 assert_eq!(query(AnalysisLimits::default()).statistics(), stats);
                 let (exact, short) = caps(stats);
                 let target = query(exact);
@@ -293,7 +293,7 @@ expect seven() == 7i32 && true;
             // 316 work and 134 entries and sets depth 5 (metering rule 11).
             let before = statistics(190397, 4219, 3);
             crate::limit::assert_graph_limit(&analyze_ownership(receipt, caps(before).0));
-            let graph_stats = statistics(193242, 4353, 5);
+            let graph_stats = statistics(190722, 4353, 5);
             let (exact, short) = caps(graph_stats);
             let graph = analyze_ownership(receipt, exact);
             assert_eq!(graph.completion(), GraphCompletion::Incomplete);
@@ -376,7 +376,7 @@ expect 7i32 == seven();
             // Before: Incomplete at each comparison, 188,285/4,095/3 for the graph.
             let before = statistics(188285, 4095, 3);
             crate::limit::assert_graph_limit(&analyze_ownership(receipt, caps(before).0));
-            let graph_stats = statistics(192303, 4724, 8);
+            let graph_stats = statistics(189783, 4724, 8);
             let (exact, short) = caps(graph_stats);
             let graph = analyze_ownership(receipt, exact);
             assert_eq!(graph.completion(), GraphCompletion::Incomplete);
@@ -390,9 +390,9 @@ expect 7i32 == seven();
             for (root, work, entries, depth) in [
                 ("function same(", 2184, 179, 4),
                 ("function scaled(", 2313, 237, 8),
-                ("expect seven() == 7i32;", 4102, 185, 3),
-                ("expect (((seven()))) == ((7i32));", 4113, 185, 5),
-                ("expect 7i32 == seven();", 4104, 185, 3),
+                ("expect seven() == 7i32;", 4032, 185, 3),
+                ("expect (((seven()))) == ((7i32));", 4043, 185, 5),
+                ("expect 7i32 == seven();", 4034, 185, 3),
             ] {
                 let decl = written(module, root);
                 let query = |cap| {
@@ -720,7 +720,7 @@ function screened(xs: List<i32>, left: i32, right: i32): i32 {
                 receipt,
                 caps(statistics(191033, 4151, 5)).0,
             ));
-            let graph_stats = statistics(193886, 4285, 5);
+            let graph_stats = statistics(191366, 4285, 5);
             let (exact, short) = caps(graph_stats);
             let graph = analyze_ownership(receipt, exact);
             assert_eq!(graph.completion(), GraphCompletion::Incomplete);
@@ -796,7 +796,7 @@ function arrowUninvoked(first: i32, second: i32): i32 {
                 receipt,
                 caps(statistics(186809, 4039, 4)).0,
             ));
-            let graph_stats = statistics(189656, 4173, 5);
+            let graph_stats = statistics(187136, 4173, 5);
             let (exact, short) = caps(graph_stats);
             let graph = analyze_ownership(receipt, exact);
             assert_eq!(graph.completion(), GraphCompletion::Incomplete);

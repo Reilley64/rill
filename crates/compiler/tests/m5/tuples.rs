@@ -2870,7 +2870,7 @@ fn direct_shared_tuple_calls_keep_only_the_result_backing() {
             let scoped = lower(
                 "forwardsAlias",
                 AnalysisLimits {
-                    max_work: 6284,
+                    max_work: 6124,
                     max_entries: 1218,
                     max_depth: 6,
                 },
@@ -2911,7 +2911,7 @@ fn direct_shared_tuple_calls_keep_only_the_result_backing() {
             let resumes = lower(
                 "resumes",
                 AnalysisLimits {
-                    max_work: 11106,
+                    max_work: 10786,
                     max_entries: 2382,
                     max_depth: 6,
                 },

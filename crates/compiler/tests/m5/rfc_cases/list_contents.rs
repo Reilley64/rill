@@ -716,14 +716,14 @@ fn r1_known_conservative_rejection_of_a_callee_that_stores_nothing() {
                 &[const {
                     Case {
                         text: CONSERVATIVE,
-                        typed_stats: (450220, 48881, 12),
-                        graph: (GraphCompletion::SourceRejected, (191784, 4419, 6)),
+                        typed_stats: (432780, 53587, 12),
+                        graph: (GraphCompletion::SourceRejected, (188834, 4419, 6)),
                         roots: &[rejected(
                             "local",
                             R0202_LOCAL.0,
                             R0202_LOCAL.1,
                             R0202_LOCAL.2,
-                            (3166, 317, 6),
+                            (2736, 317, 6),
                         )],
                     }
                 }],
@@ -754,20 +754,20 @@ fn direct_list_destination_checks_parameters_and_rejects_locals() {
                 &[const {
                     Case {
                         text: DIRECT,
-                        typed_stats: (455111, 49206, 12),
-                        graph: (GraphCompletion::SourceRejected, (197243, 5367, 6)),
+                        typed_stats: (437544, 53954, 12),
+                        graph: (GraphCompletion::SourceRejected, (193253, 5367, 6)),
                         roots: &[
-                            checked("retain", (2208, 149, 1)),
-                            checked("forwarded", (4908, 386, 5)),
+                            checked("retain", (2138, 149, 1)),
+                            checked("forwarded", (4488, 386, 5)),
                             rejected(
                                 "local",
                                 R0202_LOCAL.0,
                                 R0202_LOCAL.1,
                                 R0202_LOCAL.2,
-                                (3230, 360, 6),
+                                (2810, 360, 6),
                             ),
-                            checked("keep", (2911, 305, 4)),
-                            checked("twice", (5577, 590, 5)),
+                            checked("keep", (2701, 305, 4)),
+                            checked("twice", (4947, 590, 5)),
                         ],
                     }
                 }],
@@ -804,40 +804,40 @@ fn family_list_destination_forms() {
                     const {
                         Case {
                             text: FAMILY_FORMS,
-                            typed_stats: (459160, 50060, 12),
-                            graph: (GraphCompletion::Incomplete, (197262, 5148, 7)),
+                            typed_stats: (441742, 54843, 12),
+                            graph: (GraphCompletion::Incomplete, (193662, 5148, 7)),
                             roots: &[
-                                checked("twice", (3416, 488, 5)),
-                                incomplete("grouped", "retain((dst), source)", (2081, 90, 3)),
-                                checked("looped", (2914, 363, 7)),
-                                checked("keep", (2920, 309, 4)),
+                                checked("twice", (2906, 488, 5)),
+                                incomplete("grouped", "retain((dst), source)", (2011, 90, 3)),
+                                checked("looped", (2624, 363, 7)),
+                                checked("keep", (2710, 309, 4)),
                             ],
                         }
                     },
                     const {
                         Case {
                             text: PAIR,
-                            typed_stats: (450030, 48915, 12),
-                            graph: (GraphCompletion::Incomplete, (191872, 4414, 5)),
-                            roots: &[checked("both", (2823, 312, 5))],
+                            typed_stats: (432598, 53649, 12),
+                            graph: (GraphCompletion::Incomplete, (189062, 4414, 5)),
+                            roots: &[checked("both", (2533, 312, 5))],
                         }
                     },
                     const {
                         Case {
                             text: ALONE,
-                            typed_stats: (449131, 48569, 12),
-                            graph: (GraphCompletion::Incomplete, (190781, 4258, 5)),
-                            roots: &[checked("forwarded", (2464, 156, 5))],
+                            typed_stats: (431659, 53247, 12),
+                            graph: (GraphCompletion::Incomplete, (187971, 4258, 5)),
+                            roots: &[checked("forwarded", (2174, 156, 5))],
                         }
                     },
                     const {
                         Case {
                             text: AFTER_RETAIN,
-                            typed_stats: (453594, 49336, 12),
-                            graph: (GraphCompletion::Incomplete, (194158, 4807, 5)),
+                            typed_stats: (436180, 54063, 12),
+                            graph: (GraphCompletion::Incomplete, (190838, 4807, 5)),
                             roots: &[
-                                checked("reuse", (2821, 322, 5)),
-                                checked("reuseDst", (3282, 423, 5)),
+                                checked("reuse", (2531, 322, 5)),
+                                checked("reuseDst", (2772, 423, 5)),
                             ],
                         }
                     },
@@ -879,53 +879,53 @@ fn local_sources_escape_through_every_route_to_the_list() {
                 &[const {
                     Case {
                         text: ESCAPES,
-                        typed_stats: (474312, 52328, 12),
-                        graph: (GraphCompletion::SourceRejected, (209965, 7021, 8)),
+                        typed_stats: (456877, 57209, 12),
+                        graph: (GraphCompletion::SourceRejected, (203875, 7021, 8)),
                         roots: &[
                             rejected(
                                 "aliased",
                                 "R0202",
                                 "retain(alias, &user)",
                                 "&user",
-                                (3513, 485, 6),
+                                (3083, 485, 6),
                             ),
                             rejected(
                                 "viaView",
                                 "R0202",
                                 "retain(dst, view)",
                                 "&user",
-                                (3505, 483, 5),
+                                (3075, 483, 5),
                             ),
                             rejected(
                                 "mixed",
                                 "R0202",
                                 "retain(dst, &user)",
                                 "&user",
-                                (4081, 652, 6),
+                                (3431, 652, 6),
                             ),
                             rejected(
                                 "branch",
                                 "R0202",
                                 "retain(dst, &user)",
                                 "&user",
-                                (3740, 606, 8),
+                                (3310, 606, 8),
                             ),
-                            checked("dead", (3018, 371, 4)),
+                            checked("dead", (2808, 371, 4)),
                             rejected(
                                 "loopLocal",
                                 "R0203",
                                 r####"{\n    let user = User { id: 1 };\n    retain(dst, &user);\n  }"####,
                                 "&user",
-                                (3592, 525, 8),
+                                (3162, 525, 8),
                             ),
                             rejected(
                                 "viaCall",
                                 "R0202",
                                 "forward(dst, &user)",
                                 "&user",
-                                (3385, 437, 6),
+                                (2965, 437, 6),
                             ),
-                            checked("forward", (2872, 348, 5)),
+                            checked("forward", (2582, 348, 5)),
                         ],
                     }
                 }],
@@ -945,8 +945,8 @@ fn list_destination_siblings_keep_their_outcomes_and_blockers() {
                     const {
                         Case {
                             text: NAMED,
-                            typed_stats: (449816, 48761, 12),
-                            graph: (GraphCompletion::Incomplete, (190653, 4143, 5)),
+                            typed_stats: (432359, 53474, 12),
+                            graph: (GraphCompletion::Incomplete, (188133, 4143, 5)),
                             roots: &[incomplete(
                                 "forwarded",
                                 "retain(dst, source)",
@@ -957,8 +957,8 @@ fn list_destination_siblings_keep_their_outcomes_and_blockers() {
                     const {
                         Case {
                             text: NESTED,
-                            typed_stats: (450822, 48809, 12),
-                            graph: (GraphCompletion::Incomplete, (190719, 4144, 5)),
+                            typed_stats: (433369, 53536, 12),
+                            graph: (GraphCompletion::Incomplete, (188199, 4144, 5)),
                             roots: &[incomplete(
                                 "forwarded",
                                 "retain(dst, source)",
@@ -969,8 +969,8 @@ fn list_destination_siblings_keep_their_outcomes_and_blockers() {
                     const {
                         Case {
                             text: ENUM,
-                            typed_stats: (449578, 48800, 12),
-                            graph: (GraphCompletion::Incomplete, (190529, 4141, 5)),
+                            typed_stats: (432131, 53513, 12),
+                            graph: (GraphCompletion::Incomplete, (188009, 4141, 5)),
                             roots: &[incomplete(
                                 "forwarded",
                                 "retain(dst, source)",
@@ -981,20 +981,20 @@ fn list_destination_siblings_keep_their_outcomes_and_blockers() {
                     const {
                         Case {
                             text: FLAG,
-                            typed_stats: (450320, 48879, 12),
-                            graph: (GraphCompletion::Incomplete, (190924, 4153, 5)),
+                            typed_stats: (432880, 53613, 12),
+                            graph: (GraphCompletion::Incomplete, (188334, 4153, 5)),
                             roots: &[incomplete(
                                 "forwarded",
                                 "retain(dst, source, flag)",
-                                (2004, 52, 3),
+                                (1934, 52, 3),
                             )],
                         }
                     },
                     const {
                         Case {
                             text: GENERIC,
-                            typed_stats: (450335, 48837, 12),
-                            graph: (GraphCompletion::Incomplete, (190839, 4146, 5)),
+                            typed_stats: (432863, 53550, 12),
+                            graph: (GraphCompletion::Incomplete, (188319, 4146, 5)),
                             roots: &[incomplete(
                                 "forwarded",
                                 "retain(dst, source)",
@@ -1005,8 +1005,8 @@ fn list_destination_siblings_keep_their_outcomes_and_blockers() {
                     const {
                         Case {
                             text: OWNED,
-                            typed_stats: (449524, 48713, 12),
-                            graph: (GraphCompletion::Incomplete, (190466, 4140, 5)),
+                            typed_stats: (432064, 53419, 12),
+                            graph: (GraphCompletion::Incomplete, (187946, 4140, 5)),
                             roots: &[incomplete(
                                 "forwarded",
                                 "retain(dst, source)",
@@ -1017,8 +1017,8 @@ fn list_destination_siblings_keep_their_outcomes_and_blockers() {
                     const {
                         Case {
                             text: EXCLUSIVE,
-                            typed_stats: (449577, 48742, 12),
-                            graph: (GraphCompletion::Incomplete, (190590, 4142, 5)),
+                            typed_stats: (432125, 53448, 12),
+                            graph: (GraphCompletion::Incomplete, (188070, 4142, 5)),
                             roots: &[incomplete(
                                 "forwarded",
                                 "retain(dst, source)",
@@ -1029,8 +1029,8 @@ fn list_destination_siblings_keep_their_outcomes_and_blockers() {
                     const {
                         Case {
                             text: SHARED_DESTINATION,
-                            typed_stats: (449577, 48742, 12),
-                            graph: (GraphCompletion::Incomplete, (190590, 4142, 5)),
+                            typed_stats: (432125, 53448, 12),
+                            graph: (GraphCompletion::Incomplete, (188070, 4142, 5)),
                             roots: &[incomplete(
                                 "forwarded",
                                 "retain(dst, source)",
@@ -1041,20 +1041,20 @@ fn list_destination_siblings_keep_their_outcomes_and_blockers() {
                     const {
                         Case {
                             text: GROUPED,
-                            typed_stats: (450560, 48918, 12),
-                            graph: (GraphCompletion::Incomplete, (190727, 4146, 5)),
+                            typed_stats: (433148, 53624, 12),
+                            graph: (GraphCompletion::Incomplete, (188137, 4146, 5)),
                             roots: &[incomplete(
                                 "grouped",
                                 "retain((dst), source)",
-                                (1991, 45, 3),
+                                (1921, 45, 3),
                             )],
                         }
                     },
                     const {
                         Case {
                             text: LOCAL_DESTINATION,
-                            typed_stats: (450273, 48892, 12),
-                            graph: (GraphCompletion::Incomplete, (190756, 4139, 5)),
+                            typed_stats: (432834, 53598, 12),
+                            graph: (GraphCompletion::Incomplete, (188236, 4139, 5)),
                             roots: &[incomplete("fresh", "users", (1900, 38, 1))],
                         }
                     },
@@ -1064,7 +1064,7 @@ fn list_destination_siblings_keep_their_outcomes_and_blockers() {
                 &request,
                 &[
                     (FLAG, &[("forwarded", (1917, 49, 3))], (188322, 4150, 5)),
-                    (GROUPED, &[("grouped", (1905, 42, 3))], (190653, 4143, 5)),
+                    (GROUPED, &[("grouped", (1905, 42, 3))], (188133, 4143, 5)),
                 ],
             );
         },
@@ -1082,20 +1082,20 @@ fn list_parameter_siblings_keep_their_parent_caps_and_outcomes() {
                     const {
                         Case {
                             text: NAMED_BORROW,
-                            typed_stats: (455531, 49111, 12),
-                            graph: (GraphCompletion::Incomplete, (194816, 4322, 5)),
+                            typed_stats: (437814, 53901, 12),
+                            graph: (GraphCompletion::Incomplete, (191876, 4322, 5)),
                             roots: &[
                                 checked("touch", (2010, 91, 1)),
                                 checked("touchTwo", (2054, 109, 1)),
-                                incomplete("f", "users", (2452, 121, 1)),
+                                incomplete("f", "users", (2312, 121, 1)),
                             ],
                         }
                     },
                     const {
                         Case {
                             text: NAMED_LONE,
-                            typed_stats: (455759, 49049, 12),
-                            graph: (GraphCompletion::Incomplete, (193893, 4261, 5)),
+                            typed_stats: (438089, 53825, 12),
+                            graph: (GraphCompletion::Incomplete, (191093, 4261, 5)),
                             roots: &[
                                 checked("touch", (1996, 84, 1)),
                                 checked("touchTwo", (2040, 102, 1)),
@@ -1106,8 +1106,8 @@ fn list_parameter_siblings_keep_their_parent_caps_and_outcomes() {
                     const {
                         Case {
                             text: NAMED_FORWARDED,
-                            typed_stats: (456007, 49155, 12),
-                            graph: (GraphCompletion::Incomplete, (194089, 4268, 5)),
+                            typed_stats: (438345, 53938, 12),
+                            graph: (GraphCompletion::Incomplete, (191289, 4268, 5)),
                             roots: &[
                                 checked("touch", (2002, 87, 1)),
                                 checked("touchTwo", (2046, 105, 1)),
@@ -1118,8 +1118,8 @@ fn list_parameter_siblings_keep_their_parent_caps_and_outcomes() {
                     const {
                         Case {
                             text: NAMED_FORWARDED_PIPE,
-                            typed_stats: (456017, 49159, 12),
-                            graph: (GraphCompletion::Incomplete, (194091, 4268, 5)),
+                            typed_stats: (438355, 53942, 12),
+                            graph: (GraphCompletion::Incomplete, (191291, 4268, 5)),
                             roots: &[
                                 checked("touch", (2002, 87, 1)),
                                 checked("touchTwo", (2046, 105, 1)),
@@ -1130,36 +1130,36 @@ fn list_parameter_siblings_keep_their_parent_caps_and_outcomes() {
                     const {
                         Case {
                             text: NAMED_DIRECT_EMPTY,
-                            typed_stats: (455316, 48960, 12),
-                            graph: (GraphCompletion::Incomplete, (194031, 4264, 5)),
+                            typed_stats: (437606, 53736, 12),
+                            graph: (GraphCompletion::Incomplete, (191161, 4264, 5)),
                             roots: &[
                                 checked("touch", (1998, 85, 1)),
                                 checked("touchTwo", (2042, 103, 1)),
-                                incomplete("f", "dst", (2029, 63, 3)),
+                                incomplete("f", "dst", (1959, 63, 3)),
                             ],
                         }
                     },
                     const {
                         Case {
                             text: NAMED_DIRECT_PAIR,
-                            typed_stats: (455525, 49015, 12),
-                            graph: (GraphCompletion::Incomplete, (194228, 4272, 5)),
+                            typed_stats: (437823, 53798, 12),
+                            graph: (GraphCompletion::Incomplete, (191358, 4272, 5)),
                             roots: &[
                                 checked("touch", (2004, 88, 1)),
                                 checked("touchTwo", (2048, 106, 1)),
-                                incomplete("f", "dst", (2045, 71, 3)),
+                                incomplete("f", "dst", (1975, 71, 3)),
                             ],
                         }
                     },
                     const {
                         Case {
                             text: NAMED_PIPED_PAIR,
-                            typed_stats: (455535, 49019, 12),
-                            graph: (GraphCompletion::Incomplete, (194228, 4269, 5)),
+                            typed_stats: (437833, 53802, 12),
+                            graph: (GraphCompletion::Incomplete, (191358, 4269, 5)),
                             roots: &[
                                 checked("touch", (2004, 88, 1)),
                                 checked("touchTwo", (2048, 106, 1)),
-                                incomplete("f", "dst |> touchTwo(s)", (2045, 68, 3)),
+                                incomplete("f", "dst |> touchTwo(s)", (1975, 68, 3)),
                             ],
                         }
                     },
@@ -1180,20 +1180,20 @@ fn list_parameter_siblings_of_nested_records_and_enums_keep_their_parent_caps() 
                     const {
                         Case {
                             text: NESTED_BORROW,
-                            typed_stats: (456652, 49203, 12),
-                            graph: (GraphCompletion::Incomplete, (195374, 4382, 5)),
+                            typed_stats: (438939, 54007, 12),
+                            graph: (GraphCompletion::Incomplete, (192364, 4382, 5)),
                             roots: &[
                                 checked("touch", (2014, 93, 1)),
                                 checked("touchTwo", (2058, 111, 1)),
-                                incomplete("f", "users", (2886, 181, 1)),
+                                incomplete("f", "users", (2676, 181, 1)),
                             ],
                         }
                     },
                     const {
                         Case {
                             text: NESTED_LONE,
-                            typed_stats: (456781, 49097, 12),
-                            graph: (GraphCompletion::Incomplete, (193959, 4262, 5)),
+                            typed_stats: (439115, 53887, 12),
+                            graph: (GraphCompletion::Incomplete, (191159, 4262, 5)),
                             roots: &[
                                 checked("touch", (1998, 85, 1)),
                                 checked("touchTwo", (2042, 103, 1)),
@@ -1204,8 +1204,8 @@ fn list_parameter_siblings_of_nested_records_and_enums_keep_their_parent_caps() 
                     const {
                         Case {
                             text: NESTED_FORWARDED,
-                            typed_stats: (457028, 49203, 12),
-                            graph: (GraphCompletion::Incomplete, (194155, 4269, 5)),
+                            typed_stats: (439370, 54000, 12),
+                            graph: (GraphCompletion::Incomplete, (191355, 4269, 5)),
                             roots: &[
                                 checked("touch", (2004, 88, 1)),
                                 checked("touchTwo", (2048, 106, 1)),
@@ -1216,8 +1216,8 @@ fn list_parameter_siblings_of_nested_records_and_enums_keep_their_parent_caps() 
                     const {
                         Case {
                             text: NESTED_FORWARDED_PIPE,
-                            typed_stats: (457038, 49207, 12),
-                            graph: (GraphCompletion::Incomplete, (194157, 4269, 5)),
+                            typed_stats: (439380, 54004, 12),
+                            graph: (GraphCompletion::Incomplete, (191357, 4269, 5)),
                             roots: &[
                                 checked("touch", (2004, 88, 1)),
                                 checked("touchTwo", (2048, 106, 1)),
@@ -1228,44 +1228,44 @@ fn list_parameter_siblings_of_nested_records_and_enums_keep_their_parent_caps() 
                     const {
                         Case {
                             text: NESTED_DIRECT_EMPTY,
-                            typed_stats: (456338, 49008, 12),
-                            graph: (GraphCompletion::Incomplete, (194097, 4265, 5)),
+                            typed_stats: (438632, 53798, 12),
+                            graph: (GraphCompletion::Incomplete, (191227, 4265, 5)),
                             roots: &[
                                 checked("touch", (2000, 86, 1)),
                                 checked("touchTwo", (2044, 104, 1)),
-                                incomplete("f", "dst", (2031, 64, 3)),
+                                incomplete("f", "dst", (1961, 64, 3)),
                             ],
                         }
                     },
                     const {
                         Case {
                             text: NESTED_DIRECT_PAIR,
-                            typed_stats: (456546, 49063, 12),
-                            graph: (GraphCompletion::Incomplete, (194294, 4273, 5)),
+                            typed_stats: (438848, 53860, 12),
+                            graph: (GraphCompletion::Incomplete, (191424, 4273, 5)),
                             roots: &[
                                 checked("touch", (2006, 89, 1)),
                                 checked("touchTwo", (2050, 107, 1)),
-                                incomplete("f", "dst", (2047, 72, 3)),
+                                incomplete("f", "dst", (1977, 72, 3)),
                             ],
                         }
                     },
                     const {
                         Case {
                             text: NESTED_PIPED_PAIR,
-                            typed_stats: (456556, 49067, 12),
-                            graph: (GraphCompletion::Incomplete, (194294, 4270, 5)),
+                            typed_stats: (438858, 53864, 12),
+                            graph: (GraphCompletion::Incomplete, (191424, 4270, 5)),
                             roots: &[
                                 checked("touch", (2006, 89, 1)),
                                 checked("touchTwo", (2050, 107, 1)),
-                                incomplete("f", "dst |> touchTwo(s)", (2047, 69, 3)),
+                                incomplete("f", "dst |> touchTwo(s)", (1977, 69, 3)),
                             ],
                         }
                     },
                     const {
                         Case {
                             text: ENUM_BORROW,
-                            typed_stats: (455069, 49052, 12),
-                            graph: (GraphCompletion::Incomplete, (194063, 4256, 5)),
+                            typed_stats: (437362, 53842, 12),
+                            graph: (GraphCompletion::Incomplete, (191263, 4256, 5)),
                             roots: &[
                                 checked("touch", (2002, 87, 1)),
                                 checked("touchTwo", (2046, 105, 1)),
@@ -1276,8 +1276,8 @@ fn list_parameter_siblings_of_nested_records_and_enums_keep_their_parent_caps() 
                     const {
                         Case {
                             text: ENUM_LONE,
-                            typed_stats: (455452, 49048, 12),
-                            graph: (GraphCompletion::Incomplete, (193769, 4259, 5)),
+                            typed_stats: (437792, 53824, 12),
+                            graph: (GraphCompletion::Incomplete, (190969, 4259, 5)),
                             roots: &[
                                 checked("touch", (1992, 82, 1)),
                                 checked("touchTwo", (2036, 100, 1)),
@@ -1288,8 +1288,8 @@ fn list_parameter_siblings_of_nested_records_and_enums_keep_their_parent_caps() 
                     const {
                         Case {
                             text: ENUM_FORWARDED,
-                            typed_stats: (455769, 49194, 12),
-                            graph: (GraphCompletion::Incomplete, (193965, 4266, 5)),
+                            typed_stats: (438117, 53977, 12),
+                            graph: (GraphCompletion::Incomplete, (191165, 4266, 5)),
                             roots: &[
                                 checked("touch", (1998, 85, 1)),
                                 checked("touchTwo", (2042, 103, 1)),
@@ -1300,8 +1300,8 @@ fn list_parameter_siblings_of_nested_records_and_enums_keep_their_parent_caps() 
                     const {
                         Case {
                             text: ENUM_FORWARDED_PIPE,
-                            typed_stats: (455779, 49198, 12),
-                            graph: (GraphCompletion::Incomplete, (193967, 4266, 5)),
+                            typed_stats: (438127, 53981, 12),
+                            graph: (GraphCompletion::Incomplete, (191167, 4266, 5)),
                             roots: &[
                                 checked("touch", (1998, 85, 1)),
                                 checked("touchTwo", (2042, 103, 1)),
@@ -1312,36 +1312,36 @@ fn list_parameter_siblings_of_nested_records_and_enums_keep_their_parent_caps() 
                     const {
                         Case {
                             text: ENUM_DIRECT_EMPTY,
-                            typed_stats: (455009, 48959, 12),
-                            graph: (GraphCompletion::Incomplete, (193907, 4262, 5)),
+                            typed_stats: (437309, 53735, 12),
+                            graph: (GraphCompletion::Incomplete, (191037, 4262, 5)),
                             roots: &[
                                 checked("touch", (1994, 83, 1)),
                                 checked("touchTwo", (2038, 101, 1)),
-                                incomplete("f", "dst", (2025, 61, 3)),
+                                incomplete("f", "dst", (1955, 61, 3)),
                             ],
                         }
                     },
                     const {
                         Case {
                             text: ENUM_DIRECT_PAIR,
-                            typed_stats: (455215, 49014, 12),
-                            graph: (GraphCompletion::Incomplete, (194104, 4270, 5)),
+                            typed_stats: (437523, 53797, 12),
+                            graph: (GraphCompletion::Incomplete, (191234, 4270, 5)),
                             roots: &[
                                 checked("touch", (2000, 86, 1)),
                                 checked("touchTwo", (2044, 104, 1)),
-                                incomplete("f", "dst", (2041, 69, 3)),
+                                incomplete("f", "dst", (1971, 69, 3)),
                             ],
                         }
                     },
                     const {
                         Case {
                             text: ENUM_PIPED_PAIR,
-                            typed_stats: (455225, 49018, 12),
-                            graph: (GraphCompletion::Incomplete, (194104, 4267, 5)),
+                            typed_stats: (437533, 53801, 12),
+                            graph: (GraphCompletion::Incomplete, (191234, 4267, 5)),
                             roots: &[
                                 checked("touch", (2000, 86, 1)),
                                 checked("touchTwo", (2044, 104, 1)),
-                                incomplete("f", "dst |> touchTwo(s)", (2041, 66, 3)),
+                                incomplete("f", "dst |> touchTwo(s)", (1971, 66, 3)),
                             ],
                         }
                     },
@@ -1363,11 +1363,11 @@ fn r1_direct_function_retain_checks_with_its_sequence() {
         const {
             Case {
                 text: DIRECT_CALL,
-                typed_stats: (447803, 48454, 12),
-                graph: (GraphCompletion::Incomplete, (190248, 4387, 5)),
+                typed_stats: (430370, 53125, 12),
+                graph: (GraphCompletion::Incomplete, (187378, 4387, 5)),
                 roots: &[
-                    checked("retain", (2114, 102, 1)),
-                    checked("forwarded", (4720, 292, 5)),
+                    checked("retain", (2044, 102, 1)),
+                    checked("forwarded", (4300, 292, 5)),
                 ],
             }
         },
@@ -1405,9 +1405,9 @@ fn r1_two_calls_check_with_their_sequence() {
         const {
             Case {
                 text: TWO_CALLS,
-                typed_stats: (450693, 48989, 12),
-                graph: (GraphCompletion::Incomplete, (192385, 4551, 5)),
-                roots: &[checked("twice", (3336, 448, 5))],
+                typed_stats: (433289, 53702, 12),
+                graph: (GraphCompletion::Incomplete, (189355, 4551, 5)),
+                roots: &[checked("twice", (2826, 448, 5))],
             }
         },
         &[(
@@ -1438,9 +1438,9 @@ fn r1_call_in_a_loop_checks_with_its_sequence() {
         const {
             Case {
                 text: LOOPED,
-                typed_stats: (449692, 48775, 12),
-                graph: (GraphCompletion::Incomplete, (191667, 4423, 7)),
-                roots: &[checked("looped", (2828, 320, 7))],
+                typed_stats: (432240, 53481, 12),
+                graph: (GraphCompletion::Incomplete, (188857, 4423, 7)),
+                roots: &[checked("looped", (2538, 320, 7))],
             }
         },
         &[(
@@ -1472,9 +1472,9 @@ fn r1_pair_of_user_sources_checks_with_its_sequence() {
         const {
             Case {
                 text: PAIR,
-                typed_stats: (450030, 48915, 12),
-                graph: (GraphCompletion::Incomplete, (191872, 4414, 5)),
-                roots: &[checked("both", (2823, 312, 5))],
+                typed_stats: (432598, 53649, 12),
+                graph: (GraphCompletion::Incomplete, (189062, 4414, 5)),
+                roots: &[checked("both", (2533, 312, 5))],
             }
         },
         &[(
@@ -1502,9 +1502,9 @@ fn r1_lone_destination_checks_with_its_sequence() {
         const {
             Case {
                 text: ALONE,
-                typed_stats: (449131, 48569, 12),
-                graph: (GraphCompletion::Incomplete, (190781, 4258, 5)),
-                roots: &[checked("forwarded", (2464, 156, 5))],
+                typed_stats: (431659, 53247, 12),
+                graph: (GraphCompletion::Incomplete, (187971, 4258, 5)),
+                roots: &[checked("forwarded", (2174, 156, 5))],
             }
         },
         &[(
@@ -1530,9 +1530,9 @@ fn r1_source_read_after_the_call_checks_with_its_sequence() {
         const {
             Case {
                 text: AFTER_READ,
-                typed_stats: (449848, 48786, 12),
-                graph: (GraphCompletion::Incomplete, (191653, 4408, 5)),
-                roots: &[checked("reuse", (2789, 306, 5))],
+                typed_stats: (432396, 53492, 12),
+                graph: (GraphCompletion::Incomplete, (188843, 4408, 5)),
+                roots: &[checked("reuse", (2499, 306, 5))],
             }
         },
         &[(
@@ -1563,17 +1563,17 @@ fn r1_keep_list_parameter_without_a_call_is_pinned() {
         const {
             Case {
                 text: DIRECT,
-                typed_stats: (455111, 49206, 12),
-                graph: (GraphCompletion::SourceRejected, (197243, 5367, 6)),
+                typed_stats: (437544, 53954, 12),
+                graph: (GraphCompletion::SourceRejected, (193253, 5367, 6)),
                 roots: &[
                     rejected(
                         "local",
                         R0202_LOCAL.0,
                         R0202_LOCAL.1,
                         R0202_LOCAL.2,
-                        (3230, 360, 6),
+                        (2810, 360, 6),
                     ),
-                    checked("keep", (2911, 305, 4)),
+                    checked("keep", (2701, 305, 4)),
                 ],
             }
         },
@@ -1610,23 +1610,23 @@ fn r1_loop_body_local_source_retained_into_dst_rejects() {
                 &[const {
                     Case {
                         text: LOOP_LOCAL,
-                        typed_stats: (456881, 49854, 12),
-                        graph: (GraphCompletion::SourceRejected, (197041, 5223, 8)),
+                        typed_stats: (439449, 54602, 12),
+                        graph: (GraphCompletion::SourceRejected, (193371, 5223, 8)),
                         roots: &[
-                            checked("looped", (2898, 355, 7)),
+                            checked("looped", (2608, 355, 7)),
                             rejected(
                                 "loopLocal",
                                 "R0203",
                                 r####"{\n    let user = User { id: 1 };\n    retain(dst, &user);\n  }"####,
                                 "&user",
-                                (3430, 444, 8),
+                                (3000, 444, 8),
                             ),
                             rejected(
                                 "loopLocalReturn",
                                 R0202_LOCAL.0,
                                 R0202_LOCAL.1,
                                 R0202_LOCAL.2,
-                                (3406, 441, 8),
+                                (2976, 441, 8),
                             ),
                         ],
                     }
@@ -1660,31 +1660,31 @@ fn r1_stored_source_outlives_the_call_loan() {
                 &[const {
                     Case {
                         text: OUTLIVES,
-                        typed_stats: (460600, 50313, 12),
-                        graph: (GraphCompletion::SourceRejected, (199644, 5538, 6)),
+                        typed_stats: (443123, 55096, 12),
+                        graph: (GraphCompletion::SourceRejected, (195694, 5538, 6)),
                         roots: &[
                             rejected(
                                 "writeAfter",
                                 "R0203",
                                 "user.id = 2;",
                                 "&user",
-                                (3394, 431, 6),
+                                (2964, 431, 6),
                             ),
                             rejected(
                                 "readAfter",
                                 R0202_LOCAL.0,
                                 R0202_LOCAL.1,
                                 R0202_LOCAL.2,
-                                (3380, 422, 6),
+                                (2950, 422, 6),
                             ),
                             rejected(
                                 "writeBefore",
                                 R0202_LOCAL.0,
                                 R0202_LOCAL.1,
                                 R0202_LOCAL.2,
-                                (3476, 472, 6),
+                                (3046, 472, 6),
                             ),
-                            checked("viewReadThenWrite", (2912, 346, 4)),
+                            checked("viewReadThenWrite", (2772, 346, 4)),
                         ],
                     }
                 }],
@@ -1709,23 +1709,23 @@ fn r1_old_contents_survive_a_later_retain() {
                 &[const {
                     Case {
                         text: OLD_CONTENTS,
-                        typed_stats: (458282, 50104, 12),
-                        graph: (GraphCompletion::SourceRejected, (198038, 5390, 6)),
+                        typed_stats: (440906, 54866, 12),
+                        graph: (GraphCompletion::SourceRejected, (193938, 5390, 6)),
                         roots: &[
-                            checked("forward", (2716, 270, 5)),
+                            checked("forward", (2426, 270, 5)),
                             rejected(
                                 "reversed",
                                 "R0202",
                                 "retain(dst, &user)",
                                 "&user",
-                                (3921, 572, 6),
+                                (3271, 572, 6),
                             ),
                             rejected(
                                 "reversedViaCall",
                                 "R0202",
                                 "retain(dst, &user)",
                                 "&user",
-                                (3900, 572, 6),
+                                (3260, 572, 6),
                             ),
                         ],
                     }
@@ -1752,22 +1752,22 @@ fn r1_local_then_parameter_reports_the_storing_call() {
                 &[const {
                     Case {
                         text: ORDER,
-                        typed_stats: (456039, 49912, 12),
-                        graph: (GraphCompletion::SourceRejected, (196358, 5172, 6)),
+                        typed_stats: (438705, 54653, 12),
+                        graph: (GraphCompletion::SourceRejected, (192538, 5172, 6)),
                         roots: &[
                             rejected(
                                 "paramThenLocal",
                                 "R0202",
                                 "retain(dst, &user)",
                                 "&user",
-                                (3899, 561, 6),
+                                (3249, 561, 6),
                             ),
                             rejected(
                                 "localThenParam",
                                 "R0202",
                                 "retain(dst, &user)",
                                 "&user",
-                                (3895, 559, 6),
+                                (3245, 559, 6),
                             ),
                         ],
                     }
@@ -1793,36 +1793,36 @@ fn r1_two_local_stores_report_the_first_storing_call() {
                 &[const {
                     Case {
                         text: TWO_LOCALS,
-                        typed_stats: (469559, 52262, 12),
-                        graph: (GraphCompletion::SourceRejected, (207845, 7464, 8)),
+                        typed_stats: (452429, 57073, 12),
+                        graph: (GraphCompletion::SourceRejected, (202085, 7464, 8)),
                         roots: &[
                             rejected(
                                 "firstThenSecond",
                                 "R0202",
                                 "retain(dst, &one)",
                                 "&one",
-                                (4714, 778, 6),
+                                (3924, 778, 6),
                             ),
                             rejected(
                                 "secondThenFirst",
                                 "R0202",
                                 "retain(dst, &two)",
                                 "&two",
-                                (4715, 778, 6),
+                                (3925, 778, 6),
                             ),
                             rejected(
                                 "twoThenParam",
                                 "R0202",
                                 "retain(dst, &two)",
                                 "&two",
-                                (5559, 1087, 6),
+                                (4549, 1087, 6),
                             ),
                             rejected(
                                 "loopLocalThenParam",
                                 "R0202",
                                 "retain(dst, &user)",
                                 "&user",
-                                (4857, 1037, 8),
+                                (4207, 1037, 8),
                             ),
                         ],
                     }
@@ -1848,22 +1848,22 @@ fn r1_view_stored_on_two_branches_reports_the_first_branch_call() {
                 &[const {
                     Case {
                         text: VIEW_BRANCHES,
-                        typed_stats: (461755, 50938, 12),
-                        graph: (GraphCompletion::SourceRejected, (205512, 8132, 7)),
+                        typed_stats: (444549, 55721, 12),
+                        graph: (GraphCompletion::SourceRejected, (200672, 8132, 7)),
                         roots: &[
                             rejected(
                                 "v23_viewBranches",
                                 "R0202",
                                 "retain(dst, view)",
                                 "&user",
-                                (5416, 1228, 7),
+                                (4546, 1228, 7),
                             ),
                             rejected(
                                 "v37_viewsOfTwo",
                                 "R0202",
                                 "retain(dst, v)",
                                 "&two",
-                                (9438, 2888, 7),
+                                (7988, 2888, 7),
                             ),
                         ],
                     }
@@ -1891,12 +1891,12 @@ fn r1_split_stores_that_repair_cost_more_and_their_parent_caps_give_resource_lim
                 &[const {
                     Case {
                         text: SPLIT_STORES,
-                        typed_stats: (472566, 51147, 12),
-                        graph: (GraphCompletion::Incomplete, (223863, 15030, 9)),
+                        typed_stats: (455028, 55930, 12),
+                        graph: (GraphCompletion::Incomplete, (220713, 15030, 9)),
                         roots: &[
-                            checked("c1_splitThenRepair", (13563, 3765, 7)),
-                            checked("c2_split3ThenRepair", (17862, 5686, 9)),
-                            checked("c3_noSplitControl", (12105, 3074, 7)),
+                            checked("c1_splitThenRepair", (13213, 3765, 7)),
+                            checked("c2_split3ThenRepair", (17442, 5686, 9)),
+                            checked("c3_noSplitControl", (11825, 3074, 7)),
                         ],
                     }
                 }],
@@ -1943,43 +1943,43 @@ fn r1_assignment_stores_report_the_assigning_statement() {
                 &[const {
                     Case {
                         text: ASSIGNED_STORES,
-                        typed_stats: (467175, 50460, 12),
-                        graph: (GraphCompletion::SourceRejected, (205896, 7014, 6)),
+                        typed_stats: (449293, 55327, 12),
+                        graph: (GraphCompletion::SourceRejected, (201766, 7014, 6)),
                         roots: &[
                             rejected(
                                 "o3_assignLocalThenCall",
                                 "R0202",
                                 "*slot = &flag;",
                                 "&flag",
-                                (2798, 436, 5),
+                                (2728, 436, 5),
                             ),
                             rejected(
                                 "r4_assignLocalThenCall",
                                 "R0202",
                                 "*slot = &p;",
                                 "&p",
-                                (3922, 596, 5),
+                                (3292, 596, 5),
                             ),
                             rejected(
                                 "o8_branchAssign",
                                 "R0202",
                                 "*slot = &flag;",
                                 "&flag",
-                                (3240, 670, 6),
+                                (3170, 670, 6),
                             ),
                             rejected(
                                 "o5_callLocalAssignLocalCall",
                                 "R0202",
                                 "*slot = &other;",
                                 "&other",
-                                (3416, 706, 6),
+                                (3276, 706, 6),
                             ),
                             rejected(
                                 "o7_assignLocalCallLocalCall",
                                 "R0202",
                                 "*slot = &flag;",
                                 "&flag",
-                                (3428, 708, 6),
+                                (3288, 708, 6),
                             ),
                             rejected(
                                 "oa_assignLocalOnly",
@@ -2013,29 +2013,29 @@ fn r1_the_storing_call_is_a_premise_of_the_state() {
                 &[const {
                     Case {
                         text: STORE_PREMISES,
-                        typed_stats: (459854, 49817, 12),
-                        graph: (GraphCompletion::SourceRejected, (201517, 7001, 7)),
+                        typed_stats: (442324, 54593, 12),
+                        graph: (GraphCompletion::SourceRejected, (198437, 7001, 7)),
                         roots: &[
                             rejected(
                                 "repaired",
                                 "R0202",
                                 "keep(slot, view)",
                                 "&flag",
-                                (3342, 659, 5),
+                                (3202, 659, 5),
                             ),
                             rejected(
                                 "joinedSetFirst",
                                 "R0202",
                                 "set(slot, view)",
                                 "&flag",
-                                (4244, 1099, 7),
+                                (4034, 1099, 7),
                             ),
                             rejected(
                                 "joinedKeepFirst",
                                 "R0202",
                                 "keep(slot, view)",
                                 "&flag",
-                                (4244, 1099, 7),
+                                (4034, 1099, 7),
                             ),
                         ],
                     }
@@ -2063,43 +2063,43 @@ fn r1_owned_parameter_and_temporary_sources_do_not_escape() {
                 &[const {
                     Case {
                         text: OWNED_SOURCES,
-                        typed_stats: (464731, 50796, 12),
-                        graph: (GraphCompletion::SourceRejected, (202095, 5871, 8)),
+                        typed_stats: (446989, 55607, 12),
+                        graph: (GraphCompletion::SourceRejected, (197145, 5871, 8)),
                         roots: &[
                             rejected(
                                 "byValue",
                                 "R0202",
                                 "retain(dst, &owned)",
                                 "&owned",
-                                (3159, 314, 6),
+                                (2729, 314, 6),
                             ),
                             rejected(
                                 "hop",
                                 "R0202",
                                 "retain(dst, view)",
                                 "&owned",
-                                (3282, 372, 5),
+                                (2852, 372, 5),
                             ),
                             rejected(
                                 "oneBranch",
                                 "R0202",
                                 "retain(dst, &owned)",
                                 "&owned",
-                                (3445, 459, 8),
+                                (3015, 459, 8),
                             ),
                             rejected(
                                 "loopOwned",
                                 "R0202",
                                 "retain(dst, &owned)",
                                 "&owned",
-                                (3705, 584, 8),
+                                (3275, 584, 8),
                             ),
                             rejected(
                                 "loopBreak",
                                 "R0202",
                                 "retain(dst, &owned)",
                                 "&owned",
-                                (3279, 376, 8),
+                                (2849, 376, 8),
                             ),
                         ],
                     }
@@ -2110,12 +2110,12 @@ fn r1_owned_parameter_and_temporary_sources_do_not_escape() {
                 &[const {
                     Case {
                         text: TEMPORARY_SOURCES,
-                        typed_stats: (455341, 49420, 12),
-                        graph: (GraphCompletion::Incomplete, (193126, 4301, 6)),
+                        typed_stats: (437764, 54140, 12),
+                        graph: (GraphCompletion::Incomplete, (189956, 4301, 6)),
                         roots: &[
-                            checked("make", (2442, 154, 4)),
-                            incomplete("call", "make()", (2272, 63, 6)),
-                            incomplete("literal", "User { id: 1 }", (2272, 63, 6)),
+                            checked("make", (2372, 154, 4)),
+                            incomplete("call", "make()", (1982, 63, 6)),
+                            incomplete("literal", "User { id: 1 }", (1982, 63, 6)),
                         ],
                     }
                 }],
@@ -2137,22 +2137,22 @@ fn r1_pair_with_one_body_local_source_rejects() {
                 &[const {
                     Case {
                         text: PAIR_LOCAL,
-                        typed_stats: (454715, 49783, 12),
-                        graph: (GraphCompletion::SourceRejected, (195135, 4884, 6)),
+                        typed_stats: (437313, 54545, 12),
+                        graph: (GraphCompletion::SourceRejected, (191755, 4884, 6)),
                         roots: &[
                             rejected(
                                 "localSecond",
                                 "R0202",
                                 "retain(dst, a, &user)",
                                 "&user",
-                                (3372, 415, 6),
+                                (2942, 415, 6),
                             ),
                             rejected(
                                 "localFirst",
                                 "R0202",
                                 "retain(dst, &user, a)",
                                 "&user",
-                                (3370, 414, 6),
+                                (2940, 414, 6),
                             ),
                         ],
                     }
@@ -2177,22 +2177,22 @@ fn r1_lone_destination_keeps_a_stored_local_rejected() {
                 &[const {
                     Case {
                         text: LONE_LOCAL,
-                        typed_stats: (458436, 49895, 12),
-                        graph: (GraphCompletion::SourceRejected, (197447, 5006, 6)),
+                        typed_stats: (440973, 54657, 12),
+                        graph: (GraphCompletion::SourceRejected, (193627, 5006, 6)),
                         roots: &[
                             rejected(
                                 "loneAfterLocal",
                                 "R0202",
                                 "retain(dst, &user)",
                                 "&user",
-                                (3721, 475, 6),
+                                (3071, 475, 6),
                             ),
                             rejected(
                                 "loneBeforeLocal",
                                 "R0202",
                                 "retain(dst, &user)",
                                 "&user",
-                                (3730, 478, 6),
+                                (3080, 478, 6),
                             ),
                         ],
                     }
@@ -2222,13 +2222,13 @@ fn r1_caller_provided_exclusive_source_stops_typed() {
             for (module, stats, pending, findings) in [
                 (
                     EXCLUSIVE_SOURCE,
-                    (449738, 48779, 12),
+                    (432306, 53485, 12),
                     &[(ResultUseBlocker::Storage, "source.id = 2;")][..],
                     &[][..],
                 ),
                 (
                     EXCLUSIVE_PASSED,
-                    (448977, 48568, 12),
+                    (431485, 53274, 12),
                     &[
                         (ResultUseBlocker::TypedInput, "retain(dst, source)"),
                         (ResultUseBlocker::Storage, "source.id = 2;"),
@@ -2493,8 +2493,8 @@ fn list_reference_parameter_charges_its_insert() {
                 &[const {
                     Case {
                         text: LIST_REFERENCE_PARAMETERS,
-                        typed_stats: (447355, 48400, 12),
-                        graph: (GraphCompletion::Incomplete, (189152, 4198, 5)),
+                        typed_stats: (429904, 53071, 12),
+                        graph: (GraphCompletion::Incomplete, (186632, 4198, 5)),
                         roots: &[
                             checked("keep", (1923, 44, 1)),
                             checked("keepThree", (1998, 68, 1)),

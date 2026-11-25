@@ -73,7 +73,7 @@ fn installed_i32_equality_checks_the_loaded_source_root() {
             assert_eq!(
                 target.statistics(),
                 Statistics {
-                    work: 2532,
+                    work: 2428,
                     entries: 310,
                     max_depth: 5
                 }
