@@ -519,7 +519,7 @@ function writeThrough(input: Option<&mut bool>): Option<bool> {
         &source,
         |request, _, _| {
             let graph = loader::load_installed(request.clone()).unwrap();
-            let (stats, exact, short) = pinned((328_082, 49_000, 12));
+            let (stats, exact, short) = pinned((452_433, 49_018, 12));
             let typed = crate::limit::measured(
                 "analyze_typed",
                 "typed",

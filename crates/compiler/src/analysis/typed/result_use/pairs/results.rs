@@ -55,7 +55,7 @@ impl<'a, 'g> Check<'a, 'g> {
         forwarded: &mut Alternatives<'g>,
     ) -> Work<()> {
         self.budget.step(self.module.key.path.len() + 2)?;
-        let index = self.nodes.get(&self.module.key, call).unwrap().0;
+        let index = self.table.get(&call).unwrap().0;
         let CheckedTransfer::Scoped(join) = &self.report.pair_calls[&index] else {
             unreachable!()
         };

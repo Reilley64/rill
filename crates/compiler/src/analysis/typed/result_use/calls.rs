@@ -74,12 +74,13 @@ impl<'a, 'g> Check<'a, 'g> {
         let boundary = if scoped {
             self.scoped
                 .map(|(role, slots)| pairs::PairBoundary::Scoped(role, slots))
-        } else {
-            call.selection
-                .as_ref()
-                .and_then(|selection| self.pairs.get(selection.implementation))
+        } else if let Some(selection) = call.selection.as_ref() {
+            self.pairs
+                .get(selection.implementation, self.budget)?
                 .copied()
                 .map(pairs::PairBoundary::Serial)
+        } else {
+            None
         };
         if settled && let Some(boundary) = boundary {
             let mut forwarded = Vec::new();
@@ -129,7 +130,7 @@ impl<'a, 'g> Check<'a, 'g> {
             } else {
                 settled && !scoped && self.ordinary_boundary(call, state, depth + 1)?
             };
-            if settled && !checked && self.contracts.contains_key(call.callee) {
+            if settled && !checked && self.contracts.contains_key(call.callee, self.budget)? {
                 self.pending(node, ResultUseBlocker::CallBoundary)?;
             }
             self.finish_call(
@@ -183,7 +184,9 @@ impl<'a, 'g> Check<'a, 'g> {
     ) -> Work<()> {
         let borrows_can_escape = !matches!(value.ty.as_ref(), TypeTerm::Primitive(_));
         self.budget.step(1)?;
-        let symbolic_parameter = self.release_parameters.get(&(&self.module.key, node));
+        let symbolic_parameter = self
+            .release_parameters
+            .get(&(&self.module.key, node), self.budget)?;
         let native_release = match &value.data {
             Some(DataExpression::NativeOwnership(call)) => releases::release_blocker(call.action),
             _ => None,
