@@ -3,7 +3,6 @@
 //! scalar field read through a `&Record` is lowered. The O2 and O8 rows above
 //! pin the RFC's own modules; these tests pin the forms around them, the
 //! operation sequence, the old caps (metering rule 11) and the siblings.
-use super::list_contents::old_root_caps;
 use super::o12::{Case, check_cases};
 use super::*;
 use compiler::analysis::ownership::RetainedPlace;
@@ -488,7 +487,7 @@ const UNSUPPORTED: &[Source] = &[
                 r####"pending Storage @ *slot = source;"####,
                 r####"pending Storage @ &mut view"####,
             ],
-            stats: (325476, 48573, 12),
+            stats: (325332, 48573, 12),
         },
     },
     Source {
@@ -512,7 +511,7 @@ const UNSUPPORTED: &[Source] = &[
                 r####"pending Storage @ *slot = source;"####,
                 r####"pending Storage @ &mut view"####,
             ],
-            stats: (327140, 48797, 12),
+            stats: (326996, 48797, 12),
         },
     },
     Source {
@@ -631,9 +630,9 @@ function f(slot: &mut &T, s: &T): void { touchTwo(slot, s); }
 "####;
 
 #[test]
-fn forwarded_record_slot_roots_pay_three_lookups_and_keep_their_outcomes() {
+fn forwarded_record_slot_roots_keep_their_parent_caps_and_outcomes() {
     installed(
-        "rfc_cases::record_contents::forwarded_record_slot_roots_pay_three_lookups_and_keep_their_outcomes",
+        "rfc_cases::record_contents::forwarded_record_slot_roots_keep_their_parent_caps_and_outcomes",
         |request| {
             check_cases(
                 &request,
@@ -641,36 +640,36 @@ fn forwarded_record_slot_roots_pay_three_lookups_and_keep_their_outcomes() {
                     const {
                         Case {
                             text: FORWARD_NAMED,
-                            typed_stats: (330631, 48902, 12),
-                            graph: (GraphCompletion::Incomplete, (191472, 4267, 5)),
+                            typed_stats: (330559, 48902, 12),
+                            graph: (GraphCompletion::Incomplete, (191040, 4267, 5)),
                             roots: &[
-                                checked("touch", (2055, 83, 1)),
-                                checked("touchTwo", (2170, 101, 1)),
-                                incomplete("f", "slot", (2171, 66, 3)),
+                                checked("touch", (1983, 83, 1)),
+                                checked("touchTwo", (2026, 101, 1)),
+                                incomplete("f", "slot", (1955, 66, 3)),
                             ],
                         }
                     },
                     const {
                         Case {
                             text: FORWARD_NAMED_PIPE,
-                            typed_stats: (330641, 48906, 12),
-                            graph: (GraphCompletion::Incomplete, (191472, 4264, 5)),
+                            typed_stats: (330569, 48906, 12),
+                            graph: (GraphCompletion::Incomplete, (191040, 4264, 5)),
                             roots: &[
-                                checked("touch", (2055, 83, 1)),
-                                checked("touchTwo", (2170, 101, 1)),
-                                incomplete("f", "slot |> touchTwo(s)", (2171, 63, 3)),
+                                checked("touch", (1983, 83, 1)),
+                                checked("touchTwo", (2026, 101, 1)),
+                                incomplete("f", "slot |> touchTwo(s)", (1955, 63, 3)),
                             ],
                         }
                     },
                     const {
                         Case {
                             text: FORWARD_NESTED,
-                            typed_stats: (331645, 48950, 12),
-                            graph: (GraphCompletion::Incomplete, (191538, 4268, 5)),
+                            typed_stats: (331573, 48950, 12),
+                            graph: (GraphCompletion::Incomplete, (191106, 4268, 5)),
                             roots: &[
-                                checked("touch", (2057, 84, 1)),
-                                checked("touchTwo", (2172, 102, 1)),
-                                incomplete("f", "slot", (2173, 67, 3)),
+                                checked("touch", (1985, 84, 1)),
+                                checked("touchTwo", (2028, 102, 1)),
+                                incomplete("f", "slot", (1957, 67, 3)),
                             ],
                         }
                     },
@@ -686,38 +685,6 @@ fn forwarded_record_slot_roots_pay_three_lookups_and_keep_their_outcomes() {
                             ],
                         }
                     },
-                ],
-            );
-            old_root_caps(
-                &request,
-                &[
-                    (
-                        FORWARD_NAMED,
-                        &[
-                            ("touch", (1983, 83, 1)),
-                            ("touchTwo", (2026, 101, 1)),
-                            ("f", (1955, 66, 3)),
-                        ],
-                        (191040, 4267, 5),
-                    ),
-                    (
-                        FORWARD_NAMED_PIPE,
-                        &[
-                            ("touch", (1983, 83, 1)),
-                            ("touchTwo", (2026, 101, 1)),
-                            ("f", (1955, 63, 3)),
-                        ],
-                        (191040, 4264, 5),
-                    ),
-                    (
-                        FORWARD_NESTED,
-                        &[
-                            ("touch", (1985, 84, 1)),
-                            ("touchTwo", (2028, 102, 1)),
-                            ("f", (1957, 67, 3)),
-                        ],
-                        (191106, 4268, 5),
-                    ),
                 ],
             );
         },
