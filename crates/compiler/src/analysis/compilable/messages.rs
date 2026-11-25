@@ -38,9 +38,7 @@ pub(super) fn scalar(kind: ScalarFindingKind) -> &'static str {
         ScalarFindingKind::UnauthorizedImplementation => {
             "this implementation is not allowed in this module"
         }
-        ScalarFindingKind::MissingConversionPair => {
-            "no conversion applies between these types"
-        }
+        ScalarFindingKind::MissingConversionPair => "no conversion applies between these types",
         ScalarFindingKind::ConversionErrorMismatch => {
             "the conversion's error type is not the one the caller expects"
         }

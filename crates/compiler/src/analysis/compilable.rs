@@ -25,8 +25,8 @@ use super::declarations::Budget;
 use super::{
     AnalysisLimits, Statistics,
     ownership::{
-        Completion, Dependency, DependencyContract, Finding, GraphCompletion, GraphReport, Mir, RootReport,
-        analyze_ownership,
+        Completion, Dependency, DependencyContract, Finding, GraphCompletion, GraphReport, Mir,
+        RootReport, analyze_ownership,
     },
     scalars::{BodyOwner, Site},
     typed::{CoreBlocker, TypedCompletion, TypedReport},
@@ -224,15 +224,11 @@ fn site_order<'a>(site: &Site<'a>) -> SiteOrder<'a> {
     )
 }
 
-/// Charge for sorting `len` items by a key that is compared in place.
 fn charge_sort(len: usize, budget: &mut Budget) -> Work<()> {
     budget.step(len.saturating_mul(len.max(1).ilog2() as usize + 1))
 }
 
-fn first_blocking_site<'g>(
-    typed: &TypedReport<'g>,
-    budget: &mut Budget,
-) -> Work<Option<Site<'g>>> {
+fn first_blocking_site<'g>(typed: &TypedReport<'g>, budget: &mut Budget) -> Work<Option<Site<'g>>> {
     let bodies = typed.bodies();
     let obligations = bodies.obligations().iter().map(|o| o.site);
     let conditional = bodies.conditional_findings().iter().map(|c| c.finding.site);
@@ -251,15 +247,16 @@ fn first_blocking_site<'g>(
     Ok(first)
 }
 
-fn typed_findings<'g>(
-    typed: &TypedReport<'g>,
-    budget: &mut Budget,
-) -> Work<Vec<TypedFinding<'g>>> {
-    let bodies = typed.bodies().findings().iter().map(|finding| TypedFinding {
-        code: finding.kind.code(),
-        site: finding.site,
-        description: messages::scalar(finding.kind),
-    });
+fn typed_findings<'g>(typed: &TypedReport<'g>, budget: &mut Budget) -> Work<Vec<TypedFinding<'g>>> {
+    let bodies = typed
+        .bodies()
+        .findings()
+        .iter()
+        .map(|finding| TypedFinding {
+            code: finding.kind.code(),
+            site: finding.site,
+            description: messages::scalar(finding.kind),
+        });
     let interfaces = typed
         .public_interface_findings()
         .iter()
@@ -293,19 +290,11 @@ enum Node {
     Disposer(usize),
 }
 
-/// The body an edge reaches, when the walk follows its kind.
 enum Follow {
-    /// The edge reaches an active disposer's frame.
     Disposer,
-    /// The edge reaches a source root, which the walk checks.
     Body,
 }
 
-/// How the walk treats a dependency edge: the kind of body it follows, or the
-/// site at which it blocks. Every kind is decided here, so a new kind fails to
-/// compile until it is. A kind the walk does not follow blocks at the edge's
-/// site: nothing checks what it reaches, and a program is never compilable
-/// over a body nobody checked.
 fn follow<'g>(dependency: &Dependency<'g>) -> Result<Follow, Site<'g>> {
     match dependency.contract {
         DependencyContract::ActiveDisposer => Ok(Follow::Disposer),
@@ -339,8 +328,8 @@ pub fn unfollowed_edge<'g>(dependency: &Dependency<'g>) -> Option<Site<'g>> {
     follow(dependency).err()
 }
 
-fn index<'r, 'g>(
-    roots: &'r [RootReport<'g>],
+fn index<'g>(
+    roots: &[RootReport<'g>],
     budget: &mut Budget,
 ) -> Work<PathMap<&'g DeclarationId, usize>> {
     let mut index = PathMap::new();
@@ -478,12 +467,16 @@ fn decide<'r, 'g>(
         }
     }
 
-    let facts = Facts::new(graph, typed, bodies.iter().map(|(_, body)| body.site().module), budget)?;
+    let facts = Facts::new(
+        graph,
+        typed,
+        bodies.iter().map(|(_, body)| body.site().module),
+        budget,
+    )?;
     let mut shapes = Shapes::default();
     for (node, body) in &bodies {
         budget.step(1)?;
         let unadmitted = match node {
-            // The backend lowers no custom disposer.
             Node::Disposer(_) => Some(body.site()),
             Node::Source(_) => first_unadmitted(body, &facts, &mut shapes, budget)?,
         };

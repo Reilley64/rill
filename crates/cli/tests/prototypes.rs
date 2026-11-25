@@ -60,7 +60,6 @@ impl Workspace {
         relative
     }
 
-    /// How a diagnostic names the entry: its canonical path.
     fn identity(&self, entry: &str) -> String {
         fs::canonicalize(self.work.join(entry))
             .unwrap()
@@ -157,8 +156,6 @@ fn assert_hello(output: &Output) {
     assert!(output.stderr.is_empty(), "{}", stderr(output));
 }
 
-/// Assert the exact report of an R0605 at `line` and `column` of the entry
-/// named `identity`, whose text is `source_line`, marking `marked`.
 fn assert_unsupported_shape(
     output: &Output,
     identity: &str,

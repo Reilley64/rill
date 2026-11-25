@@ -19,8 +19,6 @@ pub enum BackendError {
 }
 
 impl BackendError {
-    /// The backend cannot lower a shape the rule admitted: a bug in the rule's
-    /// capability data or in the backend, never a source error.
     pub(crate) fn unsupported(site: Site<'_>, what: impl Into<String>) -> Self {
         Self::unsupported_at(&site.module.path, site.span, what)
     }

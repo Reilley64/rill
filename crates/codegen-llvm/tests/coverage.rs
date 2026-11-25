@@ -1,12 +1,3 @@
-//! The backend lowers every shape the compilable-program rule admits.
-//!
-//! `Shape::ALL` is the compiler's statement of what the backend can lower.
-//! Each program below is compiled through the rule and the backend, and the
-//! shapes the rule finds in it are checked against the ones the program is
-//! here to cover; the last test fails when a shape in `Shape::ALL` has no
-//! program. If the backend cannot lower a shape, remove it from `Shape::ALL`
-//! (and from the classifiers in `compiler/src/analysis/compilable/capability.rs`)
-//! rather than from this table.
 mod support;
 
 use compiler::analysis::compilable::capability::Shape;
@@ -20,8 +11,6 @@ struct Program {
     covers: &'static [Shape],
 }
 
-/// One program per row; each row's `test` is the name of the test that
-/// compiles it, because the front end runs in a child copy of that test.
 fn programs() -> Vec<Program> {
     vec![
         Program {
@@ -44,7 +33,9 @@ fn programs() -> Vec<Program> {
         },
         Program {
             test: "a_view_crosses_a_function_into_log",
-            source: format!("{LOG}function hi(s: &string): void {{ log(s); }}\nhi(&\"through\");\n"),
+            source: format!(
+                "{LOG}function hi(s: &string): void {{ log(s); }}\nhi(&\"through\");\n"
+            ),
             covers: &[
                 Shape::BorrowStaticText,
                 Shape::CopyInto,

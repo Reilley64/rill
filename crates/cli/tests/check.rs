@@ -29,8 +29,7 @@ fn stderr(output: &Output) -> String {
 const READY: &str = "function ready(text: &string): void {}\n";
 const REUSE: &str =
     "function reuse(value: string): bool { let taken = value; let again = value; return true; }\n";
-const REUSE_AGAIN: &str =
-    "function reuseAgain(item: string): bool { let taken = item; let again = item; return true; }\n";
+const REUSE_AGAIN: &str = "function reuseAgain(item: string): bool { let taken = item; let again = item; return true; }\n";
 const MINUS: &str = "function minus(a: i32, b: i32): i32 { return a - b; }\n";
 
 #[test]

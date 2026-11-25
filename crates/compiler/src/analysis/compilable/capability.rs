@@ -92,7 +92,6 @@ impl Shape {
     ];
 }
 
-/// The typed facts the rule reads for the modules the program's bodies are in.
 pub(super) struct Facts<'a, 'g> {
     graph: &'a Graph,
     typed: &'a TypedReport<'g>,
@@ -102,8 +101,6 @@ pub(super) struct Facts<'a, 'g> {
 }
 
 impl<'a, 'g> Facts<'a, 'g> {
-    /// Index the node facts and the function headers of the modules the
-    /// program's bodies are in, `bodies` being the module of each. One pass over each list, charged per entry.
     pub(super) fn new(
         graph: &'a Graph,
         typed: &'a TypedReport<'g>,
@@ -139,7 +136,10 @@ impl<'a, 'g> Facts<'a, 'g> {
                 && fact.declaration.id.kind == DeclarationKind::Function
             {
                 budget.step(modules.len().checked_mul(width).ok_or(())?)?;
-                if !modules.iter().any(|known| fact.declaration.id.module == **known) {
+                if !modules
+                    .iter()
+                    .any(|known| fact.declaration.id.module == **known)
+                {
                     continue;
                 }
                 budget.reserve(1)?;
@@ -169,13 +169,14 @@ impl<'a, 'g> Facts<'a, 'g> {
             return Ok(None);
         };
         budget.step(self.nodes[at].len().max(1).ilog2() as usize + 1)?;
-        Ok(match self.nodes[at].get(&site.node).map(|fact| &fact.kind) {
-            Some(NodeFactKind::Expression(expression)) => Some(expression),
-            _ => None,
-        })
+        Ok(
+            match self.nodes[at].get(&site.node).map(|fact| &fact.kind) {
+                Some(NodeFactKind::Expression(expression)) => Some(expression),
+                _ => None,
+            },
+        )
     }
 
-    /// A string literal that is written directly, with no interpolation.
     fn string_literal(&self, site: Site<'g>, budget: &mut Budget) -> Work<bool> {
         Ok(self.expression(site, budget)?.is_some_and(|expression| {
             matches!(expression.ty.as_ref(), TypeTerm::Primitive(ty) if ty.name() == "string")
@@ -185,7 +186,6 @@ impl<'a, 'g> Facts<'a, 'g> {
         }))
     }
 
-    /// A call written as `callee(arguments)`, with every argument written.
     fn plain_call(&self, site: Site<'g>, budget: &mut Budget) -> Work<bool> {
         Ok(self
             .expression(site, budget)?
@@ -193,7 +193,6 @@ impl<'a, 'g> Facts<'a, 'g> {
             .is_some_and(|call| call.pipe_input.is_none() && call.defaults.is_empty()))
     }
 
-    /// The header of a function or an implementation of the walked modules.
     fn header(
         &self,
         id: &DeclarationId,
@@ -206,7 +205,11 @@ impl<'a, 'g> Facts<'a, 'g> {
             return Ok(None);
         };
         let inventory = self.typed.inventory();
-        keyed::charge(&implementation.family.module, inventory.family_probes(), budget)?;
+        keyed::charge(
+            &implementation.family.module,
+            inventory.family_probes(),
+            budget,
+        )?;
         let Some(family) = inventory.captured_family(&implementation.family) else {
             return Ok(None);
         };
@@ -219,8 +222,6 @@ impl<'a, 'g> Facts<'a, 'g> {
         Ok(None)
     }
 
-    /// Whether the backend lowers a routine's signature, noting its shapes.
-    /// Generic routines are not lowered.
     fn signature(
         &self,
         id: &DeclarationId,
@@ -260,7 +261,6 @@ impl<'a, 'g> Facts<'a, 'g> {
     }
 }
 
-/// The shapes a program uses, each noted once.
 #[derive(Debug, Default)]
 pub(super) struct Shapes(BTreeSet<Shape>);
 
@@ -279,9 +279,6 @@ impl Shapes {
     }
 }
 
-/// The first construct of `body` the backend does not lower, in lowering
-/// order: the signature, then each block of the straight path from the entry.
-/// `None` when every construct is admitted; each admitted shape is noted.
 pub(super) fn first_unadmitted<'g>(
     body: &CheckedBody<'_, 'g>,
     facts: &Facts<'_, 'g>,
@@ -366,7 +363,9 @@ fn operation<'g>(
             }
             Some(Shape::Cleanup)
         }
-        Operation::Borrow { exclusive: true, .. }
+        Operation::Borrow {
+            exclusive: true, ..
+        }
         | Operation::Copy { into: None, .. }
         | Operation::Move { into: None, .. }
         | Operation::CommitListText { .. }

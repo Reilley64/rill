@@ -1,5 +1,6 @@
 use super::roots::fixture_with_main;
 use super::*;
+use compiler::analysis::Statistics;
 use compiler::analysis::compilable::{
     Blocker, CheckedBody, Compilability, CompilableProgram, ProgramAnalysis, UNSUPPORTED_SHAPE,
     compilable_program,
@@ -7,7 +8,6 @@ use compiler::analysis::compilable::{
 use compiler::analysis::ownership::{
     DependencyContract, GraphCompletion, GraphReport, analyze_ownership,
 };
-use compiler::analysis::Statistics;
 use compiler::analysis::scalars::BodyOwner;
 use compiler::analysis::typed::{TypedCompletion, TypedReport};
 
@@ -23,8 +23,7 @@ function after(seed: bool): void {
 ";
 const REUSE: &str =
     "function reuse(value: string): bool { let taken = value; let again = value; return true; }\n";
-const REUSE_AGAIN: &str =
-    "function reuseAgain(item: string): bool { let taken = item; let again = item; return true; }\n";
+const REUSE_AGAIN: &str = "function reuseAgain(item: string): bool { let taken = item; let again = item; return true; }\n";
 const CUSTOM: &str = "import std::core::dispose as release;
 type Custom = { keep: string; }
 implement release(value: Custom): void {}
@@ -37,16 +36,21 @@ fn check(
     verify: impl for<'g> Fn(&'g loader::Graph, &TypedReport<'g>, &GraphReport<'g>),
 ) {
     let main = format!("{}\n{program}", super::IMPORTS);
-    fixture_with_main(test, &main, &[helper], |_, request, graph, receipt, typed| {
-        if request.test_mode {
-            return;
-        }
-        verify(
-            graph,
-            typed,
-            &analyze_ownership(receipt, AnalysisLimits::default()),
-        );
-    });
+    fixture_with_main(
+        test,
+        &main,
+        &[helper],
+        |_, request, graph, receipt, typed| {
+            if request.test_mode {
+                return;
+            }
+            verify(
+                graph,
+                typed,
+                &analyze_ownership(receipt, AnalysisLimits::default()),
+            );
+        },
+    );
 }
 
 fn rule<'r, 'g>(
@@ -356,8 +360,6 @@ fn a_graph_resource_limit_blocks_as_itself_on_every_axis() {
     );
 }
 
-/// The rule's own cost on a compilable `program`, pinned exact and one short
-/// on work and on entries. The rule has no recursion, so its depth is 0.
 fn assert_rule_cost(test: &str, program: &str, work: usize, entries: usize) {
     let main = format!("{}\n{program}", super::IMPORTS);
     fixture_with_main(test, &main, &[""], |_, request, graph, receipt, typed| {
@@ -557,10 +559,6 @@ fn hello_world_is_compilable_with_the_log_body_among_its_functions_in_both_modes
     );
 }
 
-/// An edge the walk does not follow blocks at its own site, for every kind
-/// of edge. Each kind is built at the site of a real edge; a program cannot
-/// reach most of them from a Checked startup, because the same constructs
-/// leave the startup Incomplete.
 #[test]
 fn an_edge_the_walk_does_not_follow_blocks_at_its_site() {
     use compiler::analysis::compilable::unfollowed_edge;
