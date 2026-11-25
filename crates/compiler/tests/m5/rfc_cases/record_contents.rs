@@ -45,7 +45,7 @@ fn record_view_reads_check() {
                 &[const {
                     Case {
                         text: READS,
-                        typed_stats: (333458, 48578, 12),
+                        typed_stats: (332626, 48578, 12),
                         graph: (GraphCompletion::Incomplete, (193433, 5239, 5)),
                         roots: &[
                             checked("viaParam", (2102, 137, 3)),
@@ -95,7 +95,7 @@ fn unsupported_record_reads_pin_current_caps_and_blockers() {
                     const {
                         Case {
                             text: READ_SIBLINGS,
-                            typed_stats: (328492, 48011, 12),
+                            typed_stats: (327685, 48011, 12),
                             graph: (GraphCompletion::Incomplete, (188245, 4241, 5)),
                             roots: &[
                                 incomplete("exclusive", "view.x", (1906, 45, 3)),
@@ -108,7 +108,7 @@ fn unsupported_record_reads_pin_current_caps_and_blockers() {
                     const {
                         Case {
                             text: NAMED_READS,
-                            typed_stats: (325120, 47705, 12),
+                            typed_stats: (324324, 47705, 12),
                             graph: (GraphCompletion::SourceRejected, (186573, 4221, 5)),
                             roots: &[
                                 Root {
@@ -257,7 +257,7 @@ fn stored_source_loans_reach_the_caller_view() {
                 &[const {
                     Case {
                         text: FORMS,
-                        typed_stats: (346876, 51370, 12),
+                        typed_stats: (345902, 51370, 12),
                         graph: (GraphCompletion::SourceRejected, (215934, 9533, 8)),
                         roots: &[
                             checked("remember", (2810, 339, 3)),
@@ -323,7 +323,7 @@ fn callee_stores_of_locals_escape_and_of_parameters_do_not() {
                 &[const {
                     Case {
                         text: POISON,
-                        typed_stats: (332719, 48732, 12),
+                        typed_stats: (331890, 48732, 12),
                         graph: (GraphCompletion::SourceRejected, (196249, 5587, 6)),
                         roots: &[
                             checked("remember", (2552, 210, 3)),
@@ -409,7 +409,7 @@ fn empty_body_and_family_calls_with_record_contents() {
                     const {
                         Case {
                             text: EMPTY_BODY,
-                            typed_stats: (329185, 48511, 12),
+                            typed_stats: (328350, 48511, 12),
                             graph: (GraphCompletion::SourceRejected, (193615, 5558, 8)),
                             roots: &[
                                 checked("remember", (2322, 138, 1)),
@@ -427,7 +427,7 @@ fn empty_body_and_family_calls_with_record_contents() {
                     const {
                         Case {
                             text: FAMILY,
-                            typed_stats: (328618, 48501, 12),
+                            typed_stats: (327804, 48501, 12),
                             graph: (GraphCompletion::Incomplete, (189445, 4282, 5)),
                             roots: &[incomplete(
                                 "selected",
@@ -488,7 +488,7 @@ const UNSUPPORTED: &[Source] = &[
                 r####"pending Storage @ *slot = source;"####,
                 r####"pending Storage @ &mut view"####,
             ],
-            stats: (325631, 47914, 12),
+            stats: (324817, 47914, 12),
         },
     },
     Source {
@@ -512,7 +512,7 @@ const UNSUPPORTED: &[Source] = &[
                 r####"pending Storage @ *slot = source;"####,
                 r####"pending Storage @ &mut view"####,
             ],
-            stats: (327296, 48135, 12),
+            stats: (326478, 48135, 12),
         },
     },
     Source {
@@ -530,7 +530,7 @@ const UNSUPPORTED: &[Source] = &[
         outcome: Outcome::Typed {
             completion: TypedCompletion::Incomplete,
             signals: &[r####"pending Storage @ *slot = source;"####],
-            stats: (324334, 47682, 12),
+            stats: (323391, 47682, 12),
         },
     },
     Source {
@@ -553,7 +553,7 @@ const UNSUPPORTED: &[Source] = &[
                 r####"pending Storage @ *slot = source;"####,
                 r####"pending Storage @ &mut view"####,
             ],
-            stats: (325413, 47912, 12),
+            stats: (324599, 47912, 12),
         },
     },
     Source {
@@ -576,45 +576,16 @@ const UNSUPPORTED: &[Source] = &[
                 r####"pending Storage @ *slot = source;"####,
                 r####"pending Storage @ &mut view"####,
             ],
-            stats: (325398, 47894, 12),
+            stats: (324586, 47894, 12),
         },
     },
 ];
 
-/// Rule 1 and rule 2 (ri-1up; rule-1 exception, chief of staff, 2026-11-24
-/// 11:35 AEDT): a store into `&mut &T` for a `T` that is not a flat
-/// non-generic record of `i32` fields stays typed `Incomplete` at the same
-/// blockers. The record screen reads the type alone first, so a generic
-/// record and an exclusive `&mut Point` pay nothing (caps unchanged, measured
-/// at `bc9bfdd5`). A string field, a nested record and an enum need the
-/// declaration's fields, which no paid fact carries: each pays two lookups
-/// (the callee's store, the caller's `&mut view`), pinned here at the new
-/// caps. Their parent caps (325,487 / 47,914 / 12; 327,152 / 48,135 / 12;
-/// 324,194 / 47,682 / 12) give `ResourceLimit`, with no receipt.
 #[test]
 fn unsupported_record_contents_stay_incomplete() {
     run(
         "rfc_cases::record_contents::unsupported_record_contents_stay_incomplete",
         UNSUPPORTED,
-    );
-}
-
-#[test]
-fn unsupported_record_contents_parent_caps_now_give_resource_limit() {
-    installed(
-        "rfc_cases::record_contents::unsupported_record_contents_parent_caps_now_give_resource_limit",
-        |request| {
-            let olds = [
-                (0, (325487, 47914, 12)),
-                (1, (327152, 48135, 12)),
-                (2, (324194, 47682, 12)),
-            ];
-            let olds: Vec<_> = olds
-                .iter()
-                .map(|&(i, old)| (UNSUPPORTED[i].text, old))
-                .collect();
-            old_caps(&request, &olds);
-        },
     );
 }
 
@@ -659,15 +630,6 @@ implement touchOne(dst: &mut &T): void { while (true) {} }
 function f(slot: &mut &T, s: &T): void { touchTwo(slot, s); }
 "####;
 
-/// ri-zee8 (named exception, chief of staff, 2026-11-24 15:28 AEDT, outside the
-/// standing rule-1 ruling): a root that declares a `&mut &T` parameter for an
-/// unsupported `T` and passes it to a function that also takes a `&T` pays
-/// three charged declaration lookups, over bound (c): +216 work for a `string`
-/// field (direct and piped) and a nested record, +210 for an enum. Each stays
-/// `Incomplete` at the same blocker. The helper roots pay one (`touch`, +72) and
-/// two (`touchTwo`, +144). Pinned exact and one short by `check_cases`; each
-/// parent cap (`bc9bfdd5`, before ri-1up) gives `ResourceLimit` with no MIR and
-/// no finding. The real fix is the M4 field-list fact (ri-qlh.4).
 #[test]
 fn forwarded_record_slot_roots_pay_three_lookups_and_keep_their_outcomes() {
     installed(
@@ -679,7 +641,7 @@ fn forwarded_record_slot_roots_pay_three_lookups_and_keep_their_outcomes() {
                     const {
                         Case {
                             text: FORWARD_NAMED,
-                            typed_stats: (330759, 48229, 12),
+                            typed_stats: (329958, 48229, 12),
                             graph: (GraphCompletion::Incomplete, (191472, 4267, 5)),
                             roots: &[
                                 checked("touch", (2055, 83, 1)),
@@ -691,7 +653,7 @@ fn forwarded_record_slot_roots_pay_three_lookups_and_keep_their_outcomes() {
                     const {
                         Case {
                             text: FORWARD_NAMED_PIPE,
-                            typed_stats: (330769, 48233, 12),
+                            typed_stats: (329968, 48233, 12),
                             graph: (GraphCompletion::Incomplete, (191472, 4264, 5)),
                             roots: &[
                                 checked("touch", (2055, 83, 1)),
@@ -703,7 +665,7 @@ fn forwarded_record_slot_roots_pay_three_lookups_and_keep_their_outcomes() {
                     const {
                         Case {
                             text: FORWARD_NESTED,
-                            typed_stats: (331771, 48275, 12),
+                            typed_stats: (330970, 48275, 12),
                             graph: (GraphCompletion::Incomplete, (191538, 4268, 5)),
                             roots: &[
                                 checked("touch", (2057, 84, 1)),
@@ -715,12 +677,12 @@ fn forwarded_record_slot_roots_pay_three_lookups_and_keep_their_outcomes() {
                     const {
                         Case {
                             text: FORWARD_ENUM,
-                            typed_stats: (330339, 48226, 12),
-                            graph: (GraphCompletion::Incomplete, (191336, 4265, 5)),
+                            typed_stats: (329468, 48226, 12),
+                            graph: (GraphCompletion::Incomplete, (190916, 4265, 5)),
                             roots: &[
-                                checked("touch", (2049, 81, 1)),
-                                checked("touchTwo", (2162, 99, 1)),
-                                incomplete("f", "slot", (2161, 64, 3)),
+                                checked("touch", (1979, 81, 1)),
+                                checked("touchTwo", (2022, 99, 1)),
+                                incomplete("f", "slot", (1951, 64, 3)),
                             ],
                         }
                     },
@@ -755,15 +717,6 @@ fn forwarded_record_slot_roots_pay_three_lookups_and_keep_their_outcomes() {
                             ("f", (1957, 67, 3)),
                         ],
                         (191106, 4268, 5),
-                    ),
-                    (
-                        FORWARD_ENUM,
-                        &[
-                            ("touch", (1979, 81, 1)),
-                            ("touchTwo", (2022, 99, 1)),
-                            ("f", (1951, 64, 3)),
-                        ],
-                        (190916, 4265, 5),
                     ),
                 ],
             );

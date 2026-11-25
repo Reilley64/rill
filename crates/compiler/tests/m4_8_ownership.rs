@@ -58,12 +58,7 @@ fn installed_ownership_requires_the_built_archive() {
                 NativeOwnershipAction::SharedRetain.rust_item(),
                 "rill_ownership::shared::retain"
             );
-            assert!(
-                report
-                    .core_blockers()
-                    .contains(&CoreBlocker::Representation)
-            );
-            assert!(report.core_blockers().contains(&CoreBlocker::Roles));
+            assert_eq!(report.core_blockers(), []);
             let [overlap] = report.ownership_overlaps() else {
                 panic!(
                     "expected only the nested-payload replacement: {:?}",
@@ -114,9 +109,20 @@ fn installed_ownership_requires_the_built_archive() {
                 .unwrap();
             assert_eq!(release.coverage, OwnershipCoverage::Clear);
             // A protected overlap must not erase independent representation evidence.
-            let [storage] = report.native_representations() else {
+            let (shared, others): (Vec<_>, Vec<_>) = report
+                .native_representations()
+                .iter()
+                .partition(|r| r.owner.id == copy.owner.id);
+            let [storage] = shared[..] else {
                 panic!("expected one Shared representation");
             };
+            assert!(
+                others
+                    .iter()
+                    .all(|r| r.owner.id.module.origin == Origin::Standard
+                        && r.owner.id.module != copy.owner.id.module),
+                "the extra representations belong to standard modules the program does not import"
+            );
             assert_eq!(storage.owner.id, copy.owner.id);
             assert_eq!(storage.argument.name.as_deref(), Some("T"));
             assert_eq!(storage.artifact, provider.artifact);
@@ -147,6 +153,7 @@ fn installed_ownership_requires_the_built_archive() {
         );
         fs::write(facade, bytes).unwrap();
         let graph = loader::load_installed(request.clone()).unwrap();
+        let archive = fs::read(root.join(ARCHIVE)).unwrap();
         fs::write(root.join(ARCHIVE), b"substituted archive").unwrap();
         // Static evidence stays with the original captured inputs.
         assert!(
@@ -173,11 +180,19 @@ fn installed_ownership_requires_the_built_archive() {
         ",
         )
         .unwrap();
+        assert_eq!(
+            loader::load_installed(request.clone()).unwrap_err().kind,
+            FailureKind::InvalidRequest
+        );
+        fs::write(root.join(ARCHIVE), archive).unwrap();
         let graph = loader::load_installed(request).unwrap();
         let report = analyze_typed(&graph, AnalysisLimits::default());
         assert!(
-            report.ownership_protection().is_empty(),
-            "an unrelated same-spelled source must not request the archive"
+            report
+                .ownership_protection()
+                .iter()
+                .all(|p| p.owner.id.module.origin == Origin::Standard),
+            "an unrelated same-spelled source gets no ownership protection"
         );
         return;
     }
@@ -574,8 +589,21 @@ fn combined_installed_capture(request: &InstalledRequest) {
             .find(|module| module.key.path == "shared.rill")
             .unwrap();
         let protected = report.ownership_protection();
+        let (protected, others): (Vec<_>, Vec<_>) = protected
+            .iter()
+            .partition(|scope| scope.owner.id.module.path == "shared.rill");
         assert_eq!(protected.len(), 2);
-        for scope in protected {
+        assert!(
+            others.iter().all(|scope| {
+                scope.owner.id.module.origin == Origin::Standard
+                    && matches!(
+                        scope.owner.id.module.path.as_str(),
+                        "channel.rill" | "mutex.rill"
+                    )
+            }),
+            "the extra protection belongs to standard modules the program does not import"
+        );
+        for scope in &protected {
             let provider = scope.provider.as_ref().expect("delivered Shared provider");
             assert!(
                 report
@@ -1354,16 +1382,16 @@ fn installed_ordinary_family(request: &InstalledRequest) {
         .unwrap();
         let partial = loader::load_installed(request.clone()).unwrap();
         let report = analyze_typed(&partial, AnalysisLimits::default());
-        assert!(report.core_blockers().contains(&CoreBlocker::Roles));
+        assert_eq!(report.core_blockers(), []);
         assert!(
-            report
+            !report
                 .bodies()
                 .obligations()
                 .iter()
                 .any(|o| o.reason == ScalarUnsupported::FamilySelection
                     && o.site.span.bytes() == b"pick(&true)")
         );
-        assert!(report.receipt().is_none());
+        assert!(report.receipt().is_some());
 
         fs::write(
             &entry,
@@ -1766,7 +1794,7 @@ fn installed_pair_invocation(request: &InstalledRequest) {
             analyze_typed(
                 &graph,
                 AnalysisLimits {
-                    max_work: 372246,
+                    max_work: 371288,
                     max_entries: 54059,
                     max_depth: 12
                 }

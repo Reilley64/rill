@@ -1,6 +1,8 @@
 //! Boolean match snapshots and Result residences at the installed receipt boundary.
 // The installed M4 profile that can issue a receipt is macOS AArch64.
 #![cfg(all(target_arch = "aarch64", target_os = "macos"))]
+#[path = "support/form_grid.rs"]
+mod form_grid;
 #[path = "support/limit.rs"]
 mod limit;
 mod support;
@@ -9,6 +11,7 @@ use compiler::analysis::AnalysisLimits;
 use compiler::analysis::scalars::ScalarFindingKind;
 use compiler::analysis::typed::{ResultUseBlocker, TypedCompletion, TypedReport, analyze_typed};
 use compiler::loader::{InstalledRequest, Origin, load_installed};
+use form_grid::{Axis, Cell};
 use std::{fs, path::PathBuf, process::Command};
 
 const IMPORTS: &str = "\
@@ -573,7 +576,7 @@ function probe(flag: bool): void {
   else { if (!copy) { let _ = debt; } }
 }
 ",
-            (426696, 48863, 12),
+            (425881, 48863, 12),
             checked as fn(&TypedReport<'_>),
         ),
         (
@@ -590,7 +593,7 @@ function probe(flag: bool, outer: bool): void {
   } };
 }
 ",
-            (427764, 49046, 16),
+            (426948, 49046, 16),
             checked,
         ),
         (
@@ -604,7 +607,7 @@ function probe(flag: bool, gate: bool): void {
     else { if (!copy) { let _ = debt; } }
 }
 ",
-            (428401, 49120, 12),
+            (427575, 49120, 12),
             checked,
         ),
         (
@@ -613,7 +616,7 @@ function probe(flag: bool, gate: bool): void {
 import std::routine::join;
 function probe(flag: bool): void { let debt = Err<bool,i32>(61i32); let before = flag; let copy = match (flag) { _ => before }; if (flag) { if (copy) { let _ = debt; } } else { if (!copy) { let _ = debt; } } }
 ",
-            (426895, 48892, 12),
+            (426077, 48892, 12),
             checked,
         ),
         (
@@ -622,7 +625,7 @@ function probe(flag: bool): void { let debt = Err<bool,i32>(61i32); let before =
 import std::routine::join;
 function probe(flag: bool, gate: bool): void { let debt = Err<bool,i32>(61i32); match (*(if (gate) &flag else &flag)) { true if flag => { let _ = debt; }, false if !flag => { let _ = debt; }, _ => {} }; }
 ",
-            (427988, 49104, 12),
+            (427159, 49104, 12),
             checked,
         ),
     ] {
@@ -648,22 +651,22 @@ function probe(flag: bool, gate: bool): void { let debt = Err<bool,i32>(61i32); 
         (
             "pre: bare control",
             pre("let before = flag;", "before"),
-            (324672, 48105, 12),
+            (323854, 48105, 12),
         ),
         (
             "pre: grouped initializer",
             pre("let before = (flag);", "before"),
-            (324704, 48117, 12),
+            (323886, 48117, 12),
         ),
         (
             "pre: grouped binder",
             pre("let (before) = flag;", "before"),
-            (324698, 48117, 12),
+            (323879, 48117, 12),
         ),
         (
             "pre: grouped arm body",
             pre("let before = flag;", "(before)"),
-            (324742, 48122, 12),
+            (323924, 48122, 12),
         ),
         (
             "computed: grouped scrutinee",
@@ -671,7 +674,7 @@ function probe(flag: bool, gate: bool): void { let debt = Err<bool,i32>(61i32); 
                 "match (*(if (gate) &flag else &flag))",
                 "match (((*(if (gate) &flag else &flag))))",
             ),
-            (325778, 48356, 12),
+            (324947, 48356, 12),
         ),
     ] {
         installed(&probe, name, &source, None, |report| {
@@ -685,43 +688,25 @@ function probe(flag: bool, gate: bool): void { let debt = Err<bool,i32>(61i32); 
         });
     }
 
-    // Review ci-0mdr Q4 (SP-7, ri-px1.11.2). A mutable local that is never written is as
-    // good a copy as an immutable one, so the first two rows check with a receipt. Their
-    // parent numbers are the rejections measured at da5bec50 (both paid before their
-    // `R0103`, rule 1 exception ri-2s0.10). The third row is the same source with an
-    // immutable local: it shares the screen, so it checks too. Measured at a4e56651 (C3's
-    // base) it was the same `R0103` as the mutable source, 324529 / 48133 / 12, and it
-    // costs less now, so that parent cap still gives `Checked`.
-    for (name, source, parent, exact) in [
-        (
-            "pre: mutable binder",
-            pre("let mut before = flag;", "before"),
-            Some((324709, 48123, 12)),
-            (324714, 48105, 12),
-        ),
-        (
-            "pre: mutable source",
-            MUTABLE_SOURCE.to_owned(),
-            Some((324529, 48133, 12)),
-            (324568, 48115, 12),
-        ),
-        (
-            "pre: immutable local source",
-            MUTABLE_SOURCE.replace("let mut current", "let current"),
-            Some((324529, 48133, 12)),
-            (324518, 48115, 12),
-        ),
-    ] {
-        let holds = parent.is_some_and(|parent| exact.0 <= parent.0 && exact.1 <= parent.1);
-        let over_parent = parent.filter(|_| !holds);
+    form_grid::sweep(&AXES, &boolean_copy_cells(), |cell| {
+        let name = cell.name;
+        let exact = cell.exact;
+        let fixed = match cell.outcome {
+            Outcome::Storage => Some(exact),
+            Outcome::Checked | Outcome::Unpaid => cell.parent_still_holds(),
+        };
         installed_over_parent(
             &probe,
             name,
-            &source,
-            parent.filter(|_| holds),
-            over_parent,
+            &cell.source,
+            fixed,
+            cell.parent_now_exceeded(),
             |report| {
-                checked(report);
+                match cell.outcome {
+                    Outcome::Checked => checked(report),
+                    Outcome::Unpaid => unpaid(report),
+                    Outcome::Storage => pending_storage(report, name),
+                }
                 let stats = report.statistics();
                 assert_eq!(
                     (stats.work, stats.entries, stats.max_depth),
@@ -730,118 +715,7 @@ function probe(flag: bool, gate: bool): void { let debt = Err<bool,i32>(61i32); 
                 );
             },
         );
-    }
-
-    // Genuine rejections stay R0103: the written value is not the matched source. Exact
-    // numbers at 7002855e, then here. `pre: copy of another parameter` pays a few steps to
-    // read the written binding before it rejects, so its parent cap no longer holds. The
-    // `computed` row costs no more. Rule 1 exception (chief of staff, 2026-11-23,
-    // ri-2s0.10): `pre: copy of another parameter` (+14 work) pays before `R0103`, and its
-    // parent cap (7002855e) gives `ResourceLimit`. The write twins pay nothing before
-    // their rejection that the parents did not: their parent numbers are the ones measured
-    // at 81d317b3, before the widened gate (review ci-b4b2 A-F1, ri-px1.11.9), and each
-    // parent cap still holds. Named rule-1 exception (chief of staff, 2026-11-24 16:53
-    // AEDT, ri-j6fm; `compiler-metering.md` rule 1): the `ri-j6fm` rows write or lend a
-    // different local after the source, so the free `last_written` screen no longer names
-    // the source and it pays its scan before the same `R0103` (+86 and +90 work over the
-    // parents measured at 81d317b3); each parent cap gives `ResourceLimit`. Widened by the
-    // chief of staff, 2026-11-24 17:54 AEDT (chief-rulings-21.md): the source or the copy
-    // pays its scan when another local is written or lent before the match, so the 2A-F2
-    // rows (source lent, +90; copy lent, +50) are pinned the same way. The row of 2A-F1
-    // costs its parent cap (81d317b3), so it carries no exception.
-    for (name, source, parent, exact) in [
-        (
-            "pre: copy of another parameter",
-            pre("let before = other;", "before"),
-            Some((324698, 48123, 12)),
-            (324712, 48123, 12),
-        ),
-        (
-            "pre: mutable binder reassigned before the match",
-            pre("let mut before = flag; before = !flag;", "before"),
-            Some((325493, 48441, 12)),
-            (325493, 48441, 12),
-        ),
-        (
-            "pre: mutable source reassigned after the copy",
-            MUTABLE_SOURCE.replace(
-                "let before = current;",
-                "let before = current; current = !flag;",
-            ),
-            Some((325403, 48455, 12)),
-            (325403, 48455, 12),
-        ),
-        (
-            "pre: mutable copy of the source, then lent mutably (ri-px1.11.13, 2A-F1)",
-            MUTABLE_SOURCE.replace(
-                "let before = current;",
-                "let mut before = current; let r = &mut before;",
-            ),
-            Some((324747, 48205, 12)),
-            (324747, 48205, 12),
-        ),
-        (
-            "pre: mutable source written, then another local written (ri-j6fm, X2)",
-            MUTABLE_SOURCE.replace(
-                "let before = current;",
-                "let before = current; current = !flag; let mut z = flag; z = !flag;",
-            ),
-            Some((326097, 48707, 12)),
-            (326183, 48707, 12),
-        ),
-        (
-            "pre: mutable source written, then another local lent mutably (ri-j6fm, X3)",
-            MUTABLE_SOURCE.replace(
-                "let before = current;",
-                "let before = current; current = !flag; let mut z = flag; let w = &mut z;",
-            ),
-            Some((326044, 48695, 12)),
-            (326134, 48695, 12),
-        ),
-        (
-            "pre: mutable source lent, then another local written (ri-j6fm, 2A-F2 a)",
-            MUTABLE_SOURCE.replace(
-                "let before = current;",
-                "let before = current; let r = &mut current; let mut z = flag; z = !flag;",
-            ),
-            Some((326063, 48685, 12)),
-            (326153, 48685, 12),
-        ),
-        (
-            "pre: mutable copy lent, then another local written (ri-j6fm, 2A-F2 b)",
-            MUTABLE_SOURCE.replace(
-                "let before = current;",
-                "let mut before = current; let r = &mut before; let mut z = flag; z = !flag;",
-            ),
-            Some((326063, 48685, 12)),
-            (326113, 48685, 12),
-        ),
-        (
-            "computed: alias selects another place",
-            COMPUTED.replace("&flag else &flag", "&flag else &other"),
-            Some((325928, 48413, 12)),
-            (325886, 48394, 12),
-        ),
-    ] {
-        let holds = parent.is_some_and(|parent| exact.0 <= parent.0 && exact.1 <= parent.1);
-        let over_parent = parent.filter(|_| !holds);
-        installed_over_parent(
-            &probe,
-            name,
-            &source,
-            parent.filter(|_| holds),
-            over_parent,
-            |report| {
-                unpaid(report);
-                let stats = report.statistics();
-                assert_eq!(
-                    (stats.work, stats.entries, stats.max_depth),
-                    exact,
-                    "{name}"
-                );
-            },
-        );
-    }
+    });
 
     // Review ci-0mdr Q4 (SP-7), chief of staff 2026-11-24 14:50 AEDT, condition 3. The
     // immutable local `current` copies the parameter `flag`; neither can be written. Both
@@ -853,13 +727,13 @@ function probe(flag: bool, gate: bool): void { let debt = Err<bool,i32>(61i32); 
             "pre: immutable local source reassigned after the copy",
             "let before = current; current = !flag;",
             b"current = !flag;".as_slice(),
-            (324920, 48237, 12),
+            (324072, 48237, 12),
         ),
         (
             "pre: immutable local source, its parameter written after the copy",
             "let before = current; flag = !flag;",
             b"flag = !flag;".as_slice(),
-            (324753, 48171, 12),
+            (323905, 48171, 12),
         ),
     ] {
         let source = MUTABLE_SOURCE
@@ -867,69 +741,217 @@ function probe(flag: bool, gate: bool): void { let debt = Err<bool,i32>(61i32); 
             .replace("let before = current;", edit);
         installed_read_only(&probe, name, &source, write, exact);
     }
+}
 
-    // A mutable borrow of the copy or the source stays `Incomplete` (Storage) at the
-    // `*value = !*value;` write inside `flip`, with the unpaid `R0103` still published,
-    // whatever the match does, so neither can reach `Checked`. Parent numbers measured at
-    // 81d317b3 (review ci-b4b2 A-F1, ri-px1.11.9): same outcome and blocker, and the
-    // rejection costs no more than it did there. The last row is the third `ri-j6fm` form
-    // (the named exception of the rejections above): the same outcome and blocker as its
-    // parent, `flip(&mut z)` of another local after the source was written, +90 work.
-    for (name, source, exact, over_parent) in [
-        (
-            "pre: mutable binder lent mutably before the match",
-            format!(
+enum Outcome {
+    Checked,
+    Unpaid,
+    Storage,
+}
+
+const AXES: [Axis; 4] = [
+    Axis {
+        name: "source",
+        forms: &[
+            "parameter",
+            "other parameter",
+            "mutable local",
+            "immutable local",
+            "computed alias to other place",
+        ],
+    },
+    Axis {
+        name: "binder",
+        forms: &["immutable", "mutable"],
+    },
+    Axis {
+        name: "before the match",
+        forms: &[
+            "none",
+            "write source",
+            "lend source",
+            "lend source by call",
+            "write copy",
+            "lend copy",
+            "lend copy by call",
+        ],
+    },
+    Axis {
+        name: "another local",
+        forms: &["none", "write", "lend", "lend by call"],
+    },
+];
+
+fn boolean_copy_cells() -> Vec<Cell<Outcome>> {
+    vec![
+        Cell {
+            name: "pre: mutable binder",
+            at: &["parameter", "mutable", "none", "none"],
+            source: pre("let mut before = flag;", "before"),
+            parent: Some((324709, 48123, 12)),
+            exact: (323896, 48105, 12),
+            outcome: Outcome::Checked,
+        },
+        Cell {
+            name: "pre: mutable source",
+            at: &["mutable local", "immutable", "none", "none"],
+            source: MUTABLE_SOURCE.to_owned(),
+            parent: Some((324529, 48133, 12)),
+            exact: (323748, 48115, 12),
+            outcome: Outcome::Checked,
+        },
+        Cell {
+            name: "pre: immutable local source",
+            at: &["immutable local", "immutable", "none", "none"],
+            source: MUTABLE_SOURCE.replace("let mut current", "let current"),
+            parent: Some((324529, 48133, 12)),
+            exact: (323698, 48115, 12),
+            outcome: Outcome::Checked,
+        },
+        Cell {
+            name: "pre: copy of another parameter",
+            at: &["other parameter", "immutable", "none", "none"],
+            source: pre("let before = other;", "before"),
+            parent: Some((323881, 48123, 12)),
+            exact: (323881, 48123, 12),
+            outcome: Outcome::Unpaid,
+        },
+        Cell {
+            name: "pre: mutable binder reassigned before the match",
+            at: &["parameter", "mutable", "write copy", "none"],
+            source: pre("let mut before = flag; before = !flag;", "before"),
+            parent: Some((324649, 48441, 12)),
+            exact: (324649, 48441, 12),
+            outcome: Outcome::Unpaid,
+        },
+        Cell {
+            name: "pre: mutable source reassigned after the copy",
+            at: &["mutable local", "immutable", "write source", "none"],
+            source: MUTABLE_SOURCE.replace(
+                "let before = current;",
+                "let before = current; current = !flag;",
+            ),
+            parent: Some((324557, 48455, 12)),
+            exact: (324557, 48455, 12),
+            outcome: Outcome::Unpaid,
+        },
+        Cell {
+            name: "pre: mutable copy of the source, then lent mutably (ri-px1.11.13, 2A-F1)",
+            at: &["mutable local", "mutable", "lend copy", "none"],
+            source: MUTABLE_SOURCE.replace(
+                "let before = current;",
+                "let mut before = current; let r = &mut before;",
+            ),
+            parent: Some((323925, 48205, 12)),
+            exact: (323925, 48205, 12),
+            outcome: Outcome::Unpaid,
+        },
+        Cell {
+            name: "pre: mutable source written, then another local written (ri-j6fm, X2)",
+            at: &["mutable local", "immutable", "write source", "write"],
+            source: MUTABLE_SOURCE.replace(
+                "let before = current;",
+                "let before = current; current = !flag; let mut z = flag; z = !flag;",
+            ),
+            parent: Some((325237, 48707, 12)),
+            exact: (325237, 48707, 12),
+            outcome: Outcome::Unpaid,
+        },
+        Cell {
+            name: "pre: mutable source written, then another local lent mutably (ri-j6fm, X3)",
+            at: &["mutable local", "immutable", "write source", "lend"],
+            source: MUTABLE_SOURCE.replace(
+                "let before = current;",
+                "let before = current; current = !flag; let mut z = flag; let w = &mut z;",
+            ),
+            parent: Some((325188, 48695, 12)),
+            exact: (325188, 48695, 12),
+            outcome: Outcome::Unpaid,
+        },
+        Cell {
+            name: "pre: mutable source lent, then another local written (ri-j6fm, 2A-F2 a)",
+            at: &["mutable local", "immutable", "lend source", "write"],
+            source: MUTABLE_SOURCE.replace(
+                "let before = current;",
+                "let before = current; let r = &mut current; let mut z = flag; z = !flag;",
+            ),
+            parent: Some((325212, 48685, 12)),
+            exact: (325212, 48685, 12),
+            outcome: Outcome::Unpaid,
+        },
+        Cell {
+            name: "pre: mutable copy lent, then another local written (ri-j6fm, 2A-F2 b)",
+            at: &["mutable local", "mutable", "lend copy", "write"],
+            source: MUTABLE_SOURCE.replace(
+                "let before = current;",
+                "let mut before = current; let r = &mut before; let mut z = flag; z = !flag;",
+            ),
+            parent: Some((325212, 48685, 12)),
+            exact: (325212, 48685, 12),
+            outcome: Outcome::Unpaid,
+        },
+        Cell {
+            name: "computed: alias selects another place",
+            at: &["computed alias to other place", "immutable", "none", "none"],
+            source: COMPUTED.replace("&flag else &flag", "&flag else &other"),
+            parent: Some((325928, 48413, 12)),
+            exact: (325057, 48394, 12),
+            outcome: Outcome::Unpaid,
+        },
+        Cell {
+            name: "pre: mutable binder lent mutably before the match",
+            at: &["parameter", "mutable", "lend copy by call", "none"],
+            source: format!(
                 "{FLIP}{}",
                 pre("let mut before = flag; flip(&mut before);", "before")
             ),
-            (325886, 48178, 12),
-            None,
-        ),
-        (
-            "pre: mutable source lent mutably after the copy",
-            format!(
+            parent: None,
+            exact: (325047, 48178, 12),
+            outcome: Outcome::Storage,
+        },
+        Cell {
+            name: "pre: mutable source lent mutably after the copy",
+            at: &["mutable local", "immutable", "lend source by call", "none"],
+            source: format!(
                 "{FLIP}{}",
                 MUTABLE_SOURCE.replace(
                     "let before = current;",
-                    "let before = current; flip(&mut current);",
+                    "let before = current; flip(&mut current);"
                 )
             ),
-            (325702, 48188, 12),
-            None,
-        ),
-        (
-            "pre: mutable source written, then another local lent by a call (ri-j6fm, X4)",
-            format!(
+            parent: None,
+            exact: (324873, 48188, 12),
+            outcome: Outcome::Storage,
+        },
+        Cell {
+            name: "pre: mutable source written, then another local lent by a call (ri-j6fm, X4)",
+            at: &["mutable local", "immutable", "write source", "lend by call"],
+            source: format!(
                 "{FLIP}{}",
                 MUTABLE_SOURCE.replace(
                     "let before = current;",
-                    "let before = current; current = !flag; let mut z = flag; flip(&mut z);",
+                    "let before = current; current = !flag; let mut z = flag; flip(&mut z);"
                 )
             ),
-            (326912, 48582, 12),
-            Some((326822, 48582, 12)),
-        ),
-    ] {
-        installed_over_parent(&probe, name, &source, Some(exact), over_parent, |report| {
-            assert_eq!(report.completion(), TypedCompletion::Incomplete, "{name}");
-            assert!(report.receipt().is_none());
-            let uses = report.result_use().unwrap();
-            let [pending] = uses.pending() else {
-                panic!("{:?}", uses.pending())
-            };
-            assert_eq!(pending.blocker, ResultUseBlocker::Storage);
-            assert_eq!(pending.site.span.bytes(), b"*value = !*value;", "{name}");
-            let discards = report.result_use().unwrap().discards();
-            assert_eq!(discards.len(), 1, "{name}");
-            assert_eq!(discards[0].code(), "R0103", "{name}");
-            let stats = report.statistics();
-            assert_eq!(
-                (stats.work, stats.entries, stats.max_depth),
-                exact,
-                "{name}"
-            );
-        });
-    }
+            parent: Some((325958, 48582, 12)),
+            exact: (325958, 48582, 12),
+            outcome: Outcome::Storage,
+        },
+    ]
+}
+
+fn pending_storage(report: &TypedReport<'_>, name: &str) {
+    assert_eq!(report.completion(), TypedCompletion::Incomplete, "{name}");
+    assert!(report.receipt().is_none());
+    let uses = report.result_use().unwrap();
+    let [pending] = uses.pending() else {
+        panic!("{:?}", uses.pending())
+    };
+    assert_eq!(pending.blocker, ResultUseBlocker::Storage);
+    assert_eq!(pending.site.span.bytes(), b"*value = !*value;", "{name}");
+    let discards = report.result_use().unwrap().discards();
+    assert_eq!(discards.len(), 1, "{name}");
+    assert_eq!(discards[0].code(), "R0103", "{name}");
 }
 
 const MUTABLE_SOURCE: &str = "

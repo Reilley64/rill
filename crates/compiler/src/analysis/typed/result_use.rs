@@ -4,7 +4,7 @@ use crate::analysis::scalars::data::{
     Access, Constructor, DataExpression, PathProjection, PlacePath,
 };
 use crate::analysis::scalars::{
-    BodyOwner, ExpressionFacts, NodeFactKind, NodeFacts, Propagation, Site,
+    BodyOwner, CopySource, ExpressionFacts, NodeFactKind, NodeFacts, Propagation, Site,
 };
 use crate::analysis::{
     Binder, DeclarationFacts, DeclarationId, DeclarationShape, MemberType, Payload, Substitution,
@@ -84,6 +84,7 @@ pub struct ResultUseReport<'g> {
     // Temporary until the integrated analysis attaches each proof directly to
     // its originating call. The key indexes this report's typed node array.
     pair_calls: BTreeMap<usize, pairs::CheckedTransfer<'g>>,
+    consumed_receivers: BTreeSet<usize>,
     routine_bound: bool,
     fresh_option_iterators: Vec<(&'g DeclarationId, &'g DeclarationId, NodeId)>,
 }
@@ -105,6 +106,18 @@ impl<'g> ResultUseReport<'g> {
             }
         }
         Ok(())
+    }
+
+    pub(super) fn attach_consumed_receivers(&mut self, bodies: &mut GenericReport<'g>) {
+        for index in std::mem::take(&mut self.consumed_receivers) {
+            let invocation = bodies
+                .typed_node_mut(index)
+                .callable
+                .as_mut()
+                .and_then(|callable| Arc::get_mut(callable.invocation.as_mut()?))
+                .expect("checked invocation");
+            invocation.consumed_receiver = true;
+        }
     }
 
     pub(super) fn attach_option_iterators(
@@ -133,6 +146,7 @@ impl<'g> ResultUseReport<'g> {
             discards,
             pending: _pending,
             pair_calls: _pair_calls,
+            consumed_receivers: _consumed_receivers,
             routine_bound: _routine_bound,
             fresh_option_iterators: _fresh_option_iterators,
         } = self;
@@ -147,7 +161,48 @@ impl<'g> ResultUseReport<'g> {
     }
 }
 
-type Nodes<'a, 'g> = BTreeMap<(&'g ModuleKey, NodeId), (usize, &'a NodeFacts<'g>)>;
+type NodeTable<'a, 'g> = BTreeMap<NodeId, (usize, &'a NodeFacts<'g>)>;
+
+struct Nodes<'a, 'g> {
+    modules: &'g [Module],
+    tables: Vec<NodeTable<'a, 'g>>,
+    len: usize,
+}
+
+impl<'a, 'g> Nodes<'a, 'g> {
+    fn new(modules: &'g [Module]) -> Self {
+        Self {
+            modules,
+            tables: std::iter::repeat_with(BTreeMap::new)
+                .take(modules.len())
+                .collect(),
+            len: 0,
+        }
+    }
+
+    fn insert(&mut self, module: &ModuleKey, node: NodeId, fact: (usize, &'a NodeFacts<'g>)) {
+        if let Some(index) = self.position(module)
+            && let std::collections::btree_map::Entry::Vacant(slot) = self.tables[index].entry(node)
+        {
+            slot.insert(fact);
+            self.len += 1;
+        }
+    }
+
+    fn len(&self) -> usize {
+        self.len
+    }
+
+    fn position(&self, module: &ModuleKey) -> Option<usize> {
+        self.modules
+            .binary_search_by(|candidate| candidate.key.cmp(module))
+            .ok()
+    }
+
+    fn get(&self, module: &ModuleKey, node: NodeId) -> Option<&(usize, &'a NodeFacts<'g>)> {
+        self.tables[self.position(module)?].get(&node)
+    }
+}
 
 type Alternatives<'g> = Vec<Residence<'g>>;
 
@@ -189,12 +244,10 @@ pub(super) fn check<'g>(
     budget: &mut Budget,
     report: &mut ResultUseReport<'g>,
 ) -> Work<()> {
-    let mut nodes = BTreeMap::new();
+    let mut nodes = Nodes::new(inventory.graph().modules());
     for (index, facts) in bodies.typed_nodes().iter().enumerate() {
         budget.reserve(1)?;
-        nodes
-            .entry((facts.site.module, facts.site.node))
-            .or_insert((index, facts));
+        nodes.insert(facts.site.module, facts.site.node, (index, facts));
     }
     let mut checked = BTreeSet::new();
     for body in bodies.checked_bodies() {
@@ -292,15 +345,17 @@ pub(super) fn check<'g>(
     for (id, (entry, _)) in &contracts {
         budget.step(1)?;
         budget.step(inventory.graph().modules().len())?;
-        let Some(module) = inventory
+        let Some(index) = inventory
             .graph()
             .modules()
             .iter()
-            .find(|m| m.key == id.module)
+            .position(|m| m.key == id.module)
         else {
             continue;
         };
-        let mut check = Check::new(sources, module, &contracts, budget, report)?;
+        let module = &inventory.graph().modules()[index];
+        let table = &nodes.tables[index];
+        let mut check = Check::new(sources, module, table, &contracts, budget, report)?;
         if checked.contains(id) {
             check.parametric = Some(*entry);
             check.proving_callable = true;
@@ -314,9 +369,9 @@ pub(super) fn check<'g>(
     for (id, summary) in proved {
         contracts.get_mut(id).unwrap().1 = Some(summary);
     }
-    for module in inventory.graph().modules() {
+    for (module, table) in inventory.graph().modules().iter().zip(&nodes.tables) {
         budget.step(1)?;
-        Check::new(sources, module, &contracts, budget, report)?.roots()?;
+        Check::new(sources, module, table, &contracts, budget, report)?.roots()?;
     }
     Ok(())
 }
@@ -341,6 +396,7 @@ struct Check<'a, 'g> {
     pairs: &'a pairs::PairBodies<'g>,
     scoped: Option<(super::RoutineRole<'g>, pairs::PairBody<'g>)>,
     nodes: &'a Nodes<'a, 'g>,
+    table: &'a NodeTable<'a, 'g>,
     checked: &'a BTreeSet<&'g DeclarationId>,
     variants: &'a BTreeMap<&'g DeclarationId, &'a Payload<'g>>,
     implementation_headers: &'a BTreeMap<&'g DeclarationId, &'a DeclarationFacts<'g>>,
@@ -352,10 +408,7 @@ struct Check<'a, 'g> {
     report: &'a mut ResultUseReport<'g>,
     loops: Vec<LoopExits<'g>>,
     match_views: Vec<(Address<'g>, Root<'g>)>,
-    wildcard_sources: Vec<Address<'g>>,
-    // The root of the latest assignment or `&mut` evaluated, from the place facts those
-    // already read. `parameter_copy_source` rejects a local it names without a scan.
-    last_written: Option<&'g DeclarationId>,
+    wildcard_sources: Vec<(Address<'g>, bool)>,
     checked_arrows: BTreeSet<NodeId>,
     dead_depth: usize,
     dead_start: Option<usize>,
@@ -379,6 +432,7 @@ impl<'a, 'g> Check<'a, 'g> {
     fn new(
         sources: Sources<'a, 'g>,
         module: &'g Module,
+        table: &'a NodeTable<'a, 'g>,
         contracts: &'a CallbackContract<'g>,
         budget: &'a mut Budget,
         report: &'a mut ResultUseReport<'g>,
@@ -394,6 +448,7 @@ impl<'a, 'g> Check<'a, 'g> {
             pairs: sources.pairs,
             scoped: sources.scoped,
             nodes: sources.nodes,
+            table,
             checked: sources.checked,
             variants: sources.variants,
             implementation_headers: sources.implementation_headers,
@@ -406,7 +461,6 @@ impl<'a, 'g> Check<'a, 'g> {
             loops: Vec::new(),
             match_views: Vec::new(),
             wildcard_sources: Vec::new(),
-            last_written: None,
             checked_arrows: BTreeSet::new(),
             dead_depth: 0,
             dead_start: None,
@@ -444,11 +498,7 @@ impl<'a, 'g> Check<'a, 'g> {
     }
 
     fn facts(&mut self, node: NodeId) -> Work<Option<&'a NodeFacts<'g>>> {
-        self.budget.step(1)?;
-        Ok(self
-            .nodes
-            .get(&(&self.module.key, node))
-            .map(|&(_, fact)| fact))
+        Ok(self.table.get(&node).map(|&(_, fact)| fact))
     }
 
     fn pending(&mut self, node: NodeId, blocker: ResultUseBlocker) -> Work<()> {
@@ -761,10 +811,6 @@ impl<'a, 'g> Check<'a, 'g> {
                 let target = self.expression_facts(left)?;
                 let path = target.and_then(|expression| expression.path.as_ref());
                 let checked = self.facts(node)?.is_some();
-                // A write the source language forbids has no facts: it names no mutable local.
-                if checked {
-                    self.last_written = path.map(|path| path.root).or(self.last_written);
-                }
                 let plain_dereference = path.filter(|path| {
                     checked
                         && syntax.kind == NodeKind::Assignment("=")
@@ -1166,9 +1212,6 @@ impl<'a, 'g> Check<'a, 'g> {
                 let operand = syntax.children[0];
                 let operand_facts = self.expression_facts(operand)?;
                 let path = operand_facts.and_then(|e| e.path.as_ref());
-                if syntax.kind == NodeKind::Prefix("&mut") {
-                    self.last_written = path.map(|path| path.root).or(self.last_written);
-                }
                 let place = self.place_storage(&state, path)?;
                 if state.has_option_lists()
                     && let Some(path) = path

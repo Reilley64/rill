@@ -3,7 +3,9 @@ use super::typed::CollectionCore;
 use super::*;
 use crate::lexer::{LiteralMode, NumberForm, Token, TokenKind};
 use declarations::DeclarationReceipt;
+use std::cell::Cell;
 use std::collections::{BTreeSet, VecDeque};
+use std::rc::Rc;
 
 mod copying;
 mod core;
@@ -120,6 +122,9 @@ pub struct ExpressionFacts<'g> {
     pub refinement: Option<Arc<data::Refinement<'g>>>,
     pub read_only_projection: bool,
     pub access: data::Access,
+    pub(in crate::analysis) copy_of: CopySource<'g>,
+    pub(in crate::analysis) written_before: bool,
+    pub(in crate::analysis) initializer: Option<NodeId>,
     /// The written shape is `local * literal`, or a local or that product
     /// plus a local. M5 still resolves the actual scalar slots.
     pub(in crate::analysis) bounded_i32_arithmetic: bool,
@@ -143,6 +148,7 @@ pub struct CallFacts<'g> {
     pub(in crate::analysis) list_arrows: Option<Box<super::typed::PairCall<'g>>>,
     pub(in crate::analysis) scoped_join: Option<Box<super::typed::ScopedJoinCall<'g>>>,
     pub callee: &'g DeclarationId,
+    pub declaration: &'g Declaration,
     pub bindings: Vec<&'g Binding>,
     pub substitution: Vec<Substitution<'g>>,
     /// The selected ordinary body and its own binder substitution, when proved.
@@ -431,6 +437,10 @@ struct Slot<'g> {
     invocation: Option<Arc<InvocationFacts<'g>>>,
     function_value: Option<Arc<FunctionValueFacts<'g>>>,
     arrow: Option<Arc<ArrowFacts<'g>>>,
+    copy_of: CopySource<'g>,
+    written_before: bool,
+    written: Option<Rc<Cell<bool>>>,
+    initializer: Option<NodeId>,
 }
 /// Operand shape of a normal `i32` expression, classified from its children
 /// during the flow pass so that M5 admits arithmetic without a lookup.
@@ -458,6 +468,14 @@ struct ExpressionResult<'g> {
     access: data::Access,
     path: Option<data::PlacePath<'g>>,
     arrow: Option<Arc<ArrowFacts<'g>>>,
+    written: Option<Rc<Cell<bool>>>,
+}
+#[derive(Clone, Copy, Debug, Default)]
+pub(in crate::analysis) enum CopySource<'g> {
+    #[default]
+    Unknown,
+    Not,
+    Of(&'g DeclarationId),
 }
 #[derive(Clone)]
 struct Local<'g> {
@@ -465,6 +483,9 @@ struct Local<'g> {
     ty: Option<Type<'g>>,
     mutable: bool,
     boolean: Option<BooleanSet>,
+    copy_of: CopySource<'g>,
+    written: Option<Rc<Cell<bool>>>,
+    initializer: Option<NodeId>,
 }
 #[derive(Clone)]
 struct Context<'r, 'g> {
@@ -1273,6 +1294,9 @@ impl<'r, 'g> Checker<'r, 'g> {
             {
                 self.establish(inference, child, referent.clone(), true)?;
             }
+            if mutable && let Some(written) = &inference.slots[&child].written {
+                written.set(true);
+            }
             if let Some(actual) = actual {
                 if mutable {
                     match inference.slots[&child].place {
@@ -1825,6 +1849,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 list_arrows: None,
                 scoped_join: None,
                 callee: &declaration.id,
+                declaration,
                 bindings,
                 substitution,
                 selection: None,
@@ -1872,6 +1897,9 @@ impl<'r, 'g> Checker<'r, 'g> {
                             ty: Some(parameter.ty.clone()),
                             mutable: false,
                             boolean: None,
+                            copy_of: CopySource::Unknown,
+                            written: None,
+                            initializer: None,
                         },
                     );
                 }
@@ -2175,6 +2203,10 @@ impl<'r, 'g> Checker<'r, 'g> {
                         }
                         slot.binding = Some(local.declaration);
                         slot.arrow = self.arrow_bindings.get(local.declaration).cloned();
+                        slot.copy_of = local.copy_of;
+                        slot.written_before = local.written.as_ref().is_some_and(|w| w.get());
+                        slot.written = local.written.clone();
+                        slot.initializer = local.initializer;
                         slot.place = if local.mutable {
                             Place::Writable
                         } else {
@@ -2901,6 +2933,9 @@ impl<'r, 'g> Checker<'r, 'g> {
                         refinement: slot.refinement.clone(),
                         read_only_projection: slot.read_only_projection,
                         access: slot.access,
+                        copy_of: slot.copy_of,
+                        written_before: slot.written_before,
+                        initializer: slot.initializer,
                         bounded_i32_arithmetic: matches!(
                             slot.i32_operand,
                             I32Operand::Product | I32Operand::Sum
@@ -2950,6 +2985,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                         access: slot.access,
                         path: self.copy_path(slot.path.as_ref())?,
                         arrow: slot.arrow.clone(),
+                        written: slot.written.clone(),
                     });
                 }
             }
@@ -3199,6 +3235,16 @@ impl<'r, 'g> Checker<'r, 'g> {
                     };
                     let boolean = inferred.as_ref().and_then(|e| e.boolean);
                     let arrow = inferred.as_ref().and_then(|e| e.arrow.clone());
+                    let copy_of = inferred
+                        .as_ref()
+                        .and_then(|e| {
+                            e.path
+                                .as_ref()
+                                .filter(|path| path.projections.is_empty())
+                                .filter(|_| primitive_name(&e.ty) == Some("bool"))
+                                .map(|path| CopySource::Of(path.root))
+                        })
+                        .unwrap_or(CopySource::Not);
                     let ty = if self.marks() == before
                         && (self.input.ordinary.is_none() || inferred.is_some())
                     {
@@ -3231,6 +3277,9 @@ impl<'r, 'g> Checker<'r, 'g> {
                                 ty: ty.clone(),
                                 mutable,
                                 boolean,
+                                copy_of,
+                                written: mutable.then(|| Rc::new(Cell::new(false))),
+                                initializer: Some(initializer),
                             });
                         self.elab.reserve(1)?;
                         self.record_node(NodeFacts {
@@ -3254,6 +3303,9 @@ impl<'r, 'g> Checker<'r, 'g> {
             }
             NodeKind::Assignment(operator) => {
                 let left = self.expression(module, n.children[0], None, context)?;
+                if let Some(written) = left.as_ref().and_then(|e| e.written.as_ref()) {
+                    written.set(true);
+                }
                 if left.as_ref().is_some_and(|e| e.place != Place::Writable) {
                     self.finding(module, node, ScalarFindingKind::ReadOnly)?;
                 }

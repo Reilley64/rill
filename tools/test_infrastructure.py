@@ -1,4 +1,4 @@
-from contextlib import redirect_stdout
+from contextlib import redirect_stderr, redirect_stdout
 import io
 import json
 import os
@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 import yaml
 
+import check_comments
 import doctor
 from check_docs import anchors, check
 
@@ -82,6 +83,206 @@ class DocumentationTests(unittest.TestCase):
         self.assertEqual(anchors('````md\n```\n# Not an anchor\n```\n````\n# Actual\n'), {"actual"})
 
 
+class CommentCheckSourceTests(unittest.TestCase):
+    def refused(self, source, **kwargs):
+        return [text for _, text in check_comments.check_source(source, **kwargs)]
+
+    def test_plain_comments_are_refused_in_every_position(self):
+        source = "// a note\nfn f() {} // trailing\n/* block */\n/*\n multi\n*/\n//// banner\n// TODO: later\n// let x = 1;\n"
+        self.assertEqual(len(self.refused(source)), 7)
+        self.assertEqual(check_comments.check_source("fn f() {}\n// note\n"), [(2, "// note")])
+
+    def test_each_keep_list_form_passes(self):
+        forms = {
+            "line license header": "// SPDX-License-Identifier: MIT\n// Copyright 2026 Rill\nfn f() {}\n",
+            "block license header": "/* Licensed under the MIT license. */\nfn f() {}\n",
+            "doc on a public item": "/// Adds one.\n#[inline]\npub fn f() {}\n",
+            "block doc on a public item": "/** Adds one. */\npub struct S;\n",
+            "doc on an enum variant": "pub enum E {\n    /// The first.\n    A,\n}\n",
+            "doc on a trait member": "pub trait T {\n    /// Runs.\n    fn run(&self);\n}\n",
+            "inner doc on a public module": "//! The crate.\npub fn f() {}\n",
+            "SAFETY on an unsafe block": "fn f() {\n    // SAFETY: the pointer is live.\n    unsafe { g() };\n}\n",
+            "SAFETY on a let": "fn f() {\n    // SAFETY: held.\n    let x = unsafe { g() };\n}\n",
+            "multi-line SAFETY on an unsafe impl": "// SAFETY: the cell is\n// only read here.\nunsafe impl Send for S {}\n",
+            "bead link": "fn f() {}\n// ri-qlh.18.6\n// ci-snb8\n// ri-abcd12\n",
+            "RFC link": "// docs/rfcs/0007-ownership-borrowing-mutation-and-cleanup.md\nfn f() {}\n",
+            "RFC link with anchor": "// docs/rfcs/0007-ownership.md#cleanup\nfn f() {}\n",
+            "ADR link": "fn f() {} // docs/adr/0001-record.md\n",
+        }
+        for name, source in forms.items():
+            with self.subTest(form=name):
+                self.assertEqual(self.refused(source, inner_public=True), [])
+
+    def test_lookalikes_are_refused(self):
+        cases = {
+            "doc on a private item": "/// Adds one.\nfn f() {}\n",
+            "doc on a crate-visible item": "/// Adds one.\npub(crate) fn f() {}\n",
+            "doc on a private field": "pub struct S {\n    /// The count.\n    n: u32,\n}\n",
+            "inner doc on a private module": "//! The module.\nfn f() {}\n",
+            "SAFETY off an unsafe block": "// SAFETY: fine.\nfn f() {}\n",
+            "SAFETY on an unsafe fn": "// SAFETY: fine.\nunsafe fn f() {}\n",
+            "license comment after code": "fn f() {}\n// License: MIT\n",
+            "bead link with prose": "// see ri-qlh.18.6 for why\nfn f() {}\n",
+            "RFC link with prose": "// docs/rfcs/0007-ownership.md says so\nfn f() {}\n",
+            "bead id followed by prose": "// ri-qlh is why\nfn f() {}\n",
+        }
+        for name, source in cases.items():
+            with self.subTest(case=name):
+                self.assertTrue(self.refused(source), source)
+
+    def test_comment_markers_in_literals_are_not_comments(self):
+        source = (
+            'fn f() -> &\'static str {\n'
+            '    let a = "// not a comment";\n'
+            '    let b = r#"/* nor "this" */"#;\n'
+            "    let c = '/';\n"
+            "    let d = '\\'';\n"
+            "    let e = b\"//\";\n"
+            '    let g = "esc \\" // still inside";\n'
+            '    "x"\n}\n'
+        )
+        self.assertEqual(self.refused(source), [])
+
+    def test_block_comments_nest(self):
+        self.assertEqual(len(self.refused("/* outer /* inner */ still outer */\nfn f() {}\n")), 1)
+        self.assertEqual(self.refused("fn f() {}\n/* a /* b */ // c */ fn g() {}\n// ri-abc\n"), ["/* a /* b */ // c */"])
+
+    def test_only_comments_touching_changed_lines_are_reported(self):
+        source = "// old\nfn f() {}\n// new\n/*\nspan\n*/\n"
+        self.assertEqual(check_comments.check_source(source, changed={3}), [(3, "// new")])
+        self.assertEqual(check_comments.check_source(source, changed={5}), [(4, "/*")])
+        self.assertEqual(check_comments.check_source(source, changed=set()), [])
+
+
+class CommentCheckRunTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory()
+        self.addCleanup(self.directory.cleanup)
+        self.root = Path(self.directory.name)
+        git(self.root, "init", "-q", "-b", "main")
+        git(self.root, "config", "user.email", "test@example.com")
+        git(self.root, "config", "user.name", "Test")
+        self.write("crates/a/src/lib.rs", "// old comment\npub fn f() {}\n")
+        git(self.root, "add", ".")
+        git(self.root, "commit", "-qm", "base")
+        git(self.root, "update-ref", "refs/remotes/origin/main", "HEAD")
+        git(self.root, "checkout", "-qb", "work")
+
+    def write(self, name, text):
+        path = self.root / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text)
+
+    def commit(self):
+        git(self.root, "add", ".")
+        git(self.root, "commit", "-qm", "change")
+
+    def run_check(self, *argv, env=None):
+        out, err = io.StringIO(), io.StringIO()
+        with patch.dict(os.environ, env or {}), redirect_stdout(out), redirect_stderr(err):
+            code = check_comments.main(list(argv), root=self.root)
+        return code, out.getvalue(), err.getvalue()
+
+    def test_a_branch_with_no_new_comment_passes_despite_old_ones(self):
+        self.write("crates/a/src/lib.rs", "// old comment\npub fn f() {}\npub fn g() {}\n")
+        self.commit()
+        self.assertEqual(self.run_check()[0], 0)
+
+    def test_an_added_plain_comment_fails_with_the_instruction(self):
+        self.write("crates/a/src/lib.rs", "// old comment\npub fn f() {}\n// workaround\nfn g() {}\n")
+        self.commit()
+        code, _, err = self.run_check()
+        self.assertEqual(code, 1)
+        self.assertIn("crates/a/src/lib.rs:3: // workaround", err)
+        self.assertNotIn("old comment", err)
+        self.assertIn("Remove the comment. If it explains a workaround, fix the root cause; "
+                      "if it states a rule, write a test or a type; "
+                      "if it records a decision, link the bead, RFC or ADR.", err)
+
+    def test_added_keep_list_forms_pass(self):
+        self.write("crates/a/src/lib.rs", "// old comment\n/// Adds.\npub fn f() {}\n// ri-abcd\nfn g() {}\n")
+        self.commit()
+        self.assertEqual(self.run_check()[0], 0)
+
+    def test_an_uncommitted_and_an_untracked_file_are_read(self):
+        self.write("crates/a/src/lib.rs", "// old comment\npub fn f() {} // edit\n")
+        self.write("runtime/new.rs", "// fresh\n")
+        self.write("docs/note.rs", "// outside the source directories\n")
+        code, _, err = self.run_check()
+        self.assertEqual(code, 1)
+        self.assertIn("crates/a/src/lib.rs:2: // edit", err)
+        self.assertIn("runtime/new.rs:1: // fresh", err)
+        self.assertNotIn("docs/note.rs", err)
+
+    def test_a_dispatched_run_diffs_against_the_merge_base_with_origin_main(self):
+        self.write("crates/a/src/lib.rs", "// old comment\npub fn f() {}\n// first\n")
+        self.commit()
+        self.write("crates/a/src/lib.rs", "// old comment\npub fn f() {}\n// first\n// second\n")
+        self.commit()
+        code, _, err = self.run_check(env={"GITHUB_BASE_REF": ""})
+        self.assertEqual(code, 1)
+        self.assertIn(":3: // first", err)
+        self.assertIn(":4: // second", err)
+
+    def test_a_pull_request_run_diffs_against_its_base_branch(self):
+        git(self.root, "checkout", "-q", "main")
+        git(self.root, "checkout", "-qb", "integration")
+        self.write("crates/a/src/lib.rs", "// old comment\npub fn f() {}\n// integrated\n")
+        self.commit()
+        git(self.root, "update-ref", "refs/remotes/origin/integration", "HEAD")
+        git(self.root, "checkout", "-qb", "feature")
+        self.write("crates/a/src/lib.rs", "// old comment\npub fn f() {}\n// integrated\n// mine\n")
+        self.commit()
+        code, _, err = self.run_check(env={"GITHUB_BASE_REF": "integration"})
+        self.assertEqual(code, 1)
+        self.assertIn(":4: // mine", err)
+        self.assertNotIn("integrated", err)
+
+    def test_a_missing_base_fails_and_names_the_checkout_depth(self):
+        git(self.root, "update-ref", "-d", "refs/remotes/origin/main")
+        with self.assertRaises(SystemExit) as raised:
+            self.run_check()
+        self.assertIn("fetch-depth: 0", str(raised.exception))
+
+    def test_an_explicit_base_overrides_origin_main(self):
+        self.write("crates/a/src/lib.rs", "// old comment\npub fn f() {}\n// added\n")
+        self.commit()
+        self.assertEqual(self.run_check("--base", "HEAD")[0], 0)
+        self.assertEqual(self.run_check("--base", "HEAD~1")[0], 1)
+
+    def test_tree_mode_reads_every_comment(self):
+        code, out, err = self.run_check("--tree")
+        self.assertEqual(code, 1)
+        self.assertIn("crates/a/src/lib.rs:1: // old comment", err)
+        self.write("crates/a/src/lib.rs", "pub fn f() {}\n")
+        code, out, _ = self.run_check("--tree")
+        self.assertEqual(code, 0)
+        self.assertIn("every comment", out)
+
+    def test_inner_docs_are_a_contract_only_on_a_public_module(self):
+        self.write("crates/a/src/lib.rs", "pub mod open;\nmod shut;\n")
+        self.write("crates/a/src/open.rs", "//! The open module.\n")
+        self.write("crates/a/src/shut.rs", "//! The shut module.\n")
+        self.commit()
+        code, _, err = self.run_check()
+        self.assertEqual(code, 1)
+        self.assertIn("crates/a/src/shut.rs:1", err)
+        self.assertNotIn("open.rs", err)
+
+    def test_the_repository_wires_the_check_into_check_and_ci(self):
+        tasks = doctor.tomllib.loads((doctor.ROOT / "mise.toml").read_text())["tasks"]
+        self.assertIn("check:comments", tasks["check"]["depends"])
+        self.assertEqual(tasks["check:comments"]["run"], "python tools/check_comments.py")
+        for name in ["check.yml", "native.yml"]:
+            workflow = yaml.load((doctor.ROOT / ".github/workflows" / name).read_text(), Loader=yaml.BaseLoader)
+            checkouts = [step for job in workflow["jobs"].values() for step in job["steps"]
+                         if step.get("uses", "").startswith("actions/checkout@")]
+            self.assertTrue(checkouts)
+            for step in checkouts:
+                with self.subTest(workflow=name):
+                    self.assertEqual(step["with"]["fetch-depth"], "0")
+
+
 class ToolSelectionTests(unittest.TestCase):
     def check(self, *, uv_version=None, override=None, wrong_path=False):
         config = doctor.tomllib.loads((doctor.ROOT / "mise.toml").read_text())
@@ -147,37 +348,19 @@ class WorkspaceTests(unittest.TestCase):
 
 
 class OwnershipArchiveTests(unittest.TestCase):
-    """build.rs sets RILL_OWNERSHIP_ARCHIVE only for aarch64-apple-darwin."""
+    """build.rs builds the first-party archive for every host, and m5 compiles on every host."""
 
-    @staticmethod
-    def gates_to_aarch64_macos(line):
-        return ("cfg(" in line and "not(" not in line
-                and 'target_arch = "aarch64"' in line and 'target_os = "macos"' in line)
-
-    def gated(self, path, lines):
-        text = "\n".join(lines)
-        if any(line.startswith("#![") and self.gates_to_aarch64_macos(line) for line in lines):
-            return True
-        for parent in (path.parent.with_suffix(".rs"), path.parent / "mod.rs"):
-            if path.name != "mod.rs" and parent.is_file() and parent != path:
-                declaration = parent.read_text().splitlines()
-                for number, line in enumerate(declaration):
-                    if line.rstrip(";").split()[-2:] == ["mod", path.stem] and number \
-                            and self.gates_to_aarch64_macos(declaration[number - 1]):
-                        return True
-        uses = [number for number, line in enumerate(lines) if 'env!("RILL_OWNERSHIP_ARCHIVE")' in line]
-        return all(any(self.gates_to_aarch64_macos(line) for line in lines[max(0, number - 3):number])
-                   for number in uses)
-
-    def test_archive_users_compile_only_for_aarch64_macos(self):
+    def test_archive_is_not_gated_to_one_host(self):
         crate = doctor.ROOT / "crates" / "compiler"
-        users = [path for path in sorted(crate.rglob("*.rs"))
-                 if "target" not in path.relative_to(crate).parts and path.name != "build.rs"
-                 and 'env!("RILL_OWNERSHIP_ARCHIVE")' in path.read_text()]
-        self.assertTrue(users)
-        ungated = [str(path.relative_to(doctor.ROOT)) for path in users
-                   if not self.gated(path, path.read_text().splitlines())]
-        self.assertEqual(ungated, [])
+        self.assertNotIn("return;", (crate / "build.rs").read_text())
+        self.assertNotIn("#![cfg(", (crate / "tests" / "m5.rs").read_text())
+        self.assertNotIn("cfg(", (crate / "src" / "loader" / "installed.rs").read_text())
+
+    def test_check_runs_the_zero_test_guard_for_m5(self):
+        tasks = doctor.tomllib.loads((doctor.ROOT / "mise.toml").read_text())["tasks"]
+        self.assertIn("check:m5", tasks["check"]["depends"])
+        self.assertEqual(tasks["check:m5"]["run"],
+                         "cargo test --locked --no-default-features -p compiler --test m5 -- --list | grep -c ': test$'")
 
 
 class WorkflowTests(unittest.TestCase):
@@ -212,13 +395,15 @@ class WorkflowTests(unittest.TestCase):
 class NativeAcceptanceTests(unittest.TestCase):
     STEP = "Test: Verify native runtime acceptance is unavailable"
 
-    def run_step(self, mise_script):
+    RELEASE_STEP = "Build and test: Verify release acceptance stops at the unavailable build"
+    BUILD_STUB = f'exec "{sys.executable}" tools/unavailable.py build\n'
+
+    def run_step(self, mise_script, step_name=STEP, command="mise run test:runtime"):
         workflow = yaml.load((doctor.ROOT / ".github/workflows/native.yml").read_text(), Loader=yaml.BaseLoader)
         steps = workflow["jobs"]["native"]["steps"]
-        self.assertEqual([step["name"] for step in steps].count(self.STEP), 1)
-        script = next(step["run"] for step in steps if step["name"] == self.STEP)
-        self.assertEqual([step["name"] for step in steps if "mise run test:runtime" in step.get("run", "")],
-                         [self.STEP])
+        self.assertEqual([step["name"] for step in steps].count(step_name), 1)
+        script = next(step["run"] for step in steps if step["name"] == step_name)
+        self.assertEqual([step["name"] for step in steps if command in step.get("run", "")], [step_name])
         with tempfile.TemporaryDirectory() as directory:
             mise = Path(directory) / "mise"
             mise.write_text("#!/bin/sh\n" + mise_script)
@@ -236,6 +421,33 @@ class NativeAcceptanceTests(unittest.TestCase):
                        "echo 'unrelated is not implemented in this scaffold' >&2\nexit 2\n"]:
             with self.subTest(script=script):
                 self.assertNotEqual(self.run_step(script).returncode, 0)
+
+    def run_release(self, mise_script):
+        guard = '[ "$1 $2" != "run verify:release" ] && exit 64\n'
+        return self.run_step(guard + mise_script, self.RELEASE_STEP, "mise run verify:release")
+
+    def test_the_release_step_runs_only_on_dispatch(self):
+        workflow = yaml.load((doctor.ROOT / ".github/workflows/native.yml").read_text(), Loader=yaml.BaseLoader)
+        step = next(step for step in workflow["jobs"]["native"]["steps"] if step["name"] == self.RELEASE_STEP)
+        self.assertEqual(step["if"], "github.event_name == 'workflow_dispatch'")
+
+    def test_the_build_stub_after_passing_checks_is_asserted(self):
+        result = self.run_release("echo 'checks passed'\n" + self.BUILD_STUB)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+    def test_a_failing_check_still_fails_the_release_step(self):
+        for script in ["echo 'check failed' >&2\nexit 1\n", "echo 'check failed' >&2\nexit 2\n",
+                       "echo 'build is not implemented in this scaffold' >&2\nexit 1\n"]:
+            with self.subTest(script=script):
+                self.assertNotEqual(self.run_release(script).returncode, 0)
+
+    def test_a_changed_stub_or_a_successful_release_fails_the_release_step(self):
+        for script in ["exit 0\n", "echo 'build exists' >&2\nexit 2\n",
+                       "echo 'unrelated is not implemented in this scaffold' >&2\nexit 2\n"]:
+            with self.subTest(script=script):
+                result = self.run_release(script)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("::error::verify:release no longer stops at the build stub", result.stdout)
 
 
 class TestTaskTests(unittest.TestCase):

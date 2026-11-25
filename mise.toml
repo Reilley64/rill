@@ -8,7 +8,7 @@ locked = true
 lockfile_platforms = ["linux-x64", "linux-arm64", "macos-x64", "macos-arm64"]
 
 [tools]
-"core:rust" = { version = "1.98.0", profile = "minimal", components = ["rustfmt", "clippy"] }
+"core:rust" = { version = "1.98.0", profile = "minimal", components = ["rustfmt", "clippy"], targets = "aarch64-apple-darwin" }
 "core:python" = "3.13.18"
 "aqua:astral-sh/uv" = "0.13.8"
 
@@ -27,7 +27,7 @@ run = "python tools/doctor.py"
 
 [tasks.check]
 description = "Run LLVM-free Rust tests, formatting, lint, documentation and fixture checks"
-depends = ["check:rust", "check:docs", "check:fixtures", "check:tools", "test"]
+depends = ["check:rust", "check:m5", "check:docs", "check:comments", "check:fixtures", "check:tools", "test"]
 
 [tasks."check:rust"]
 description = "Check Rust formatting and LLVM-free clippy"
@@ -54,9 +54,31 @@ description = "Replay the published fixed work/entries/depth caps (m5::legacy_ca
 depends = ["doctor"]
 run = "cargo test --locked --no-default-features -p compiler --test m5 -- legacy_caps --test-threads=2"
 
+[tasks."probe:m5"]
+description = "Print the ownership pipeline's verdicts for the `=== name` sections of a sources file in both load modes (mise run probe:m5 -- <sources file>)"
+depends = ["doctor"]
+env = { RILL_M5_PROBE_VERBOSE = "1" }
+run = "sh -c 'RILL_M5_PROBE_SOURCES=$(cd \"$(dirname \"$1\")\" && pwd)/$(basename \"$1\") cargo test --locked --no-default-features -p compiler --test m5 -- --ignored probe_sources --nocapture --test-threads=1' probe:m5"
+
+[tasks."check:m5"]
+description = "Fail when the M5 ownership test binary lists no tests on this platform"
+depends = ["doctor"]
+run = "cargo test --locked --no-default-features -p compiler --test m5 -- --list | grep -c ': test$'"
+
+[tasks."status:prototypes"]
+description = "Regenerate the committed prototype status table (crates/compiler/tests/m5/prototype-status.tsv) through the public pipeline"
+depends = ["doctor"]
+env = { RILL_PROTOTYPE_STATUS_WRITE = "1" }
+run = "cargo test --locked --no-default-features -p compiler --test m5 -- prototype_status --test-threads=2"
+
 [tasks."check:docs"]
 depends = ["doctor"]
-run = ["python tools/check_docs.py", "git diff --check"]
+run = ["python tools/check_docs.py", "python tools/row_tests.py check", "git diff --check"]
+
+[tasks."check:comments"]
+description = "Refuse Rust comments added since the merge base with origin/main that are outside the keep list"
+depends = ["doctor"]
+run = "python tools/check_comments.py"
 
 [tasks."check:fixtures"]
 depends = ["setup"]

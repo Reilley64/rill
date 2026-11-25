@@ -214,7 +214,7 @@ impl<'a, 'g> Check<'a, 'g> {
             binding,
             ..
         } = plan;
-        let mut proof = self.callable_check(self.module)?;
+        let mut proof = self.callable_check(self.module, self.table)?;
         let mut entry = Residence::default();
         if let Some((binding, _)) = binding {
             let mut states = proof.statement(binding, entry, depth + 1)?;

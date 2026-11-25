@@ -9,7 +9,7 @@ use compiler::analysis::generics::{GoalBlocker, GoalState};
 use compiler::analysis::scalars::BodyOwner;
 use compiler::analysis::typed::{
     ConversionProtection, ConversionProvider, DecimalParseError, NumericConversionError,
-    PrimitiveValue, TypedCompletion, analyze_typed, conversion_values,
+    PrimitiveValue, ResultUseBlocker, TypedCompletion, analyze_typed, conversion_values,
 };
 use compiler::analysis::{AnalysisLimits, QueryError, TypeTerm};
 use compiler::loader::{
@@ -32,6 +32,7 @@ fn installed_conversions() {
             text_and_bytes(&root, mode);
             owned_bytes_has_no_result_storage(&root, mode);
             user_dispatch(&root, mode);
+            generic_try_into_requirement_calls(&root, mode);
             rejected_registrations(&root, mode);
             limited_uses(&root, mode);
             authority(&root, mode);
@@ -58,6 +59,11 @@ fn installed_conversions() {
         "error.rill",
         "format.rill",
         "compare.rill",
+        "std.rill",
+        "channel.rill",
+        "iter.rill",
+        "mutex.rill",
+        "shared.rill",
     ] {
         fs::copy(source.join(file), root.join("lib/rill/std").join(file)).unwrap();
     }
@@ -591,6 +597,150 @@ fn user_dispatch(root: &Path, mode: bool) {
     );
 }
 
+fn generic_try_into_requirement_calls(root: &Path, mode: bool) {
+    use ResultUseBlocker::{CallBoundary, Containment, TypedInput};
+    const DECLARED: &str =
+        "function c<To, From, E>(value: From): void where tryInto(To, From, E) {}";
+    const CHECKED: &str = "function checked<To, From, E>(value: From): Result<To, E> where tryInto(To, From, E) { return tryInto<To>(value); }";
+    const PAIR: &str = "type A = {}; type B = {}; enum Bad { No } implement tryInto<B>(value: A): Result<B, Bad> { return Result.Ok(B {}); }";
+    let preamble = "import std::{List, Result, Err}; \
+        import std::channel::{Receiver, Sender}; \
+        import std::convert::{into, tryInto}; \
+        import std::error::formatError; \
+        import std::iter::iterate; \
+        import std::mutex::LockGuard; \
+        import std::number::ParseError; \
+        import std::option::{Option, map as mapOption}; \
+        import std::result::{isOk, map as mapResult}; \
+        import std::shared::Shared;";
+    let result = "import std::convert::tryInto; import std::result::Result;";
+    let declared_only = &[(Containment, "value: From")][..];
+    let checked_call =
+        |call: &'static str| [(CallBoundary, "tryInto<To>(value)"), (Containment, call)];
+    type Case<'a> = (&'a str, String, Vec<(ResultUseBlocker, &'a str)>);
+    let cases: Vec<Case> = vec![
+        (
+            "reproducer (RFC 0009 line 277)",
+            format!("import std::convert::tryInto; {DECLARED} c<u8>(7u16);"),
+            declared_only.to_vec(),
+        ),
+        (
+            "m02 numeric pair under a guard (line 277)",
+            format!("{result} {CHECKED} function fits(): bool {{ guard let value = checked<u8>(7u16) else {{ return false; }} return true; }}"),
+            checked_call("checked<u8>(7u16)").to_vec(),
+        ),
+        (
+            "m03 numeric pair bound by let (line 277)",
+            format!("{result} {CHECKED} function fits(): void {{ let r = checked<u8>(7u16); }}"),
+            checked_call("checked<u8>(7u16)").to_vec(),
+        ),
+        (
+            "m04 numeric pair with the written error (lines 191, 277)",
+            format!("{result} import std::number::ConversionError; {CHECKED} function fits(): void {{ let r: Result<u8, ConversionError> = checked<u8>(7u16); }}"),
+            checked_call("checked<u8>(7u16)").to_vec(),
+        ),
+        (
+            "m05 user pair (line 277)",
+            format!("{result} {PAIR} {CHECKED} function fits(): void {{ let r = checked<B>(A {{}}); }}"),
+            checked_call("checked<B>(A {})").to_vec(),
+        ),
+        (
+            "m06 user pair with the written error (lines 191, 277)",
+            format!("{result} {PAIR} {CHECKED} function fits(): void {{ let r: Result<B, Bad> = checked<B>(A {{}}); }}"),
+            checked_call("checked<B>(A {})").to_vec(),
+        ),
+        (
+            "m07 string parse pair (line 277)",
+            format!("{result} {CHECKED} function fits(text: &string): void {{ let r = checked<i32>(text); }}"),
+            checked_call("checked<i32>(text)").to_vec(),
+        ),
+        (
+            "m08 direct numeric call (control)",
+            format!("{result} function fits(): void {{ let r = tryInto<u8>(7u16); }}"),
+            vec![(Containment, "tryInto<u8>(7u16)")],
+        ),
+        (
+            "m09 every argument written (lines 191, 277)",
+            format!("{result} import std::number::ParseError; {CHECKED} function fits(text: &string): void {{ let r = checked<i32, &string, ParseError>(text); }}"),
+            checked_call("checked<i32, &string, ParseError>(text)").to_vec(),
+        ),
+        (
+            "m10 call at startup (line 277)",
+            format!("{result} {CHECKED} let r = checked<u8>(7u16);"),
+            checked_call("checked<u8>(7u16)").to_vec(),
+        ),
+        (
+            "m11 clause only, called from a function (line 277)",
+            format!("import std::convert::tryInto; {DECLARED} function f(): void {{ c<u8>(7u16); }}"),
+            declared_only.to_vec(),
+        ),
+        (
+            "m13 no pair exists (line 361)",
+            format!("import std::convert::tryInto; {DECLARED} c<bool>(\"x\");"),
+            vec![(Containment, "value: From"), (TypedInput, "c<bool>(\"x\")")],
+        ),
+        (
+            "m14 into clause (control)",
+            "import std::convert::into; function c<To, From>(value: From): void where into(To, From) {} c<u16>(7u8);".into(),
+            vec![(Containment, "value: From")],
+        ),
+        (
+            "m15 with the M5 preamble (line 277)",
+            format!("{preamble} {DECLARED} c<u8>(7u16);"),
+            declared_only.to_vec(),
+        ),
+        (
+            "m16 generic caller forwarding its requirement (line 363)",
+            format!("import std::convert::tryInto; {DECLARED} function d<To, From, E>(value: From): void where tryInto(To, From, E) {{ c<To>(value); }} c<u8>(7u16);"),
+            declared_only.to_vec(),
+        ),
+    ];
+    for (name, source, expected) in cases {
+        let graph = capture(root, mode, &source);
+        let report = analyze_typed(&graph, AnalysisLimits::default());
+        let pending: Vec<_> = report
+            .result_use()
+            .unwrap()
+            .pending()
+            .iter()
+            .filter(|p| p.site.module.origin == Origin::Application)
+            .map(|p| {
+                (
+                    p.blocker,
+                    String::from_utf8_lossy(p.site.span.bytes()).into_owned(),
+                )
+            })
+            .collect();
+        let expected: Vec<_> = expected.iter().map(|(b, s)| (*b, s.to_string())).collect();
+        assert_eq!(
+            report.completion(),
+            TypedCompletion::Incomplete,
+            "{name} {mode}"
+        );
+        assert!(report.receipt().is_none(), "{name} {mode}");
+        assert_eq!(pending, expected, "{name} {mode}");
+        if ["reproducer", "m02", "m05", "m16"]
+            .iter()
+            .any(|prefix| name.starts_with(prefix))
+        {
+            limit::assert_typed_limits_below(&graph, &report);
+        }
+        let app = graph
+            .modules()
+            .iter()
+            .find(|m| m.key.origin == Origin::Application)
+            .unwrap();
+        assert!(
+            report
+                .bodies()
+                .findings()
+                .iter()
+                .all(|f| f.site.module != &app.key),
+            "{name} {mode}"
+        );
+    }
+}
+
 fn rejected_registrations(root: &Path, mode: bool) {
     let graph = capture(
         root,
@@ -718,13 +868,16 @@ fn limited_uses(root: &Path, mode: bool) {
 }
 
 fn authority(root: &Path, mode: bool) {
-    let no_trigger = capture(root, mode, "import std::number::ConversionError;");
-    assert!(
-        no_trigger
-            .modules()
-            .iter()
-            .all(|m| !matches!(m.key.path.as_str(), "bytes.rill" | "convert.rill"))
-    );
+    let baseline = capture(root, mode, "import std::number::ConversionError;");
+    for key in ["bytes.rill", "convert.rill"] {
+        assert!(
+            baseline
+                .modules()
+                .iter()
+                .any(|m| m.key.origin == Origin::Standard && m.key.path == key),
+            "{key}"
+        );
+    }
     let source = "import std::convert::tryInto; function parse(text: &string): void { let _ = tryInto<u8>(text); }";
     let graph = capture(root, mode, source);
     assert!(

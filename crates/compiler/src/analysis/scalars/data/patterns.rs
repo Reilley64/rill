@@ -360,6 +360,9 @@ impl<'r, 'g> Checker<'r, 'g> {
                         ty: None,
                         mutable,
                         boolean: None,
+                        copy_of: CopySource::Unknown,
+                        written: None,
+                        initializer: None,
                     },
                 );
                 self.elab.step(self.facts.nodes.len())?;
@@ -467,6 +470,9 @@ impl<'r, 'g> Checker<'r, 'g> {
                 ty: bound.clone(),
                 mutable,
                 boolean: None,
+                copy_of: CopySource::Unknown,
+                written: None,
+                initializer: None,
             },
         );
         if let Some(bound) = &bound {

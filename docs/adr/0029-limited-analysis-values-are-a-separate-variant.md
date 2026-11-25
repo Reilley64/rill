@@ -1,0 +1,27 @@
+# A value from an exhausted budget is a separate variant
+
+An analysis that runs out of budget returns a different variant of its result type, not the same type with some fields emptied. Each public analysis entry point returns `Run<R, L>`: `Finished(R)` or `ResourceLimit(L)`. `R` is today's report with `ResourceLimit` removed from its completion. `L` carries the statistics the run spent and the partial facts named below, and has no accessor for a finding, a verdict that cites one, MIR or a receipt. A reader reaches the findings, facts and inventory of a run only by matching on the variant, so an emptied list cannot read as "nothing found". [Compiler metering](../agents/compiler-metering.md) rule 8 stops being a list of accessors that each review round extended by one. The M5 retro (candidate 2) and the chief of staff's direction of 2026-11-24 11:21 set this direction; ri-qlh.9 records it.
+
+## What changes, by type
+
+- `analyze_typed` returns `TypedReport`, `analyze_ordinary` and the typed inventory `OrdinaryAnalysis`, `analyze_generics` and `ConversionReport::bodies` `GenericReport`, `analyze_conversions` `ConversionReport`, `select_inputs` `SelectionReport`, `ConversionReport::query_pair` `PairReport`, `analyze_ownership` `GraphReport`, and `lower_body` and `lower_root` the body `Report`. Each completion loses `ResourceLimit`: `TypedCompletion`, `ordinary::Completion` (leaving `Incomplete` alone), `ScalarFailureKind`, `BodyCompletion`, `ownership::Completion` and `GraphCompletion`. A part of a finished report never reads `ResourceLimit`: one budget covers a run, so exhaustion anywhere exhausts the run. `SelectionReport` and `PairReport` make their public `completion` and `outcome` fields private or finished-only.
+- `analyze_declaration_types`, `check_declarations`, `check_scalars` and `check_data` return `Err` with a failure. `TypeRejected`, `SourceRejected` and `Incomplete` failures keep their partial facts and findings: those are results of a finished run. A `ResourceLimit` failure is a separate variant of the failure type, with statistics and known facts and no `findings`.
+- `loader::Failure` follows the same rule: a `ResourceLimit` failure carries its message, path and span, and no findings. Whether any loader path appends findings to a `ResourceLimit` failure today (`engine.findings` in `loader/resolve.rs`) is not established here; the implementation probes it first.
+- `Incomplete` and `SourceRejected` are not budget outcomes. Their findings do not depend on where a cap fell, and a finished report is meant to be the same at every cap that finishes.
+
+## Partial facts
+
+A limited variant keeps only facts that are true whatever the budget but may be missing, under names that say so (`known_*`, returning `Option`, where `None` means not known and never none).
+
+- `OrdinaryAnalysis` and a typed run at a limit keep known declarations, headers and `FamilyFacts`: ruling 18 pinned them as M4 behaviour, and `m4_5::exhausted_products_keep_known_headers_but_cannot_supply_negative_input_evidence` reads them. They are never diagnostics and cannot be passed on: `select_inputs`, `analyze_generics` and `analyze_conversions` accept only a finished `OrdinaryAnalysis`, so a prefix of an inventory is refused by the compiler and not by a completion check.
+- A limited `SelectionReport` and `PairReport` keep known matches, comparisons and, for selection, pending output arguments (the 08:19 question). They keep no outcome, selected signature or error, agreement, goal or blocker: a `Registration` blocker discloses a finding, and the limit explains the others.
+- A limited `GraphReport` keeps the site and owner of each root reached and nothing per root that could cite a finding. A limited `Report` keeps statistics only.
+- `ConversionReport` keeps no facts at a limit (ruling 18), unchanged. A fact with no consumer when the CLI, IDE or LSP first reads limited values may be dropped by a later change; keeping one needs a reader and an amendment of this ADR.
+
+## Consequences
+
+Metering does not move. The type changes what a run publishes, not what it spends: no `step`, `reserve` or `charge_key` changes, a limited run keeps its statistics, and the withheld issues that `analyze_generics` meters today stay metered. No cap moves, and any cap that appears to must stop the work (rule 11).
+
+The hand-kept guards go: every `publishes_nothing_at_limit`, `withhold_findings` and `withhold_judgments` in `src/`, `tests/m4_8_limit_readers.rs`, and the accessor lists, `UNNAMED` and payload destructures of `tests/support/limit.rs`. The `assert_*_limit` helpers shrink to asserting the variant, and their call sites stay. One test replaces the reader sweep: at every cap a source either gives the limited variant or finishes with the report the exact cap gives. That checks the claim that a finished run does not depend on where the budget fell.
+
+Debug output is not publication and may show anything. ri-qlh.9.1 (ordinary-call `NoMatch` and `Ambiguous`, a conversion use's `InsufficientContext`) and ri-qlh.9.2 (sweep gaps, `TypedReport::withhold_findings`) cannot occur once the reports that held them are gone from the limited variant. Both close with the implementation, not with this decision. If the implementation finds a finished report holding a part that reads `ResourceLimit` (a `RootReport` placeholder in `ownership/graph.rs` is the first candidate), that is a limit disguised as a finished value: it stops and reports the path.

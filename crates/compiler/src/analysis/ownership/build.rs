@@ -562,6 +562,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             scalar_copy_read: None,
             copied_origins: BTreeSet::new(),
             declared_shared_frame: false,
+            consumed_receiver: None,
             dispose: typed.dispose_role().map(|d| &d.id),
             return_contract,
             callable_frame: None,
@@ -6993,6 +6994,9 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 typed_origin: arrow.map(|arrow| arrow.site.node),
             }
         } else {
+            if invocation.consumed_receiver {
+                self.consumed_receiver = Some(node);
+            }
             PairCall::Once
         };
         let receiver = self.resolve_place(receiver, path)?;
@@ -7594,6 +7598,29 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         self.expression(*argument, Some(stage), transfer, depth + 1)
     }
 
+    fn wrapper_invokes_formal(&self, wrapper: &Declaration) -> bool {
+        let syntax = &self.module.syntax.nodes;
+        let [_, body] = syntax[wrapper.node].children.as_slice() else {
+            return false;
+        };
+        let [returned] = syntax[*body].children.as_slice() else {
+            return false;
+        };
+        let [invocation] = syntax[*returned].children.as_slice() else {
+            return false;
+        };
+        syntax[*body].kind == NodeKind::Block
+            && syntax[*returned].kind == NodeKind::Return
+            && syntax[*invocation].kind == NodeKind::Call
+            && matches!(syntax[*invocation].children.as_slice(), [receiver]
+                if syntax[*receiver].kind == NodeKind::ValueReference)
+            && self.fact(invocation).is_some_and(|fact| {
+                fact.callable
+                    .as_ref()
+                    .is_some_and(|callable| callable.invocation.is_some())
+            })
+    }
+
     /// A bounded call frame for a private once wrapper, closed by this actual
     /// call: `function f<F>(job: F): R where callableOnce(F, [], R) { return job(); }`
     /// called with a written pair arrow. The actual is formed into one stage,
@@ -7662,13 +7689,18 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             return Err(pending());
         }
         if lent {
-            // Any generic `&F` call reaches here. Find the wrapper in this
-            // module by identity and screen its `return name();` body before
-            // the keyed header lookup. Declarations are ordered by (start, kind).
             let declarations = &self.module.declarations;
+            let wrapper = call.declaration;
+            if declarations
+                .as_ptr_range()
+                .contains(&std::ptr::from_ref(wrapper))
+                && !self.wrapper_invokes_formal(wrapper)
+            {
+                return Err(pending());
+            }
             self.budget
                 .step((usize::BITS - declarations.len().leading_zeros() + 1) as usize)?;
-            let wrapper = declarations
+            declarations
                 .binary_search_by_key(&(call.callee.start, call.callee.kind), |d| {
                     (d.id.start, d.id.kind)
                 })
@@ -7676,17 +7708,6 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 .map(|index| &declarations[index])
                 .filter(|wrapper| std::ptr::eq(&wrapper.id, call.callee))
                 .ok_or_else(pending)?;
-            let returns_invocation = matches!(syntax[wrapper.node].children.as_slice(), [_, body]
-                if syntax[*body].kind == NodeKind::Block
-                    && matches!(syntax[*body].children.as_slice(), [returned]
-                        if syntax[*returned].kind == NodeKind::Return
-                            && matches!(syntax[*returned].children.as_slice(), [invocation]
-                                if syntax[*invocation].kind == NodeKind::Call
-                                    && matches!(syntax[*invocation].children.as_slice(), [receiver]
-                                        if syntax[*receiver].kind == NodeKind::ValueReference))));
-            if !returns_invocation {
-                return Err(pending());
-            }
         }
         self.budget.step(1 + self.module.key.path.len())?;
         if call.callee.module != self.module.key {

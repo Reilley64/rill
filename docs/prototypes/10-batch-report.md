@@ -21,7 +21,7 @@ The intended future run would use this directory as the working directory and `m
 
 The deliberately small application grammar is not CSV/JSON:
 
-- One nonempty UTF-8 label, exactly one ASCII TAB, then text accepted by strict `parseNumber<i32>`.
+- One nonempty UTF-8 label, exactly one ASCII TAB, then text accepted by strict `tryInto<i32>`.
 - Labels cannot contain TAB/CR/LF; quote characters have no escaping/quoting role. Other Unicode/control characters are ordinary data, not sanitized terminal output.
 - No trimming, comments, embedded newline escaping, extra fields or inferred numeric widths.
 - Accept LF and CRLF line endings, a final unterminated nonempty record, and an entirely empty file.
@@ -91,16 +91,16 @@ For a file containing `tea<TAB>nope`, the semantic chain is:
 
 ```text
 AppError.Rows { path }                 display: invalid records in <path>
-  origin: wrapping operator at main.rill:54
+  origin: wrapping operator at main.rill:55
 caused by RowError.Number { line }     display: invalid amount on line <line>
-  origin: wrapping operator at records.rill:53
+  origin: wrapping operator at records.rill:52
 caused by ParseError.InvalidSyntax     standard display text
-  origin: its original construction inside the parseNumber operation
+  origin: its original construction inside the `tryInto<i32>` operation
 ```
 
 These labels explain typed nodes, not reflected runtime output. formatError uses each supplied display implementation, preserves construction origins and renders the complete explicit cause chain. This example does not freeze exact separators, path/line/column presentation or standard ParseError text. The original ParseError source-map coordinates are deliberately symbolic; the example does not fabricate a location in an unimplemented library. parseRows' postfix ?, all's selected-failure forwarding, and run's loaded? add no locations.
 
-- parseNumber constructs the underlying error; the infix operator in parseLine adds RowError.Number.
+- `tryInto<i32>` constructs the underlying error; the infix operator in parseLine adds RowError.Number.
 - parseRows uses postfix ? inside the push argument, forwarding that envelope unchanged. On failure push is not called; temporary argument loans end before owned accumulated rows are disposed.
 - load adds AppError.Rows at its wrapping operator. Its path copy runs only on failure.
 - all selects one AppError failure without fabricating a union or adding an origin; it cancels/joins the other child as required.

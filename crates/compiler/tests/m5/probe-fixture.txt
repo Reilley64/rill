@@ -1,0 +1,17 @@
+=== moved-and-copied
+function moved(text: string): string {
+    let taken = text;
+    return taken;
+}
+
+function copied(count: i32): i32 {
+    let same = count;
+    return same + count;
+}
+=== reused-after-move
+function reused(flag: bool, text: string): string {
+    if (flag) { let taken = text; }
+    return text;
+}
+=== does-not-load
+function (

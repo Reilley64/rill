@@ -178,7 +178,7 @@ fn unsupported_result_joins_keep_parent_caps_and_blockers() {
         (
             IMPORTS,
             "enum Fake<T,E> { Ok(T), Err(E) } function joined(): [Fake<bool,i32>, bool] { return join([(): Fake<bool,i32> => Fake.Ok(true), () => false]); }\n",
-            428340,
+            427539,
             49094,
             12,
             0,
@@ -189,7 +189,7 @@ fn unsupported_result_joins_keep_parent_caps_and_blockers() {
         (
             BASE,
             "\nimport std::routine::join;\nfunction joined(): void {\n    join([() => Result.Ok(true), () => 29i32]);\n}\n",
-            486641,
+            485672,
             55411,
             12,
             0,

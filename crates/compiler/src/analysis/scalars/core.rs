@@ -415,6 +415,9 @@ impl<'r, 'g> Checker<'r, 'g> {
                 ty: None,
                 mutable: false,
                 boolean: None,
+                copy_of: CopySource::Unknown,
+                written: None,
+                initializer: None,
             });
         Ok(())
     }
@@ -508,6 +511,9 @@ impl<'r, 'g> Checker<'r, 'g> {
                                 ty: Some(ty),
                                 mutable: false,
                                 boolean: None,
+                                copy_of: CopySource::Unknown,
+                                written: None,
+                                initializer: None,
                             },
                         );
                     } else {

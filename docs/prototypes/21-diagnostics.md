@@ -38,7 +38,7 @@ Reports retain their original fictitious prefix, `file:///workspace/rill/prototy
 | `borrowed-spawn.rill` | R0302: owned spawn environment contains a borrow; later stop does not waive noBorrow |
 | `incomparable-overloads.rill` | R0303: different specific parameter positions, not a return/constraint tie-break |
 | `duplicate-body.rill` | R0304: renamed type parameter does not distinguish bodies, even with no calls |
-| `protected-overlap.rill` | R0500: genuine guard release cannot be displaced through nested Payload ownership |
+| `protected-overlap.rill` | R0500: genuine guard release cannot be displaced through nested Payload ownership. The implementation parameter is `value`: `guard` is a keyword, so the earlier spelling stopped at a syntax error before reaching R0500. |
 
 The later confirmed ri-1wl (comment 6886119679) requires implement / implement<T> name for family bodies. The 3 affected rejection files use that syntax. Standalone functions and declarations without bodies retain function. The ordinary nested-payload orphan permission remains relevant to protected-overlap; conversion-specific endpoint permission does not replace it.
 
