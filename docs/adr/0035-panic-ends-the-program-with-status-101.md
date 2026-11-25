@@ -7,7 +7,7 @@
 - **Normal completion.** `log` writes to standard output. When startup completes normally the program exits 0, and `rill run` returns the program's status as its own (charting Q11; grilling Q19).
 - **Cleanup on normal completion.** When startup completes normally, the startup scope's owned values are cleaned up before exit (charting Q12; statechart 1 rule R2c).
 - **Panic.** A panic writes exactly `panic: <message>` and a newline to standard error, with no trace in slice 1, and ends the program with status 101 (grilling Q22 and Q10). A panic runs no cleanup (ADR 0005; charting Q12; rule R8).
-- **Distinct from the driver.** The panic status differs from the driver's statuses (charting Q11). [ADR 0016](0016-structured-diagnostics.md) lists them as 0, 1, 2, 3 and 130, so 101 is free. A program the compiler cannot yet compile fails with driver status 1 and no executable (Q8).
+- **Distinct from the driver.** The panic status differs from the driver's statuses (charting Q11). The [driver status table](../diagnostic-contracts.md#driver-status), which [ADR 0016](0016-structured-diagnostics.md) records, lists them as 0, 1, 2, 3 and 130, so 101 is free. A program the compiler cannot yet compile fails with driver status 1 and no executable (Q8).
 - **Failing writes.** A failed `log` write, such as standard output closed, is a panic (Q10). A non-UTF-8 argument is a panic raised by the program's own `guard`, not by the runtime (grilling Q14), and ends with the same status.
 - **Panics in cleanup.** A panic inside a `dispose` overload, or during exit cleanup, ends the program like any other panic (statechart decision S9).
 
@@ -15,7 +15,7 @@
 
 - A test can tell a Rill panic (101, one `panic: ` line on standard error) from a driver failure (1, 2, 3) and from a normal exit (0) by status alone.
 - ADR 0005's "trace" is not produced in slice 1. This ADR does not repeal it; it records that slice 1 omits it.
-- ADR 0016 says raw application exits are not normalized into driver statuses. Passing the program's status through `rill run` agrees: the driver reports what the program returned and does not map it.
+- The [diagnostic contract](../diagnostic-contracts.md#driver-status) says raw application exits are not normalized into driver statuses. Passing the program's status through `rill run` agrees: the driver reports what the program returned and does not map it.
 - Acceptance runs the real `rill` binary on four platforms for: a name argument, no argument, a non-UTF-8 argument (panic, 101), and standard output closed (panic, 101). The checking allocator ([ADR 0032](0032-generated-code-allocates-through-three-runtime-functions.md)) shows zero live allocations after a normal exit and a non-zero count after a panic.
 
 ## Considered options
