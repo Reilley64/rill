@@ -197,3 +197,46 @@ fn a_program_that_calls_inputs_and_args_is_typed_checked() {
         },
     );
 }
+
+#[test]
+fn the_env_bridges_are_screened_before_they_are_charged_and_charged_by_key() {
+    installed(
+        "env::the_env_bridges_are_screened_before_they_are_charged_and_charged_by_key",
+        |request| {
+            fs::write(&request.entry, IMPORT).unwrap();
+            for request in modes(&request) {
+                let test_mode = request.test_mode;
+                let graph = loader::load_installed(request).unwrap();
+                let typed = analyze_typed(&graph, AnalysisLimits::default());
+                assert_eq!(typed.completion(), TypedCompletion::Checked, "{test_mode}");
+                let used = typed.statistics();
+                crate::limit::assert_triple(
+                    (used.work, used.entries, used.max_depth),
+                    (444_459, 48_983, 12),
+                    test_mode,
+                );
+                let exact = AnalysisLimits {
+                    max_work: used.work,
+                    max_entries: used.entries,
+                    max_depth: used.max_depth,
+                };
+                let replay = analyze_typed(&graph, exact);
+                assert_eq!(replay.completion(), TypedCompletion::Checked, "{test_mode}");
+                for short in [
+                    AnalysisLimits {
+                        max_work: exact.max_work - 1,
+                        ..exact
+                    },
+                    AnalysisLimits {
+                        max_entries: exact.max_entries - 1,
+                        ..exact
+                    },
+                ] {
+                    let limited = analyze_typed(&graph, short);
+                    crate::limit::assert_typed_limit(&limited);
+                    assert!(limited.receipt().is_none(), "{test_mode}");
+                }
+            }
+        },
+    );
+}

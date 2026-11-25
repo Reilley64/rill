@@ -375,6 +375,7 @@ impl<'g> PrimitiveCore<'g> {
             ] {
                 if let Some(bridge) = check_env_binding(inventory, module, name, arity, budget)? {
                     budget.reserve(1)?;
+                    crate::loader::keyed::charge(&bridge.id.module, self.bridges.len(), budget)?;
                     self.bridges.insert(&bridge.id, operation);
                 }
             }
@@ -663,14 +664,17 @@ fn check_env_binding<'g>(
     budget: &mut Budget,
 ) -> Work<Option<&'g Declaration>> {
     for declaration in &module.declarations {
+        if declaration.public
+            || declaration.scope.is_some()
+            || declaration.id.kind != DeclarationKind::Family
+            || declaration.name.as_deref() != Some(name)
+        {
+            continue;
+        }
         budget.step(1)?;
-        if !declaration.public
-            && declaration.scope.is_none()
-            && declaration.id.kind == DeclarationKind::Family
-            && declaration.name.as_deref() == Some(name)
-            && inventory
-                .captured_family(&declaration.id)
-                .is_some_and(|f| f.implementations.is_empty())
+        if inventory
+            .captured_family(&declaration.id)
+            .is_some_and(|f| f.implementations.is_empty())
             && let Some(signature) = family_header(inventory, declaration, budget)?
             && let DeclarationShape::Function { parameters, .. } = &signature.shape
             && signature.binders.is_empty()
