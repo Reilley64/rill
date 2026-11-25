@@ -65,11 +65,12 @@ These are task groups, not alternate Rust compiler profiles. Invoke each task as
 
 A distribution that claims language server support must also pass `test:lsp-client` for its advertised capabilities. The general release check does not require a language server.
 | `plan:llvm` | Inspect the optional LLVM route and prerequisites. A plan is not installation evidence. |
-| `setup:llvm` | Explicit opt-in LLVM provisioning, separate from default setup. |
+| `setup:llvm` | Explicit opt-in download of the trimmed LLVM archive for this host from the `Reilley64/rill` release, by pinned checksum. Separate from default setup. |
+| `build:llvm` | Build this host's trimmed LLVM archive from pinned source. The `Release: Trimmed LLVM archives` workflow runs it; run it locally only for a reproduction. |
 | `test:llvm` | LLVM C-API compile/link smoke only, not a Rill backend or inkwell integration test. |
 | `experiment:*` | Explicit entry points for existing reproductions, with their original scope and prerequisites. |
 
-`Test: Scaffold checks` configures the LLVM-free checks on four GitHub-hosted OS/architecture profiles. `Test: Native acceptance` runs for native-impacting changes and manual dispatch. It asserts that `test:runtime` exits 2 with the scaffold message because native acceptance is absent; that is not a passing native profile. A manual run also asserts that `verify:release` passes the repository checks and then stops at the same stub for `build`; replace both assertions when the tasks exist. Neither workflow installs LLVM or publishes releases.
+`Test: Scaffold checks` configures the LLVM-free checks on four GitHub-hosted OS/architecture profiles. `Test: Native acceptance` runs for native-impacting changes and manual dispatch. It asserts that `test:runtime` exits 2 with the scaffold message because native acceptance is absent; that is not a passing native profile. A manual run also asserts that `verify:release` passes the repository checks and then stops at the same stub for `build`; replace both assertions when the tasks exist. Neither workflow installs LLVM or publishes releases. `Release: Trimmed LLVM archives` runs only when dispatched by hand; it builds the four hosts' archives and uploads them as workflow artifacts, and a maintainer attaches them to the release.
 
 Both workflows use explicit runner-local Cargo and Rustup homes before mise installs tools. Nested mise tasks then retain the same Rustup provider, instead of losing the runner's external provider during tool lookup. Workflow names and YAML layout follow the [GitHub automation guide](../.github/AGENTS.md).
 
@@ -101,7 +102,7 @@ mise does not provide an operating-system SDK, target sysroot or all native depe
 
 - On both macOS architectures, install and select Apple Command Line Tools or Xcode with a usable macOS SDK and platform linker. Resolve the SDK through `xcrun`; licenses and privileged OS setup are external prerequisites.
 - On each Linux architecture, provide the host C/C++ toolchain as needed, a native linker, libc headers, startup objects and the runtime/development libraries required by the selected tools. No universal Linux distribution or musl compatibility has been validated.
-- A source LLVM build needs a C++17-capable bootstrap compiler, CMake, Ninja, Python and the native SDK or sysroot. Its CPU, memory, disk and build-time costs are separate from the fast developer path.
+- `build:llvm` needs a C++17-capable compiler and the native SDK or sysroot, plus the pinned CMake, Ninja and Python that mise provides. Its CPU, disk and build-time costs (see the LLVM profile below) are separate from the fast developer path.
 - Tool downloads need network access and a working CA trust configuration. OS prerequisite installation is explicit; tasks must not silently acquire privileges or use an undeclared package manager.
 
 Experiment-only prerequisites can include Rosetta, Docker, Wasmtime, Binaryen or Node. They belong to their explicit tasks and runbooks, not the default checks. The unchanged historical backend runner also requires `brew info --json=v2 llvm` to record Homebrew metadata, even when the task passes the pinned prefix for every LLVM executable. That reproduction requires an existing matching historical environment; its task does not install Homebrew or use Homebrew LLVM as a fallback. It is not a portable fresh-setup test. A Wasm backend and `wasm-ld` do not supply a WASI SDK, and no SDK or target acceptance follows from setup success.
@@ -115,25 +116,21 @@ mise run plan:llvm
 mise run setup:llvm
 ```
 
-The second command selects the binary route on the three hosts with published bundles. On native macOS x86-64, source compilation requires an explicit opt-in and bootstrap/SDK paths instead:
+`setup:llvm` downloads one archive for the host from the `llvm-23.1.5-1` release on `Reilley64/rill`, checks its size limit and SHA-256 against the pins in `tools/llvm/common.py`, extracts it safely and inspects the result. The prefix is `target/toolchains/llvm-23.1.5/<host>`, where host is `linux-x64`, `linux-arm64`, `macos-arm64` or `macos-x64`. It needs about 2 GiB of free disk. The script rejects insufficient disk rather than substituting another route.
 
-```sh
-mise run setup:llvm -- --build-source \
-  --sdk "$(xcrun --show-sdk-path)" \
-  --cc "$(xcrun --find clang)" --cxx "$(xcrun --find clang++)"
-```
+The release does not exist yet and the pins are unset. Until a maintainer publishes it and the pins land, `setup:llvm` stops before any download and names the unset pin.
 
-Provisioning requires at least 48 GiB free disk for bundles or 80 GiB for source. The source route requires at least 8 GiB RAM, 4 GiB per build job, and defaults to two jobs with one linker job. The script rejects insufficient resources rather than substituting another route. These budgets exceed typical small hosted-runner capacity.
-
-After provisioning, use `mise run test:llvm` on Linux. On macOS, pass the selected SDK explicitly:
+After provisioning, use `mise run test:llvm` on Linux. The smoke builds with the host `/usr/bin/cc` and `/usr/bin/c++`, because the prefix holds no compiler. On macOS, pass the selected SDK explicitly:
 
 ```sh
 mise run test:llvm -- --sdk "$(xcrun --show-sdk-path)"
 ```
 
-The selected route preserves a full, explicit LLVM prefix with headers, libraries and tools. It uses checksum-pinned upstream LLVM 23.1.5 archives for Linux x86-64, Linux AArch64 and macOS AArch64. Upstream supplies no macOS x86-64 archive for this release, so that host uses a pinned source build. There is no implicit Homebrew prefix, driver-only substitute, shared-LLVM fallback or LLVM downgrade.
+The archive is a trimmed LLVM: one backend for the host architecture (`X86` or `AArch64`), no LLVM projects such as clang or lld, static libraries, headers and `llvm-config`. Nothing else is built, and no optional native library is linked (zlib, zstd, libxml2, libedit and libffi are off). `llvm-config --link-static --system-libs` reports `-lrt -ldl -lm` on Linux and `-lm` on macOS. The `Release: Trimmed LLVM archives` workflow builds it on `ubuntu-24.04`, `ubuntu-24.04-arm`, `macos-15` and `macos-15-intel` from the checksum-pinned `llvm-project-23.1.5.src.tar.xz`, with the flags in `tools/llvm/release.py`. Nothing builds LLVM on push or pull request.
 
-Provisioning validation has not passed on these hosts. Artifact publication and source recipe inspection do not prove usable static libraries, coherent prefixes or native library closure. `test:llvm` is a C-API smoke boundary only. It does not establish the eventual Rust binding integration, complete backend targets, required native or Wasm lowering, or any Rill execution.
+Measured on standard GitHub-hosted runners of this repository: a build takes 32 to 36 minutes on `ubuntu-24.04`, `ubuntu-24.04-arm` and `macos-15` and 71 minutes on `macos-15-intel`. The `.tar.xz` archives are 40 to 52 MiB. The installed prefix is 206 to 215 MiB on macOS (the prototype measured 292 to 299 MiB on Linux). The build directory, source and prefix together take 2.3 to 2.4 GiB, and free disk fell by 2.6 to 2.9 GiB over a run; no sample was taken during the build, so treat 3 GiB as the budget for a local `build:llvm`. There is no implicit Homebrew prefix, driver-only substitute, shared-LLVM fallback or LLVM downgrade.
+
+Archive installation does not prove an inkwell build. Using the prefix from Rust needs `LLVM_SYS_231_PREFIX` set to it, `LLVM_SYS_231_STRICT_VERSIONING=1`, inkwell `=0.11.0` with `llvm23-1-force-static` and the native `target-*` feature rather than `target-all`. `test:llvm` is a C-API smoke boundary only. It does not establish the eventual Rust binding integration, WebAssembly or RISC-V backends, or any Rill execution. Because the prefix has no `clang`, `lld` or `wasm-ld`, `experiment:backend` cannot use it.
 
 A usable route still needs per-host evidence for exact versions and prefixes, requested tools and target backends, static LLVM linkage, remaining loader dependencies and SDK/sysroot compatibility. Static LLVM linkage does not imply a fully static executable. Existing backend experiments and the production acceptance gates retain their separate obligations. The [LLVM provisioning research](research/0046-llvm23-provisioning-options.md) records artifact and recipe evidence, not a successful installation.
 
