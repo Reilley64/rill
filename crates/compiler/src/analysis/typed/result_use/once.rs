@@ -201,6 +201,13 @@ impl<'a, 'g> Check<'a, 'g> {
         {
             return Ok(None);
         }
+        if self
+            .facts(syntax[*argument].children[0])?
+            .and_then(|fact| fact.callable.as_ref()?.arrow.as_deref())
+            .is_some_and(|arrow| arrow.captures.iter().any(|c| c.form != CaptureForm::Value))
+        {
+            return Ok(None);
+        }
         // Screen each staged residence before summarizing the wrapper body.
         for state in states {
             if self.lent_descriptor(state, *argument)?.is_none() {
