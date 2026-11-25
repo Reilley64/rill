@@ -88,7 +88,7 @@ fn capture(root: &Path, mode: bool, source: &str) -> Graph {
     fs::write(&entry, source).unwrap();
     load_installed(InstalledRequest {
         entry,
-        target: "aarch64-apple-darwin".into(),
+        target: env!("RILL_ANALYSIS_TARGET").into(),
         options: BTreeMap::new(),
         test_mode: mode,
         limits: Limits::default(),
@@ -918,7 +918,7 @@ fn authority(root: &Path, mode: bool) {
             copy: selector("copy"),
             dispose: selector("dispose"),
         },
-        target: "aarch64-apple-darwin".into(),
+        target: env!("RILL_ANALYSIS_TARGET").into(),
         options: BTreeMap::new(),
         test_mode: mode,
         limits: Limits::default(),

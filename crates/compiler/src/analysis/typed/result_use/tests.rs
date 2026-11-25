@@ -33,7 +33,7 @@ fn load_test_graph(tag: &str, source: &str) -> loader::Graph {
             copy: select("copy"),
             dispose: select("dispose"),
         },
-        target: "aarch64-apple-darwin".into(),
+        target: env!("RILL_ANALYSIS_TARGET").into(),
         options: Default::default(),
         test_mode: false,
         limits: Limits::default(),

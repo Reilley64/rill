@@ -362,7 +362,7 @@ fn installed_routine_pin_and_origin_are_independent_of_spelling() {
                 assert!(report.routine_role().is_none() && report.receipt().is_none());
                 for unsupported in [
                     InstalledRequest {
-                        target: "x86_64-apple-darwin".into(),
+                        target: "x86_64-pc-windows-msvc".into(),
                         ..request.clone()
                     },
                     InstalledRequest {

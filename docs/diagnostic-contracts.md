@@ -64,6 +64,10 @@ Run's structured scope ends at its build/driver phase; application stderr/Err/pa
 
 Raw application exits/signals, OOM or abrupt host termination are not normalized into guaranteed driver statuses. No completion record is guaranteed after fatal termination. A controlled incomplete/canceled check is not successful validation. Empty checked test suites report zero discovered/evaluated tests, not invented passes.
 
+### Compilable programs
+
+`build` and `run` compile a program only when it is a compilable program: its entry startup and every body reachable from it are `Checked`, although the whole graph has no complete state. The compiler decides this once (`compiler::analysis::compilable::compilable_program`); neither the backend nor the CLI decides it. A valid program that is not compilable fails with driver status 1 and R0605, which names the first blocking span. R0605 is not a source error and is never reported for a finding or for an exhausted resource limit: a source finding keeps its own code, and a resource limit is reported as a limit. `check` reports R0605 for the same programs, without generating code. A program whose typed analysis cannot finish also reports R0605, at the first site that analysis publishes (`ProgramAnalysis::compilability` makes both decisions). A resource limit during `check`, `build` or `run` exits with status 3, names the exhausted limit and says analysis is incomplete: it is neither R0605 nor a pass.
+
 ### Version 1
 
 [The JSON Schema](diagnostic-report.schema.json) defines typed JSONL records: `diagnostic`, `expectationResult`, `toolFailure`, `summary`. Each has schemaVersion, a run id, a decimal-string sequence starting at 1 and increasing by one, and kind. Context/snapshot data associates facts with their input. Byte offsets/counters are canonical decimal strings, not lossy floats. Optional decoded line/column coordinates are likewise decimal strings; LSP ranges are separately encoded, not copied from these human coordinates. Previews are typed descriptive strings, not JSON serialization/reflection of program objects.

@@ -1,5 +1,4 @@
 //! A private callable requirement does not check an actual environment by itself.
-#![cfg(all(target_arch = "aarch64", target_os = "macos"))]
 #[path = "support/limit.rs"]
 mod limit;
 
@@ -34,7 +33,11 @@ const SHARED_WRAPPER: &str =
     "function run<F>(job: &F): bool where callable(F, [], bool) { return job(); }\n";
 const SHARED_CALLER: &str =
     "function caller(flag: bool): bool { let f: () => bool = () => flag; return run(&f); }\n";
-const ARCHIVE: &str = "lib/rill/runtime/aarch64-apple-darwin/librill_ownership.rlib";
+const ARCHIVE: &str = concat!(
+    "lib/rill/runtime/",
+    env!("RILL_ANALYSIS_TARGET"),
+    "/librill_ownership.rlib"
+);
 
 #[test]
 fn private_once_checks_the_actual_shared_pair() {
@@ -107,15 +110,6 @@ fn check_sources(entry: &Path) {
     let declared_only =
         "function run<F>(job: F): bool where callable(F, [], bool) { return job(); }\n";
     let output = "function invoke<F>(job: F): Result<bool, i32> where callableOnce(F, [], Result<bool, i32>) { return job(); }\nfunction caller(seed: bool): void { invoke(() => Result.Ok(seed)); }\n";
-    // The read-only twin: `run(&f)` lends the actual descriptor; it never moves it.
-    // The `declared-shared-only`, `-output-discard`, `shared-dead-only`,
-    // `-public`, `-grouped`, `-scoped` and `-loop` caps are those measured at
-    // 9b93a660, before the lent route. Its screens reject them without charge.
-    // A formal actual (+1 work) and a borrowed Result capture (+16 work, +3
-    // entries) are rejected after the lent residence is read, and
-    // `shared-unclosed` (+464 work, +14 entries) after the wrapper's other
-    // caller closes. Rule 1 exception of 2026-11-23 (ri-2s0.10): the parent
-    // caps 323,599, 325,321/47,868 and 325,701/47,779 give `ResourceLimit`.
     let shared = SHARED_WRAPPER;
     let shared_actual = format!("{shared}{SHARED_CALLER}");
     let shared_second = SHARED_CALLER
@@ -280,7 +274,7 @@ fn check_sources(entry: &Path) {
                 "{shared}function caller(flag: bool): bool {{ let res: Result<bool, i32> = Result.Ok(flag); let f: () => bool = () => isOk(&res); return run(&f); }}\n"
             ),
             Incomplete,
-            Some((324528, 47871, 12)),
+            Some((324513, 47868, 12)),
         ),
         (
             "shared-formal-actual",
@@ -309,7 +303,7 @@ fn check_sources(entry: &Path) {
         for test_mode in [false, true] {
             let graph = load_installed(InstalledRequest {
                 entry: entry.into(),
-                target: "aarch64-apple-darwin".into(),
+                target: env!("RILL_ANALYSIS_TARGET").into(),
                 test_mode,
                 options: Default::default(),
                 limits: Default::default(),

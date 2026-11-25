@@ -3,6 +3,7 @@ use std::path::Path;
 use std::process::{Command, Output};
 
 const OPERATIONS: [&str; 4] = ["build", "check", "run", "test"];
+const UNAVAILABLE: [&str; 3] = ["build", "run", "test"];
 
 fn rill(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_rill"))
@@ -41,9 +42,10 @@ fn help_is_real_and_describes_scaffold_status() {
         for command in ["build", "check", "run", "test", "lsp"] {
             assert!(help.contains(command), "{help}");
         }
-        assert!(help.contains("unavailable commands exit 2"));
-        assert!(help.contains("not\na compiler check/build/test outcome"));
-        assert!(help.contains("Entry paths are not opened"));
+        assert!(help.contains("unavailable\ncommands exit 2"));
+        assert!(help.contains("limitation, not a compiler check/build/test outcome"));
+        assert!(help.contains("do not open\nentry paths"));
+        assert!(help.contains("check exits 0 for a compilable program, 1 for a"));
     }
 }
 
@@ -62,7 +64,7 @@ fn version_uses_the_package_version() {
 
 #[test]
 fn every_unavailable_command_fails_without_fake_output() {
-    for command in ["build", "check", "run", "test", "lsp"] {
+    for command in ["build", "run", "test", "lsp"] {
         assert_unavailable(&rill(&[command]), command);
     }
 }
@@ -76,7 +78,7 @@ fn entry_paths_are_not_resolved_or_required_to_be_readable_sources() {
     // A missing path, a directory, and Rust test source all reach the same
     // unavailability error: none is loaded or validated as a Rill source file.
     let test_source = crate_dir.join("tests/cli.rs");
-    for command in OPERATIONS {
+    for command in UNAVAILABLE {
         for entry in [missing.as_path(), crate_dir, test_source.as_path()] {
             let output = Command::new(env!("CARGO_BIN_EXE_rill"))
                 .arg(command)
@@ -95,7 +97,7 @@ fn source_and_lsp_input_are_not_read() {
     use std::thread;
     use std::time::{Duration, Instant};
 
-    for command in ["build", "check", "run", "test", "lsp"] {
+    for command in ["build", "run", "test", "lsp"] {
         let mut process = Command::new(env!("CARGO_BIN_EXE_rill"));
         process.arg(command);
         if command != "lsp" {
@@ -120,6 +122,11 @@ fn source_and_lsp_input_are_not_read() {
         }
         assert_unavailable(&child.wait_with_output().expect("collect output"), command);
     }
+}
+
+#[test]
+fn check_needs_an_entry_path() {
+    assert_failure(&rill(&["check"]), "check expects an entry path");
 }
 
 #[test]

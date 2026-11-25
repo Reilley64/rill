@@ -8,6 +8,7 @@ use crate::source::Span;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
+pub mod compilable;
 pub mod conversions;
 pub mod declarations;
 pub mod ordinary;

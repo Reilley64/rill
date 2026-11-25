@@ -1,5 +1,4 @@
 //! Exercise the same native archive used by installed capture, without Rill lowering.
-#![cfg(all(target_arch = "aarch64", target_os = "macos"))]
 
 use std::path::Path;
 use std::{fs, process::Command};
@@ -14,7 +13,13 @@ fn delivered_native_ownership_actions() {
     let executable = directory.join("ownership-tests");
     let tests = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../runtime/ownership/tests.rs");
     let compile = Command::new(env!("RILL_OWNERSHIP_RUSTC"))
-        .args(["--edition=2024", "--test", "--extern"])
+        .args([
+            "--edition=2024",
+            "--test",
+            "--target",
+            env!("RILL_ANALYSIS_TARGET"),
+            "--extern",
+        ])
         .arg(format!("rill_ownership={artifact}"))
         .arg(tests)
         .arg("-o")

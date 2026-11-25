@@ -108,8 +108,11 @@ fn wrong_text_wrapper_or_missing_guard_archive_cannot_publish_mir() {
         |request| {
             let prefix = request.entry.parent().unwrap().parent().unwrap();
             let core = prefix.join("lib/rill/std/core.rill");
-            let archive =
-                prefix.join("lib/rill/runtime/aarch64-apple-darwin/librill_ownership.rlib");
+            let archive = prefix.join(concat!(
+                "lib/rill/runtime/",
+                env!("RILL_ANALYSIS_TARGET"),
+                "/librill_ownership.rlib"
+            ));
             let saved = archive.with_extension("saved");
             let original = fs::read_to_string(&core).unwrap();
             let wrong = original.replace("{ disposeText(value); }", "{}");

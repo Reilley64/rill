@@ -16,6 +16,8 @@ use std::{
 mod cancellation;
 #[path = "m5/captures.rs"]
 mod captures;
+#[path = "m5/compilable.rs"]
+mod compilable;
 #[path = "m5/disposers.rs"]
 mod disposers;
 #[path = "m5/field_routes.rs"]
@@ -944,7 +946,7 @@ fn path_drops<'g>(mir: &Mir<'g>, mut block: usize) -> Vec<Obligation<'g>> {
 }
 
 fn installed(test: &str, check: impl FnOnce(InstalledRequest)) {
-    let target = "aarch64-apple-darwin";
+    let target = env!("RILL_ANALYSIS_TARGET");
     if let Some(root) = std::env::var_os("RILL_M5_PROBE_ROOT") {
         check(InstalledRequest {
             entry: PathBuf::from(root).join("app/main.rill"),
