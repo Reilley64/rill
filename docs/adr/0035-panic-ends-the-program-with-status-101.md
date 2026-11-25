@@ -1,6 +1,6 @@
 # A panic writes one line to standard error and ends the program with status 101
 
-**Status:** draft for owner approval (charting decisions Q11 and Q12, 2026-11-24; Hello World grilling decisions Q10 and Q22, 2026-11-25; the owner decided Q10 that each ABI decision is recorded as an ADR). [ADR 0005](0005-panics-end-the-program-without-unwinding.md) says a panic ends the whole program with its message and trace and unwinds nothing. It names no output stream, no exit status and no format. Slice 1 runs a real program, so those become observable.
+**Status:** accepted, 2026-11-25 (owner decision). Drafted from charting decisions Q11 and Q12, 2026-11-24; Hello World grilling decisions Q10 and Q22, 2026-11-25; the owner decided Q10 that each ABI decision is recorded as an ADR. [ADR 0005](0005-panics-end-the-program-without-unwinding.md) says a panic ends the whole program with its message and trace and unwinds nothing. It names no output stream, no exit status and no format. Slice 1 runs a real program, so those become observable.
 
 ## Decision
 

@@ -1,6 +1,6 @@
 # The runtime owns `main` and runs startup on a managed entry stack
 
-**Status:** draft for owner approval (Hello World grilling decisions Q35 and Q9, 2026-11-25; the owner decided Q10 that each ABI decision is recorded as an ADR). [ADR 0014](0014-bounded-stacks-proper-tail-calls-and-backend-gates.md) says entry execution uses a managed, fixed 1 MiB region rather than the OS main-thread stack. [ADR 0019](0019-owned-startup-environment-and-arguments.md) says arguments and the environment are captured at a controlled point before Rill code runs. Nothing named who owns the process entry point or the order of these steps. **ADR 0014 stands; this ADR adds no deviation.**
+**Status:** accepted, 2026-11-25 (owner decision). Drafted from Hello World grilling decisions Q35 and Q9, 2026-11-25; the owner decided Q10 that each ABI decision is recorded as an ADR. [ADR 0014](0014-bounded-stacks-proper-tail-calls-and-backend-gates.md) says entry execution uses a managed, fixed 1 MiB region rather than the OS main-thread stack. [ADR 0019](0019-owned-startup-environment-and-arguments.md) says arguments and the environment are captured at a controlled point before Rill code runs. Nothing named who owns the process entry point or the order of these steps. **ADR 0014 stands; this ADR adds no deviation.**
 
 ## Decision
 
