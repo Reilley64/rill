@@ -158,6 +158,58 @@ fn assert_unsupported_shape(output: &Output) {
     assert!(report.contains("a - b"), "{report}");
 }
 
+fn assert_checked_hello(output: &Output) {
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(output));
+    assert_eq!(output.stdout, HELLO_OUTPUT);
+    assert_eq!(stderr(output), "live allocations: 0\n");
+}
+
+#[test]
+fn run_with_check_allocations_reports_zero_live_allocations() {
+    let workspace = Workspace::new("check-run");
+    let entry = workspace.entry("hello-world.rill", HELLO);
+    let before = workspace.files();
+    assert_checked_hello(&workspace.rill(&[
+        "run",
+        "--check-allocations",
+        &entry,
+        "an",
+        "argument",
+    ]));
+    assert_eq!(workspace.files(), before);
+    workspace.assert_no_scratch();
+}
+
+#[test]
+fn build_with_check_allocations_makes_a_program_that_reports_zero() {
+    let workspace = Workspace::new("check-build");
+    let entry = workspace.entry("hello-world.rill", HELLO);
+    let output = workspace.rill(&["build", "--check-allocations", &entry, "-o", "app/checked"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    assert!(
+        output.stdout.is_empty() && output.stderr.is_empty(),
+        "{output:?}"
+    );
+    assert_checked_hello(&workspace.command(&workspace.work.join("app/checked"), &[], None));
+    let plain = workspace.rill(&["build", &entry, "-o", "app/plain"]);
+    assert_eq!(plain.status.code(), Some(0), "{}", stderr(&plain));
+    assert_hello(&workspace.command(&workspace.work.join("app/plain"), &[], None));
+}
+
+#[test]
+fn check_allocations_is_in_no_help_text() {
+    let workspace = Workspace::new("check-help");
+    for args in [&["--help"][..], &["build", "--help"], &["run", "--help"]] {
+        let output = workspace.rill(args);
+        let text = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            stderr(&output)
+        );
+        assert!(!text.contains("check-allocations"), "{args:?}: {text}");
+    }
+}
+
 const UNSUPPORTED: &str = "function ready(flag: bool): bool { return flag; }\nfunction minus(a: i32, b: i32): i32 { return a - b; }\nlet ok = ready(true);\nlet n = minus(3i32, 1i32);\n";
 
 #[test]
@@ -242,9 +294,11 @@ fn a_bad_invocation_exits_two_and_builds_nothing() {
     let entry = workspace.entry("hello-world.rill", HELLO);
     let before = workspace.files();
     let absent = workspace.work.join("absent.rill");
-    let invocations: [&[&str]; 8] = [
+    let invocations: [&[&str]; 10] = [
         &["build"],
         &["run"],
+        &["build", "--check-allocations"],
+        &["run", "--check-allocations", "--bogus"],
         &["build", "--bogus"],
         &["run", "--bogus"],
         &["build", &entry, "--bogus"],

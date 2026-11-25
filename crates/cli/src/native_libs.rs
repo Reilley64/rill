@@ -1,5 +1,5 @@
 #[cfg(target_os = "macos")]
-pub const NATIVE_LIBS: &[&str] = &["-lSystem", "-lc", "-lm"];
+pub const NATIVE_LIBS: &[&str] = &["-liconv", "-lSystem", "-lc", "-lm"];
 
 #[cfg(target_os = "linux")]
 pub const NATIVE_LIBS: &[&str] = &[

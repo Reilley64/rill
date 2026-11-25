@@ -32,11 +32,19 @@ The ri-qlh record names no rejected alternative for Q35 or Q9. These are what th
 - **Running startup on the OS main-thread stack for slice 1.** ADR 0014 says entry execution is not an inherited OS stack, and Q9 declines a deviation.
 - **A new thread for startup.** Q35 describes a switch on the same thread and a switch back, and no thread.
 
+## Built in slice 1
+
+Closed by ri-qlh.22.9; planner rulings, not owner decisions ([`runtime/native`](../../runtime/native/src/entry_stack.rs), [`runtime/README.md`](../../runtime/README.md)).
+
+- **Reserving the region.** `mmap` maps one anonymous private region of 1 MiB of usable bytes plus one page, and `mprotect` makes the lowest page `PROT_NONE`. The guard sits below the usable bytes and outside them, as ADR 0014 requires. The page size comes from `sysconf(_SC_PAGESIZE)`, not a constant, because macOS on arm64 has 16 KiB pages. The same code runs on Linux and macOS through the `libc` crate.
+- **Switching.** A small `core::arch::asm!` trampoline for `x86_64` and `aarch64` saves the stack pointer in a callee-saved register (`r12`, `x20`), sets it to the top of the usable bytes (page aligned, so 16-byte aligned for both ABIs), calls a function that calls `rill_startup` then `rill_startup_cleanup`, and restores the stack pointer. No stack-switching crate is used. `main` then unmaps the region and returns 0.
+- **Panic.** A panic on the entry stack ends the process at once with status 101 and does not switch back ([ADR 0035](0035-panic-ends-the-program-with-status-101.md)).
+- **Test support.** `rill_rt_entry_stack_region` reports the usable bounds, which are 0 outside the region's lifetime. The harness compares a local's address and reads the byte just below the region, which ends the process by `SIGSEGV` or `SIGBUS`.
+
 ## Open
 
 The owner did not decide these. Nothing above decides them.
 
-- How the runtime reserves the region and switches to it on each platform, and whether the guard sits below the usable bytes only (ADR 0014 puts guards outside usable capacity).
 - What happens in slice 1 when startup overruns the 1 MiB. The overflow report arrives in slice 3, so the behavior until then, such as the guard page's fault, is unspecified.
 - The C names and signatures of the startup and cleanup functions. The runtime documents its symbols.
 - Whether the arguments are captured as owned bytes or as borrowed `argv` storage, and how the environment is ordered and validated before `std::env` sees it (ADR 0019 sorts and validates in the library).

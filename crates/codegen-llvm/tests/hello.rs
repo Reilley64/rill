@@ -88,9 +88,9 @@ fn literals_keep_their_decoded_bytes_in_order() {
 }
 
 #[test]
-fn the_object_exports_the_two_startup_symbols_and_nothing_else() {
+fn the_object_exports_the_startup_symbols_and_the_allocation_flag_and_nothing_else() {
     let Some(built) = support::emit(
-        "the_object_exports_the_two_startup_symbols_and_nothing_else",
+        "the_object_exports_the_startup_symbols_and_the_allocation_flag_and_nothing_else",
         "import std::log;\nlog(\"hello world\");\n",
     ) else {
         return;
@@ -98,7 +98,14 @@ fn the_object_exports_the_two_startup_symbols_and_nothing_else() {
     assert_eq!(built.error, None);
     let mut defined = defined_symbols(&built.object());
     defined.sort();
-    assert_eq!(defined, ["rill_startup", "rill_startup_cleanup"]);
+    assert_eq!(
+        defined,
+        [
+            "rill_check_allocations",
+            "rill_startup",
+            "rill_startup_cleanup"
+        ]
+    );
 }
 
 #[test]

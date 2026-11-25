@@ -23,6 +23,7 @@ use std::path::Path;
 
 const STARTUP: &str = "rill_startup";
 const STARTUP_CLEANUP: &str = "rill_startup_cleanup";
+const CHECK_ALLOCATIONS: &str = "rill_check_allocations";
 const RELEASE_STRING: &str = "rill.string.release";
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -160,6 +161,7 @@ pub(crate) fn emit_object(
     graph: &Graph,
     program: &CompilableProgram<'_, '_>,
     object: &Path,
+    check_allocations: bool,
 ) -> Result<(), BackendError> {
     if let Some(disposer) = program.active_disposers().first() {
         return Err(BackendError::unsupported(
@@ -214,6 +216,7 @@ pub(crate) fn emit_object(
         emitter.lower(instance, body)?;
     }
     emitter.define_startup_cleanup()?;
+    emitter.define_check_allocations(check_allocations);
 
     emitter
         .module
@@ -324,6 +327,13 @@ impl<'ctx> Emitter<'_, 'ctx> {
             .position_at_end(self.context.append_basic_block(function, "entry"));
         emit(self.builder.build_return(None))?;
         Ok(())
+    }
+
+    fn define_check_allocations(&self, enabled: bool) {
+        let byte = self.context.i8_type();
+        let global = self.module.add_global(byte, None, CHECK_ALLOCATIONS);
+        global.set_constant(true);
+        global.set_initializer(&byte.const_int(u64::from(enabled), false));
     }
 
     fn operation(
