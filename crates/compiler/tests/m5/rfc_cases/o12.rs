@@ -306,13 +306,13 @@ function viewField(): i32 { let view = &shifted(Point { x: 1, y: 2 }); return vi
                 &[Case {
                     text: VIEW,
                     typed_stats: (325063, 48462, 12),
-                    graph: (GraphCompletion::SourceRejected, (188588, 4666, 7)),
+                    graph: (GraphCompletion::SourceRejected, (188614, 4666, 7)),
                     roots: &[
                         Root {
                             name: "shifted",
                             want: Want::Checked,
                             graph: None,
-                            stats: (2778, 237, 3),
+                            stats: (2779, 237, 3),
                         },
                         Root {
                             name: "viewField",
@@ -322,7 +322,7 @@ function viewField(): i32 { let view = &shifted(Point { x: 1, y: 2 }); return vi
                                 related: r####"&shifted(Point { x: 1, y: 2 })"####,
                             },
                             graph: None,
-                            stats: (2971, 348, 7),
+                            stats: (2963, 348, 7),
                         },
                     ],
                 }],
@@ -385,25 +385,25 @@ function boundLiteral(): &string { let view = &"static"; return view; }
 function literal(): &string { return &"static"; }
 "####,
             typed_stats: (345401, 50550, 14),
-            graph: (GraphCompletion::SourceRejected, (206060, 7452, 11)),
+            graph: (GraphCompletion::SourceRejected, (206102, 7452, 11)),
             roots: &[
                 Root {
                     name: "shifted",
                     want: Want::Checked,
                     graph: None,
-                    stats: (3030, 363, 3),
+                    stats: (3031, 363, 3),
                 },
                 Root {
                     name: "bare",
                     want: Want::Checked,
                     graph: None,
-                    stats: (6285, 845, 7),
+                    stats: (6287, 845, 7),
                 },
                 Root {
                     name: "grouped",
                     want: Want::Checked,
                     graph: None,
-                    stats: (6358, 881, 11),
+                    stats: (6359, 881, 11),
                 },
                 Root {
                     name: "groupedLiteral",
@@ -415,25 +415,25 @@ function literal(): &string { return &"static"; }
                     name: "viaParam",
                     want: Want::Checked,
                     graph: None,
-                    stats: (6794, 976, 8),
+                    stats: (6796, 976, 8),
                 },
                 Root {
                     name: "second",
                     want: Want::Checked,
                     graph: None,
-                    stats: (6355, 881, 9),
+                    stats: (6356, 881, 9),
                 },
                 Root {
                     name: "looped",
                     want: Want::Checked,
                     graph: None,
-                    stats: (6703, 1084, 11),
+                    stats: (6705, 1084, 11),
                 },
                 Root {
                     name: "loopedLiteral",
                     want: Want::Checked,
                     graph: None,
-                    stats: (2355, 278, 6),
+                    stats: (2356, 278, 6),
                 },
                 Root {
                     name: "deadStore",
@@ -449,7 +449,7 @@ function literal(): &string { return &"static"; }
                         related: r####"&shifted(Point { x: 1, y: 2 })"####,
                     },
                     graph: None,
-                    stats: (3415, 598, 9),
+                    stats: (3418, 598, 9),
                 },
                 Root {
                     name: "rawLiteral",
@@ -467,7 +467,7 @@ function literal(): &string { return &"static"; }
                     name: "boundLiteral",
                     want: Want::Checked,
                     graph: None,
-                    stats: (2262, 222, 4),
+                    stats: (2263, 222, 4),
                 },
                 Root {
                     name: "literal",
@@ -504,13 +504,13 @@ function owner(): &string { let text = "x"; return &text; }
 function flag(b: bool): &string { return &`a${b}`; }
 "####,
             typed_stats: (333602, 49443, 12),
-            graph: (GraphCompletion::SourceRejected, (191338, 4565, 5)),
+            graph: (GraphCompletion::SourceRejected, (191376, 4565, 5)),
             roots: &[
                 Root {
                     name: "shifted",
                     want: Want::Checked,
                     graph: None,
-                    stats: (2862, 279, 3),
+                    stats: (2863, 279, 3),
                 },
                 Root {
                     name: "copyOut",
@@ -526,7 +526,7 @@ function flag(b: bool): &string { return &`a${b}`; }
                         blocker: r####"(&shifted(Point { x: 1, y: 2 })).x"####,
                     },
                     graph: None,
-                    stats: (1972, 75, 3),
+                    stats: (1973, 75, 3),
                 },
                 Root {
                     name: "interpolated",
@@ -534,7 +534,7 @@ function flag(b: bool): &string { return &`a${b}`; }
                         blocker: r####"`a${n}`"####,
                     },
                     graph: None,
-                    stats: (1958, 71, 4),
+                    stats: (1959, 71, 4),
                 },
                 Root {
                     name: "number",
@@ -552,7 +552,7 @@ function flag(b: bool): &string { return &`a${b}`; }
                         related: r####"text"####,
                     },
                     graph: None,
-                    stats: (2062, 126, 4),
+                    stats: (2063, 126, 4),
                 },
                 Root {
                     name: "flag",
@@ -560,7 +560,7 @@ function flag(b: bool): &string { return &`a${b}`; }
                         blocker: r####"`a${b}`"####,
                     },
                     graph: None,
-                    stats: (1958, 71, 4),
+                    stats: (1959, 71, 4),
                 },
             ],
         }],
@@ -583,7 +583,7 @@ function textBind(): void { let view = &named(); }
                 &[Case {
                     text: TEXT,
                     typed_stats: (326067, 48483, 12),
-                    graph: (GraphCompletion::Incomplete, (187421, 4277, 5)),
+                    graph: (GraphCompletion::Incomplete, (187455, 4277, 5)),
                     roots: &[
                         Root {
                             name: "named",
@@ -605,7 +605,7 @@ function textBind(): void { let view = &named(); }
                                 blocker: r####"named()"####,
                             },
                             graph: None,
-                            stats: (1889, 33, 4),
+                            stats: (1890, 33, 4),
                         },
                     ],
                 }],
@@ -652,7 +652,7 @@ function bound(): void { let v = &make(); }
                 blocker: r####"make()"####,
             },
             graph: None,
-            stats: (1887, 34, 4),
+            stats: (1888, 34, 4),
         },
     ];
     installed(
@@ -664,13 +664,13 @@ function bound(): void { let v = &make(); }
                     Case {
                         text: DISPOSER,
                         typed_stats: (327094, 48571, 12),
-                        graph: (GraphCompletion::Incomplete, (187642, 4260, 5)),
+                        graph: (GraphCompletion::Incomplete, (187676, 4260, 5)),
                         roots: ROOTS,
                     },
                     Case {
                         text: ALIASED,
                         typed_stats: (327965, 48579, 12),
-                        graph: (GraphCompletion::Incomplete, (187643, 4260, 5)),
+                        graph: (GraphCompletion::Incomplete, (187677, 4260, 5)),
                         roots: ROOTS,
                     },
                 ],

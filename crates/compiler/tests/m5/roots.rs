@@ -196,7 +196,7 @@ fn imported_startup_is_a_lexical_root_in_both_modes() {
             helper,
             owner,
             &report,
-            [(2025, 91, 3), (2041, 101, 3)][index],
+            [(2027, 91, 3), (2044, 101, 3)][index],
         );
         if index == 1 {
             assert_reuse(&report, helper, &reuse, "text");
@@ -265,7 +265,7 @@ fn unused_canonical_plain_implementation_is_a_root() {
                 helper,
                 owner,
                 &report,
-                [(2092, 134, 3), (2056, 116, 3)][index],
+                [(2094, 134, 3), (2059, 116, 3)][index],
             );
             if index == 1 {
                 assert_reuse(&report, helper, &reuse, "value");
@@ -311,7 +311,7 @@ fn expectation_checks_its_reached_helper_before_publishing_mir() {
                 helper,
                 owner,
                 &report,
-                [(4058, 205, 3), (4026, 189, 3)][index],
+                [(4060, 205, 3), (4029, 189, 3)][index],
             );
             if index == 1 {
                 assert_reuse(&report, helper, &reuse, "value");

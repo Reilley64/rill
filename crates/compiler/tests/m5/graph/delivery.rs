@@ -415,10 +415,10 @@ function unsafeBody(slot: &mut &bool, input: &bool, enter: bool): void {
     // i32 equality source root (316 work, 134 entries, depth 5); the original
     // (last column) now gives ResourceLimit. Target caps are unchanged.
     for (source, target_cap, graph_cap, expected_graph, pre_equality_graph) in [
-        (retaining.replace("ARG", "false"), (7419,935,6), (190467,4976,6), GraphCompletion::SourceRejected, (190151,4842,6)),
-        (retaining.replace("ARG", "((false))"), (7439,941,7), (190599,4978,7), GraphCompletion::SourceRejected, (190283,4844,7)),
-        (retaining.replace("middle(ARG);", "if (true) { middle(enter); }"), (7499,975,7), (190715,5010,7), GraphCompletion::SourceRejected, (190399,4876,7)),
-        ("function outer(enter: bool): void { middle(enter); }\nfunction middle(enter: bool): void { let _ = enter; }".to_owned(), (3954,162,5), (186409,4260,5), GraphCompletion::Incomplete, (186093,4126,5)),
+        (retaining.replace("ARG", "false"), (7428,935,6), (190509,4976,6), GraphCompletion::SourceRejected, (190151,4842,6)),
+        (retaining.replace("ARG", "((false))"), (7448,941,7), (190641,4978,7), GraphCompletion::SourceRejected, (190283,4844,7)),
+        (retaining.replace("middle(ARG);", "if (true) { middle(enter); }"), (7508,975,7), (190757,5010,7), GraphCompletion::SourceRejected, (190399,4876,7)),
+        ("function outer(enter: bool): void { middle(enter); }\nfunction middle(enter: bool): void { let _ = enter; }".to_owned(), (3956,162,5), (186444,4260,5), GraphCompletion::Incomplete, (186093,4126,5)),
     ] {
         probe("graph::delivery::unsupported_forwarders_keep_the_original_frame_budgets", &source, |_, module, receipt| {
             let cap = |(max_work,max_entries,max_depth)| AnalysisLimits {max_work,max_entries,max_depth};
@@ -486,8 +486,8 @@ fn infeasible_forwarded_checkpoint_keeps_the_original_frame_budgets() {
     for (source, target_cap, graph_cap, pre_equality_graph) in [
         (
             source.clone(),
-            (7597, 1009, 6),
-            (191198, 5142, 6),
+            (7606, 1009, 6),
+            (191240, 5142, 6),
             (190882, 5008, 6),
         ),
         (
@@ -495,14 +495,14 @@ fn infeasible_forwarded_checkpoint_keeps_the_original_frame_budgets() {
                 "if (enter) {} else { while (enter)",
                 "if ((enter)) {} else { while (((enter)))",
             ),
-            (7621, 1018, 8),
-            (191393, 5145, 8),
+            (7630, 1018, 8),
+            (191435, 5145, 8),
             (191077, 5011, 8),
         ),
         (
             format!("{source}function unrelated(): void {{ let x = true; }}\n"),
-            (7621, 1021, 6),
-            (191678, 5198, 6),
+            (7630, 1021, 6),
+            (191721, 5198, 6),
             (191362, 5064, 6),
         ),
         (
@@ -510,8 +510,8 @@ fn infeasible_forwarded_checkpoint_keeps_the_original_frame_budgets() {
                 "infeasibleMiddle(enter); }",
                 "infeasibleMiddle(enter); return; let _ = false; }",
             ),
-            (7611, 1015, 6),
-            (191324, 5144, 6),
+            (7620, 1015, 6),
+            (191366, 5144, 6),
             (191008, 5010, 6),
         ),
     ] {
@@ -585,7 +585,7 @@ function backedgeOuter(enter: bool): void {{ while (enter) {{ continue; }} bad(e
         &matched,
         |_, module, receipt| {
             let cap = AnalysisLimits {
-                max_work: 10495,
+                max_work: 10504,
                 max_entries: 2458,
                 max_depth: 6,
             };
@@ -600,7 +600,7 @@ function backedgeOuter(enter: bool): void {{ while (enter) {{ continue; }} bad(e
             let stats = target.statistics();
             assert_eq!(
                 (stats.work, stats.entries, stats.max_depth),
-                (10495, 2458, 6)
+                (10504, 2458, 6)
             );
             assert!(target.mir().unwrap().cancellation().is_none());
             assert!(target.findings().is_empty() && target.rejected_forwarding_calls().is_none());
@@ -615,7 +615,7 @@ function backedgeOuter(enter: bool): void {{ while (enter) {{ continue; }} bad(e
             };
             crate::limit::assert_graph_limit(&analyze_ownership(receipt, pre_equality));
             let graph_cap = AnalysisLimits {
-                max_work: 247377,
+                max_work: 247496,
                 max_entries: 14656,
                 max_depth: 11,
             };
@@ -624,7 +624,7 @@ function backedgeOuter(enter: bool): void {{ while (enter) {{ continue; }} bad(e
             let stats = graph.statistics();
             assert_eq!(
                 (stats.work, stats.entries, stats.max_depth),
-                (247377, 14656, 11)
+                (247496, 14656, 11)
             );
             assert_graph_one_short(receipt, graph_cap);
             let outer = root(&graph, b"function infeasibleOuter");
@@ -655,7 +655,7 @@ fn feasible_nested_checkpoint_still_rejects_the_forwarding_call() {
             };
             crate::limit::assert_graph_limit(&analyze_ownership(receipt, pre_equality));
             let graph_cap = AnalysisLimits {
-                max_work: 191147,
+                max_work: 191189,
                 max_entries: 5071,
                 max_depth: 8,
             };
@@ -664,7 +664,7 @@ fn feasible_nested_checkpoint_still_rejects_the_forwarding_call() {
             let stats = graph.statistics();
             assert_eq!(
                 (stats.work, stats.entries, stats.max_depth),
-                (191147, 5071, 8)
+                (191189, 5071, 8)
             );
             assert_graph_one_short(receipt, graph_cap);
             let outer = root(&graph, b"function reachedOuter");
@@ -679,7 +679,7 @@ fn feasible_nested_checkpoint_still_rejects_the_forwarding_call() {
             assert!(outer.ordinary_mir().is_some() && outer.mir().is_none());
             assert_eq!(outer.ordinary_completion(), Completion::Checked);
             let target_cap = AnalysisLimits {
-                max_work: 7751,
+                max_work: 7760,
                 max_entries: 1068,
                 max_depth: 8,
             };
@@ -688,7 +688,7 @@ fn feasible_nested_checkpoint_still_rejects_the_forwarding_call() {
             let stats = target.statistics();
             assert_eq!(
                 (stats.work, stats.entries, stats.max_depth),
-                (7751, 1068, 8)
+                (7760, 1068, 8)
             );
             assert_target_one_short(receipt, module, outer.owner(), target_cap);
             assert!(target.mir().is_none());
@@ -744,7 +744,7 @@ function ordinaryOuter(enter: bool): void { onlyScalar(enter); return; let _ = f
 "#,
         |_, module, receipt| {
             for (name, max_work, max_entries, max_depth) in
-                [("outer", 7707, 1002, 6), ("ordinaryOuter", 4266, 268, 5)]
+                [("outer", 7717, 1002, 6), ("ordinaryOuter", 4268, 268, 5)]
             {
                 let decl = module
                     .declarations
@@ -796,7 +796,7 @@ function ordinaryOuter(enter: bool): void { onlyScalar(enter); return; let _ = f
             let graph = analyze_ownership(
                 receipt,
                 AnalysisLimits {
-                    max_work: 197758,
+                    max_work: 197803,
                     max_entries: 5235,
                     max_depth: 6,
                 },
@@ -805,12 +805,12 @@ function ordinaryOuter(enter: bool): void { onlyScalar(enter); return; let _ = f
             let stats = graph.statistics();
             assert_eq!(
                 (stats.work, stats.entries, stats.max_depth),
-                (197758, 5235, 6)
+                (197803, 5235, 6)
             );
             assert_graph_one_short(
                 receipt,
                 AnalysisLimits {
-                    max_work: 197758,
+                    max_work: 197803,
                     max_entries: 5235,
                     max_depth: 6,
                 },

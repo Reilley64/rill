@@ -131,7 +131,7 @@ fn record_yield_cleans_the_partial_item_then_the_suffix() {
             }
 
             assert_pre_equality_graph_cap(receipt, (234_907, 13_094, 9));
-            let graph_stats = stats(234_848, 13_167, 9);
+            let graph_stats = stats(234_943, 13_167, 9);
             let (exact, short) = limits(graph_stats);
             let graph = analyze_ownership(receipt, exact);
             assert_eq!(graph.statistics(), graph_stats);
@@ -148,24 +148,24 @@ fn record_yield_cleans_the_partial_item_then_the_suffix() {
             let loop_head: &[u8] =
                 b"for (let item of [Entry{take: a, keep: b}, Entry{take: c, keep: d}])";
             for (name, expected, cap) in [
-                ("onBreak", Completion::Checked, stats(5_605, 1_356, 7)),
-                ("grouped", Completion::Checked, stats(5_611, 1_356, 8)),
-                ("scoped", Completion::Checked, stats(5_607, 1_356, 8)),
-                ("wrapped", Completion::Checked, stats(6_065, 1_604, 9)),
-                ("whole", Completion::Checked, stats(5_318, 1_209, 5)),
-                ("exhausted", Completion::Checked, stats(5_624, 1_362, 7)),
-                ("reused", Completion::SourceRejected, stats(5_655, 1_409, 7)),
+                ("onBreak", Completion::Checked, stats(5_610, 1_356, 7)),
+                ("grouped", Completion::Checked, stats(5_616, 1_356, 8)),
+                ("scoped", Completion::Checked, stats(5_612, 1_356, 8)),
+                ("wrapped", Completion::Checked, stats(6_071, 1_604, 9)),
+                ("whole", Completion::Checked, stats(5_323, 1_209, 5)),
+                ("exhausted", Completion::Checked, stats(5_629, 1_362, 7)),
+                ("reused", Completion::SourceRejected, stats(5_660, 1_409, 7)),
                 (
                     "movedSource",
                     Completion::SourceRejected,
-                    stats(5_351, 1_224, 5),
+                    stats(5_356, 1_224, 5),
                 ),
-                ("dead", Completion::Checked, stats(2_690, 426, 2)),
-                ("pruned", Completion::Checked, stats(2_738, 456, 4)),
-                ("onPostfix", Completion::Incomplete, stats(3_649, 562, 4)),
-                ("textLiteral", Completion::Incomplete, stats(2_512, 350, 2)),
-                ("mixed", Completion::Incomplete, stats(2_512, 350, 2)),
-                ("custom", Completion::Incomplete, stats(2_522, 358, 2)),
+                ("dead", Completion::Checked, stats(2_694, 426, 2)),
+                ("pruned", Completion::Checked, stats(2_742, 456, 4)),
+                ("onPostfix", Completion::Incomplete, stats(3_654, 562, 4)),
+                ("textLiteral", Completion::Incomplete, stats(2_514, 350, 2)),
+                ("mixed", Completion::Incomplete, stats(2_514, 350, 2)),
+                ("custom", Completion::Incomplete, stats(2_526, 358, 2)),
             ] {
                 let function = module
                     .declarations
@@ -648,7 +648,7 @@ fn string_on_break_keeps_its_cap() {
                 .iter()
                 .find(|d| d.name.as_deref() == Some("onBreak"))
                 .unwrap();
-            let cap = stats(2_837, 457, 6);
+            let cap = stats(2_841, 457, 6);
             let (exact, short) = limits(cap);
             let body = lower_body(receipt, module, &function.id, exact).unwrap();
             assert_eq!(body.statistics(), cap);

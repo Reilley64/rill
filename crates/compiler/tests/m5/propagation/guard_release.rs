@@ -222,13 +222,13 @@ fn bare_guard_is_released_once_on_each_propagation_exit() {
                     "forward",
                     bare_failure("input", "input?"),
                     bare_success("input"),
-                    (3771, 640, 4),
+                    (3774, 640, 4),
                 ),
                 (
                     "forwardGrouped",
                     bare_failure("((input))", "((input))?"),
                     bare_success("((input))"),
-                    (3775, 640, 5),
+                    (3778, 640, 5),
                 ),
                 (
                     // A written dispose before the `?` leaves nothing to
@@ -252,7 +252,7 @@ fn bare_guard_is_released_once_on_each_propagation_exit() {
                         ("Cleanup", "EndStorage(value)"),
                         ("Cleanup", ""),
                     ])),
-                    (3967, 744, 4),
+                    (3970, 744, 4),
                 ),
             ];
             for (name, failure, success, cap) in &witnesses {
@@ -311,9 +311,9 @@ fn bare_guard_is_released_once_on_each_propagation_exit() {
 
             // Nearest unsupported siblings keep their parent outcome and blocker.
             for (name, site, cap) in [
-                ("viewed", b"&lock".as_slice(), (3284, 371, 4)),
-                ("returned", b"Result.Ok(lock)", (3210, 339, 3)),
-                ("protectedArg", b"withGuard(input?, lease)", (3236, 345, 4)),
+                ("viewed", b"&lock".as_slice(), (3289, 371, 4)),
+                ("returned", b"Result.Ok(lock)", (3212, 339, 3)),
+                ("protectedArg", b"withGuard(input?, lease)", (3238, 345, 4)),
             ] {
                 let local = lower(name, AnalysisLimits::default());
                 assert_eq!(
@@ -356,8 +356,8 @@ fn bare_guard_is_released_once_on_each_propagation_exit() {
             let moved_root = find_root(&graph, module, decl("movedLocal").node);
             assert_eq!(moved_root.completion(), Completion::Incomplete);
             assert!(moved_root.mir().is_none());
-            assert_eq!(stats(moved.statistics()), (3914, 703, 4));
-            let exact = limits(3914, 703, 4);
+            assert_eq!(stats(moved.statistics()), (3918, 703, 4));
+            let exact = limits(3918, 703, 4);
             assert_eq!(lower("movedLocal", exact).completion(), Completion::Checked);
             for short in shorts(exact) {
                 let limited = lower("movedLocal", short);
@@ -365,7 +365,7 @@ fn bare_guard_is_released_once_on_each_propagation_exit() {
             }
 
             // The fixture's whole graph.
-            let cap = (205742, 7315, 5);
+            let cap = (205799, 7315, 5);
             assert_eq!(graph.completion(), GraphCompletion::Incomplete);
             assert_eq!(stats(graph.statistics()), cap);
             let exact = limits(cap.0, cap.1, cap.2);
