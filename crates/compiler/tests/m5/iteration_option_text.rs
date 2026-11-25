@@ -515,7 +515,7 @@ fn review_counterexamples_keep_their_outcomes_at_exact_caps() {
                 let run = |cap| lower_body(receipt, module, &f.id, cap).unwrap();
                 let target = run(exact);
                 assert_eq!(target.completion(), expected, "{source}");
-                crate::limit::assert_stats(target.statistics(), targeted, &format!("{source}"));
+                crate::limit::assert_stats(target.statistics(), targeted, source);
                 assert!(target.mir().is_none());
                 for cap in short {
                     let limited = run(cap);
@@ -524,7 +524,7 @@ fn review_counterexamples_keep_their_outcomes_at_exact_caps() {
                 assert_pre_equality_graph_cap(receipt, pre_equality);
                 let (exact, short) = limits(whole);
                 let graph = analyze_ownership(receipt, exact);
-                crate::limit::assert_stats(graph.statistics(), whole, &format!("{source}"));
+                crate::limit::assert_stats(graph.statistics(), whole, source);
                 let root = graph
                     .roots()
                     .iter()

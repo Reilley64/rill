@@ -30,11 +30,7 @@ pub(super) fn check_cases(request: &InstalledRequest, cases: &[Case]) {
             let typed = analyze_typed(&graph, AnalysisLimits::default());
             let context = format!("case {index}, test_mode {test_mode}");
             assert_eq!(typed.completion(), TypedCompletion::Checked, "{context}");
-            crate::limit::assert_stats(
-                typed.statistics(),
-                statistics(case.typed_stats),
-                &format!("{context}"),
-            );
+            crate::limit::assert_stats(typed.statistics(), statistics(case.typed_stats), &context);
             check_receipt(
                 &context,
                 &typed,

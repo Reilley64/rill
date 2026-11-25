@@ -99,11 +99,7 @@ pub(super) fn check(test: &str, form: &Form) {
             let typed = analyze_typed(&graph, AnalysisLimits::default());
             let context = format!("test_mode {test_mode}");
             assert_eq!(typed.completion(), TypedCompletion::Checked, "{context}");
-            crate::limit::assert_stats(
-                typed.statistics(),
-                statistics(form.typed_stats),
-                &format!("{context}"),
-            );
+            crate::limit::assert_stats(typed.statistics(), statistics(form.typed_stats), &context);
             let module = graph
                 .modules()
                 .iter()

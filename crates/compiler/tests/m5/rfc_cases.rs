@@ -142,7 +142,7 @@ fn run_with(test: &str, sources: &[Source], extra: impl Fn(usize, &loader::Graph
                         crate::limit::assert_stats(
                             typed.statistics(),
                             statistics(*typed_stats),
-                            &format!("{context}"),
+                            &context,
                         );
                         check_receipt(&context, &typed, module, *whole, roots);
                         let receipt = typed.receipt().unwrap();
@@ -273,7 +273,7 @@ fn check_typed(
     assert_eq!(typed.completion(), completion, "{context}");
     assert!(typed.receipt().is_none(), "{context}");
     assert_eq!(signals(typed, module), expected, "{context}");
-    crate::limit::assert_stats(typed.statistics(), statistics(stats), &format!("{context}"));
+    crate::limit::assert_stats(typed.statistics(), statistics(stats), context);
     let (exact, short) = limits(typed.statistics());
     let replay = analyze_typed(graph, exact);
     assert_eq!(replay.completion(), completion, "{context}");

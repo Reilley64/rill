@@ -145,18 +145,28 @@ fn triple(statistics: Statistics) -> Triple {
 }
 
 #[track_caller]
-pub(crate) fn assert_stats(measured: Statistics, pinned: Statistics, context: &str) {
+pub(crate) fn assert_stats(
+    measured: Statistics,
+    pinned: Statistics,
+    context: impl std::fmt::Display,
+) {
     if reporting() {
-        record("stats", context, Some(triple(pinned)), triple(measured), "");
+        record(
+            "stats",
+            &context.to_string(),
+            Some(triple(pinned)),
+            triple(measured),
+            "",
+        );
         return;
     }
     assert_eq!(measured, pinned, "{context}");
 }
 
 #[track_caller]
-pub(crate) fn assert_triple(measured: Triple, pinned: Triple, context: &str) {
+pub(crate) fn assert_triple(measured: Triple, pinned: Triple, context: impl std::fmt::Display) {
     if reporting() {
-        record("triple", context, Some(pinned), measured, "");
+        record("triple", &context.to_string(), Some(pinned), measured, "");
         return;
     }
     assert_eq!(measured, pinned, "{context}");

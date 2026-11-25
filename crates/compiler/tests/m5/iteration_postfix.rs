@@ -345,7 +345,7 @@ fn installed_postfix_keeps_unadmitted_loop_shapes_pending() {
                 let (exact, short) = limits(stats);
                 let run = |cap| lower_body(receipt, module, &function.id, cap).unwrap();
                 let at = run(exact);
-                crate::limit::assert_stats(at.statistics(), stats, &format!("{name}"));
+                crate::limit::assert_stats(at.statistics(), stats, name);
                 assert_eq!(at.completion(), Completion::Incomplete, "{name}");
                 assert!(at.mir().is_none() && at.findings().is_empty());
                 let blocker = at.blocked_at().unwrap();

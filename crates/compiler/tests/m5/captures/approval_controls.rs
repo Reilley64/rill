@@ -33,7 +33,7 @@ fn assert_pinned(test: &str, pin: &Pin) {
     probe_report(test, pin.source, |request, module, typed| {
         assert_eq!(typed.completion(), pin.completion, "{}", pin.source);
         assert_ne!(typed.completion(), TypedCompletion::SourceRejected);
-        crate::limit::assert_stats(typed.statistics(), pin.used, &format!("{}", pin.source));
+        crate::limit::assert_stats(typed.statistics(), pin.used, pin.source);
         assert_eq!(
             typed.receipt().is_some(),
             pin.completion == TypedCompletion::Checked

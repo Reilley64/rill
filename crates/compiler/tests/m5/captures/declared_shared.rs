@@ -233,11 +233,7 @@ fn declared_shared_frame_checks_the_lent_owner_and_rejects_without_mir() {
                     }
                 }
                 let used = target.statistics();
-                crate::limit::assert_triple(
-                    (used.work, used.entries, used.max_depth),
-                    caps,
-                    &format!("{name}"),
-                );
+                crate::limit::assert_triple((used.work, used.entries, used.max_depth), caps, name);
                 let lower = |limit| lower_body(receipt, module, &decl.id, limit).unwrap();
                 let replay = lower(exact(used));
                 assert_eq!(replay.completion(), target.completion(), "{name}");
@@ -316,11 +312,11 @@ fn declared_shared_siblings_keep_their_parent_caps() {
                     .collect();
                 assert_eq!(found, expected, "{name}");
                 let used = typed.statistics();
-                crate::limit::assert_triple((used.work, used.entries, used.max_depth), caps, &format!("{name}"));
+                crate::limit::assert_triple((used.work, used.entries, used.max_depth), caps, name);
                 let graph = loader::load_installed(request.clone()).unwrap();
                 let replay = analyze_typed(&graph, exact(used));
                 assert_eq!(replay.completion(), TypedCompletion::Incomplete, "{name}");
-                crate::limit::assert_stats(replay.statistics(), used, &format!("{name}"));
+                crate::limit::assert_stats(replay.statistics(), used, name);
                 for short in short_capture_limits(exact(used)) {
                     let limited = analyze_typed(&graph, short);
                     crate::limit::assert_typed_limit(&limited);
@@ -416,11 +412,7 @@ fn assert_incomplete_at_caps(
     let decl = capture_declaration(module, name);
     let lower = |limit| lower_body(receipt, module, &decl.id, limit).unwrap();
     let used = lower(AnalysisLimits::default()).statistics();
-    crate::limit::assert_triple(
-        (used.work, used.entries, used.max_depth),
-        caps,
-        &format!("{name}"),
-    );
+    crate::limit::assert_triple((used.work, used.entries, used.max_depth), caps, name);
     let replay = lower(exact(used));
     assert_eq!(replay.completion(), Completion::Incomplete, "{name}");
     assert_eq!(replay.blocked_at().unwrap().span.bytes(), at.as_bytes());

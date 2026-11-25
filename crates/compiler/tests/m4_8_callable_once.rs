@@ -347,7 +347,7 @@ fn check_sources(entry: &Path) {
                 crate::limit::assert_triple(
                     (stats.work, stats.entries, stats.max_depth),
                     fixed,
-                    &format!("{name} {test_mode}"),
+                    format!("{name} {test_mode}"),
                 );
             }
             let exact = AnalysisLimits {

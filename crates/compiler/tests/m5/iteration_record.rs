@@ -186,7 +186,7 @@ fn record_yield_cleans_the_partial_item_then_the_suffix() {
                     .unwrap();
                 let (exact, short) = limits(cap);
                 let body = run(exact);
-                crate::limit::assert_stats(body.statistics(), cap, &format!("{name}"));
+                crate::limit::assert_stats(body.statistics(), cap, name);
                 assert_eq!(body.completion(), expected, "{name}");
                 assert_eq!(root.ordinary_completion(), expected, "{name}");
                 for cap in short {

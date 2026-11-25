@@ -25,11 +25,7 @@ fn check(test: &str, case: &Case) {
             let typed = analyze_typed(&graph, AnalysisLimits::default());
             let context = format!("test_mode {test_mode}");
             assert_eq!(typed.completion(), TypedCompletion::Checked, "{context}");
-            crate::limit::assert_stats(
-                typed.statistics(),
-                statistics(case.typed_stats),
-                &format!("{context}"),
-            );
+            crate::limit::assert_stats(typed.statistics(), statistics(case.typed_stats), &context);
             let module = graph
                 .modules()
                 .iter()

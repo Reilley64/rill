@@ -630,7 +630,7 @@ function probe(flag: bool, gate: bool): void { let debt = Err<bool,i32>(61i32); 
         installed(&probe, name, source, None, |report| {
             check(report);
             let stats = report.statistics();
-            crate::limit::assert_triple((stats.work, stats.entries, stats.max_depth), exact, &format!("{name}"));
+            crate::limit::assert_triple((stats.work, stats.entries, stats.max_depth), exact, name);
         });
     }
 
@@ -678,11 +678,7 @@ function probe(flag: bool, gate: bool): void { let debt = Err<bool,i32>(61i32); 
         installed(&probe, name, &source, None, |report| {
             checked(report);
             let stats = report.statistics();
-            crate::limit::assert_triple(
-                (stats.work, stats.entries, stats.max_depth),
-                exact,
-                &format!("{name}"),
-            );
+            crate::limit::assert_triple((stats.work, stats.entries, stats.max_depth), exact, name);
         });
     }
 
@@ -709,7 +705,7 @@ function probe(flag: bool, gate: bool): void { let debt = Err<bool,i32>(61i32); 
                 crate::limit::assert_triple(
                     (stats.work, stats.entries, stats.max_depth),
                     exact,
-                    &format!("{name}"),
+                    name,
                 );
             },
         );
@@ -1127,7 +1123,7 @@ fn replay_exact(
         max_depth: stats.max_depth,
     };
     let replay = analyze_typed(graph, exact);
-    crate::limit::assert_stats(replay.statistics(), stats, &format!("{name}"));
+    crate::limit::assert_stats(replay.statistics(), stats, name);
     check(&replay);
     exact
 }
@@ -1172,11 +1168,7 @@ fn installed_read_only(
             assert_eq!(report.completion(), TypedCompletion::Incomplete, "{name}");
             assert!(report.receipt().is_none(), "{name}");
             let stats = report.statistics();
-            crate::limit::assert_triple(
-                (stats.work, stats.entries, stats.max_depth),
-                exact,
-                &format!("{name}"),
-            );
+            crate::limit::assert_triple((stats.work, stats.entries, stats.max_depth), exact, name);
         };
         check(&report);
         exact_and_one_short(&graph, &report, name, &check);

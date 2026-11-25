@@ -30,7 +30,7 @@ fn check(test: &str, cases: &[Case]) {
                 crate::limit::assert_stats(
                     typed.statistics(),
                     statistics(case.typed_stats),
-                    &format!("{context}"),
+                    &context,
                 );
                 check_receipt(
                     &context,

@@ -4478,11 +4478,7 @@ fn declared_once_frame_keeps_capture_provenance_and_rejects_without_mir() {
                     }
                 }
                 let used = target.statistics();
-                crate::limit::assert_triple(
-                    (used.work, used.entries, used.max_depth),
-                    caps,
-                    &format!("{name}"),
-                );
+                crate::limit::assert_triple((used.work, used.entries, used.max_depth), caps, name);
                 let exact = AnalysisLimits {
                     max_work: used.work,
                     max_entries: used.entries,
@@ -4625,11 +4621,7 @@ fn declared_once_siblings_keep_their_parent_typed_caps() {
                     "{name}"
                 );
                 let used = typed.statistics();
-                crate::limit::assert_triple(
-                    (used.work, used.entries, used.max_depth),
-                    caps,
-                    &format!("{name}"),
-                );
+                crate::limit::assert_triple((used.work, used.entries, used.max_depth), caps, name);
                 let graph = loader::load_installed(request.clone()).unwrap();
                 let exact = AnalysisLimits {
                     max_work: used.work,
@@ -4638,7 +4630,7 @@ fn declared_once_siblings_keep_their_parent_typed_caps() {
                 };
                 let replay = analyze_typed(&graph, exact);
                 assert_eq!(replay.completion(), TypedCompletion::Incomplete, "{name}");
-                crate::limit::assert_stats(replay.statistics(), used, &format!("{name}"));
+                crate::limit::assert_stats(replay.statistics(), used, name);
                 for short in short_capture_limits(exact) {
                     let limited = analyze_typed(&graph, short);
                     crate::limit::assert_typed_limit(&limited);
