@@ -174,6 +174,9 @@ impl InstalledProfile {
         if path == "output.rill" {
             return Some(include_bytes!("../../../../stdlib/output.rill"));
         }
+        if path == "env.rill" {
+            return Some(include_bytes!("../../../../stdlib/env.rill"));
+        }
         self.sources()
             .iter()
             .find_map(|&(key, bytes)| (path == key).then_some(bytes))

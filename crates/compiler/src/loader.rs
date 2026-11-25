@@ -349,6 +349,7 @@ pub struct Graph {
     request: Request,
     modules: Vec<Module>,
     routine_index: Option<usize>,
+    env_index: Option<usize>,
     declaration_count: usize,
     implementation_at: Vec<Option<usize>>,
     prelude: PreludeIdentities,
@@ -391,6 +392,10 @@ impl Graph {
     /// This group is required only when captured by ordinary import discovery.
     pub(crate) fn installed_routine_source(&self) -> Option<&Module> {
         self.routine_index.map(|index| &self.modules[index])
+    }
+
+    pub(crate) fn installed_env_source(&self) -> Option<&Module> {
+        self.env_index.map(|index| &self.modules[index])
     }
 
     /// The baseline source keys, not a discovery request.

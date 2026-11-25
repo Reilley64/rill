@@ -365,6 +365,20 @@ impl<'g> PrimitiveCore<'g> {
                 self.output.push((&family.id, operation));
             }
         }
+        if let Some(module) = graph
+            .installed_env_source()
+            .filter(|module| graph.is_pinned_standard_source(module))
+        {
+            for (name, operation, arity) in [
+                ("captureInputs", PrimitiveOperation::CaptureInputs, 0),
+                ("decodeArguments", PrimitiveOperation::DecodeArguments, 1),
+            ] {
+                if let Some(bridge) = check_env_binding(inventory, module, name, arity, budget)? {
+                    budget.reserve(1)?;
+                    self.bridges.insert(&bridge.id, operation);
+                }
+            }
+        }
         Ok(())
     }
 
@@ -634,6 +648,33 @@ fn check_output_binding<'g>(
             && input_type(&parameter.ty, PrimitiveRole::Show).and_then(primitive_name)
                 == Some("string")
             && primitive_name(actual) == Some(result)
+        {
+            return Ok(Some(declaration));
+        }
+    }
+    Ok(None)
+}
+
+fn check_env_binding<'g>(
+    inventory: &OrdinaryAnalysis<'g>,
+    module: &'g Module,
+    name: &str,
+    arity: usize,
+    budget: &mut Budget,
+) -> Work<Option<&'g Declaration>> {
+    for declaration in &module.declarations {
+        budget.step(1)?;
+        if !declaration.public
+            && declaration.scope.is_none()
+            && declaration.id.kind == DeclarationKind::Family
+            && declaration.name.as_deref() == Some(name)
+            && inventory
+                .captured_family(&declaration.id)
+                .is_some_and(|f| f.implementations.is_empty())
+            && let Some(signature) = family_header(inventory, declaration, budget)?
+            && let DeclarationShape::Function { parameters, .. } = &signature.shape
+            && signature.binders.is_empty()
+            && parameters.len() == arity
         {
             return Ok(Some(declaration));
         }
