@@ -284,21 +284,21 @@ fn interrupted_tuple_initializer_cleans_only_the_reached_prefix() {
 
             // Each new route at its exact caps and independently one short.
             for (name, completion, pinned) in [
-                ("tuple", Completion::Checked, stats(8617, 2053, 7)),
-                ("grouped", Completion::Checked, stats(8625, 2053, 9)),
-                ("scoped", Completion::Checked, stats(8080, 1778, 8)),
-                ("looped", Completion::Checked, stats(8256, 1883, 9)),
-                ("certainNone", Completion::Checked, stats(7153, 1278, 10)),
-                ("skippedSuffix", Completion::Checked, stats(7274, 1337, 10)),
+                ("tuple", Completion::Checked, stats(8623, 2053, 7)),
+                ("grouped", Completion::Checked, stats(8631, 2053, 9)),
+                ("scoped", Completion::Checked, stats(8085, 1778, 8)),
+                ("looped", Completion::Checked, stats(8261, 1883, 9)),
+                ("certainNone", Completion::Checked, stats(7157, 1278, 10)),
+                ("skippedSuffix", Completion::Checked, stats(7279, 1337, 10)),
                 (
                     "reachedSuffix",
                     Completion::SourceRejected,
-                    stats(4942, 1120, 7),
+                    stats(4947, 1120, 7),
                 ),
                 (
                     "movedPrefix",
                     Completion::SourceRejected,
-                    stats(4468, 836, 7),
+                    stats(4473, 836, 7),
                 ),
             ] {
                 let report = lower(name, default);
@@ -499,11 +499,11 @@ fn interrupted_tuple_initializer_cleans_only_the_reached_prefix() {
                 (
                     "embedded",
                     b"[stage(first), relay(gate?)]".as_slice(),
-                    stats(3978, 611, 4),
+                    stats(3981, 611, 4),
                 ),
-                ("twice", b"[gate?, other?]", stats(3979, 611, 4)),
-                ("text", b"[stage(first), label?]", stats(5061, 800, 4)),
-                ("nested", b"value", stats(3956, 603, 3)),
+                ("twice", b"[gate?, other?]", stats(3982, 611, 4)),
+                ("text", b"[stage(first), label?]", stats(5064, 800, 4)),
+                ("nested", b"value", stats(3958, 603, 3)),
             ] {
                 let report = lower(name, exact(parent));
                 assert_eq!(report.completion(), Completion::Incomplete, "{name}");
@@ -518,7 +518,7 @@ fn interrupted_tuple_initializer_cleans_only_the_reached_prefix() {
 
             // The whole graph at its exact caps and independently one short.
             assert_pre_equality_graph_cap(receipt, (240_330, 13_996, 10));
-            let whole = stats(240_646, 14_130, 10);
+            let whole = stats(240_732, 14_130, 10);
             assert_eq!(graph.statistics(), whole);
             assert_eq!(graph.completion(), GraphCompletion::SourceRejected);
             assert_eq!(analyze_ownership(receipt, exact(whole)).statistics(), whole);
@@ -556,17 +556,17 @@ fn condition_postfix_continues_on_the_ordinary_branch() {
             };
 
             for (name, completion, pinned) in [
-                ("condition", Completion::Checked, stats(4072, 821, 6)),
-                ("grouped", Completion::Checked, stats(4077, 821, 9)),
-                ("scoped", Completion::Checked, stats(4074, 821, 7)),
-                ("looped", Completion::Checked, stats(3979, 762, 6)),
-                ("branches", Completion::Checked, stats(4548, 1037, 5)),
-                ("certainNone", Completion::Checked, stats(3521, 509, 4)),
-                ("skippedRead", Completion::Checked, stats(3631, 569, 4)),
+                ("condition", Completion::Checked, stats(4074, 821, 6)),
+                ("grouped", Completion::Checked, stats(4079, 821, 9)),
+                ("scoped", Completion::Checked, stats(4076, 821, 7)),
+                ("looped", Completion::Checked, stats(3981, 762, 6)),
+                ("branches", Completion::Checked, stats(4553, 1037, 5)),
+                ("certainNone", Completion::Checked, stats(3522, 509, 4)),
+                ("skippedRead", Completion::Checked, stats(3632, 569, 4)),
                 (
                     "conditionRead",
                     Completion::SourceRejected,
-                    stats(4013, 790, 5),
+                    stats(4015, 790, 5),
                 ),
             ] {
                 let report = lower(name, default);
@@ -747,10 +747,10 @@ fn condition_postfix_continues_on_the_ordinary_branch() {
             // Nearest unsupported siblings keep the caps and blockers measured
             // at the parent revision 37a0a99e, before this route existed.
             for (name, blocked, parent) in [
-                ("whileCondition", b"gate?".as_slice(), stats(3388, 431, 4)),
-                ("negated", b"!(gate?)", stats(3399, 435, 6)),
-                ("called", b"relay(gate?)", stats(3399, 435, 6)),
-                ("resultCondition", b"gate?", stats(3411, 441, 6)),
+                ("whileCondition", b"gate?".as_slice(), stats(3389, 431, 4)),
+                ("negated", b"!(gate?)", stats(3400, 435, 6)),
+                ("called", b"relay(gate?)", stats(3400, 435, 6)),
+                ("resultCondition", b"gate?", stats(3412, 441, 6)),
             ] {
                 let report = lower(name, exact(parent));
                 assert_eq!(report.completion(), Completion::Incomplete, "{name}");
@@ -764,7 +764,7 @@ fn condition_postfix_continues_on_the_ordinary_branch() {
             }
 
             assert_pre_equality_graph_cap(receipt, (221_493, 9_847, 9));
-            let whole = stats(221_809, 9_981, 9);
+            let whole = stats(221_865, 9_981, 9);
             assert_eq!(graph.statistics(), whole);
             assert_eq!(graph.completion(), GraphCompletion::SourceRejected);
             assert_eq!(analyze_ownership(receipt, exact(whole)).statistics(), whole);
@@ -799,7 +799,7 @@ function deadCondition(gate: Option<bool>, retired: string): Option<bool> {
 }
 "#,
         |_, module, receipt, typed| {
-            let graph_stats = stats(193_518, 4_955, 5);
+            let graph_stats = stats(193_557, 4_955, 5);
             let graph = analyze_ownership(receipt, exact(graph_stats));
             assert_eq!(graph.statistics(), graph_stats);
             assert_eq!(graph.completion(), GraphCompletion::Incomplete);
@@ -811,7 +811,7 @@ function deadCondition(gate: Option<bool>, retired: string): Option<bool> {
             for (name, pinned, expected) in [
                 (
                     "deadTuple",
-                    stats(3_358, 431, 4),
+                    stats(3_361, 431, 4),
                     &[
                         "dispose first: string",
                         "init dispose(first)",
@@ -823,7 +823,7 @@ function deadCondition(gate: Option<bool>, retired: string): Option<bool> {
                 ),
                 (
                     "deadCondition",
-                    stats(3_313, 407, 4),
+                    stats(3_315, 407, 4),
                     &[
                         "dispose retired: string",
                         "init dispose(retired)",

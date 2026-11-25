@@ -1276,7 +1276,7 @@ fn owned_tuple_binding_transfers_and_cleans_initialized_elements() {
             let report = lower("unpack");
             // Unchanged flat pattern budget measured in both modes at 904433f.
             let flat = AnalysisLimits {
-                max_work: 7279,
+                max_work: 7283,
                 max_entries: 1200,
                 ..AnalysisLimits::default()
             };

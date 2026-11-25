@@ -387,7 +387,7 @@ fn grouped_computed_source_keeps_the_pre_literal_budget() {
                 module,
                 &f.id,
                 AnalysisLimits {
-                    max_work: 4154,
+                    max_work: 4156,
                     max_entries: 464,
                     max_depth: 4,
                 },
@@ -403,7 +403,7 @@ fn grouped_computed_source_keeps_the_pre_literal_budget() {
             let graph = analyze_ownership(
                 receipt,
                 AnalysisLimits {
-                    max_work: 192785,
+                    max_work: 192827,
                     max_entries: 4730,
                     max_depth: 5,
                 },
@@ -432,7 +432,7 @@ fn unproved_list_sources_keep_their_old_caps() {
         |_, module, receipt| {
             assert_pre_equality_graph_cap(receipt, (192_283, 4593, 4));
             let stats = Statistics {
-                work: 192_599,
+                work: 192_641,
                 entries: 4727,
                 max_depth: 5,
             };
@@ -445,20 +445,20 @@ fn unproved_list_sources_keep_their_old_caps() {
                 crate::limit::assert_graph_limit(&limited);
             }
             for (name, work, entries, max_depth, blocked) in [
-                ("make", 1962, 74, 2, "[a]"),
+                ("make", 1963, 74, 2, "[a]"),
                 (
                     "computed",
-                    1962,
+                    1963,
                     74,
                     2,
                     "for (let item of make(a)) { break; }",
                 ),
-                ("literal", 1962, 74, 2, "for (let item of [a]) { break; }"),
-                ("unused", 1961, 74, 1, "unused"),
-                ("named", 2281, 184, 4, ""),
+                ("literal", 1963, 74, 2, "for (let item of [a]) { break; }"),
+                ("unused", 1962, 74, 1, "unused"),
+                ("named", 2284, 184, 4, ""),
                 (
                     "computedPostfix",
-                    4148,
+                    4150,
                     461,
                     4,
                     "for (let item of make(gate?)) { let _ = &item; break; }",

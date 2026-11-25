@@ -8,7 +8,9 @@ use super::{
     TypeTerm, retained_bool_contents_type, retained_contents_type, retained_i32_record,
     retained_record_contents,
 };
-use crate::loader::{CollectionArtifact, Declaration, DeclarationId, DeclarationKind};
+use crate::loader::{
+    CollectionArtifact, Declaration, DeclarationId, DeclarationKind, DeclarationOrdinal,
+};
 use crate::source::Span;
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::ops::Range;
@@ -2806,21 +2808,53 @@ impl<'a, 'g> BuildFacts<'a, 'g> {
     }
 }
 
+struct OrdinalMap<V>(BTreeMap<DeclarationOrdinal, V>);
+
+impl<V> OrdinalMap<V> {
+    fn new() -> Self {
+        Self(BTreeMap::new())
+    }
+
+    fn get(&self, id: &DeclarationId) -> Option<&V> {
+        self.0.get(&id.ordinal)
+    }
+
+    fn insert(&mut self, id: &DeclarationId, value: V) -> Option<V> {
+        self.0.insert(id.ordinal, value)
+    }
+
+    fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+}
+
+impl<V> std::ops::Index<&DeclarationId> for OrdinalMap<V> {
+    type Output = V;
+
+    fn index(&self, id: &DeclarationId) -> &V {
+        &self.0[&id.ordinal]
+    }
+}
+
 struct Build<'a, 'g, 'b> {
     typed: &'a TypedReport<'g>,
     module: &'g Module,
     body: NodeId,
     facts: BuildFacts<'a, 'g>,
-    locals: BTreeMap<&'g DeclarationId, Slot>,
+    locals: OrdinalMap<Slot>,
     /// Count of local `&mut i32` bindings written `&mut record.field`, the only
     /// local descriptors `*name += literal` writes through. Zero rules the form out.
     exclusive_field_reborrows: usize,
     /// Checked nested regions expose value transfers, not general places.
-    nested_record_values: BTreeMap<&'g DeclarationId, Slot>,
+    nested_record_values: OrdinalMap<Slot>,
     /// Two-level owned tuple inputs kept out of general place resolution.
-    nested_tuple_parameters: BTreeMap<&'g DeclarationId, Slot>,
+    nested_tuple_parameters: OrdinalMap<Slot>,
     /// Exact named tuple bindings with their proved initializer slot.
-    nested_tuple_bindings: BTreeMap<&'g DeclarationId, (Slot, Slot)>,
+    nested_tuple_bindings: OrdinalMap<(Slot, Slot)>,
     /// Incoming narrow variants are visible only to the irrefutable binding path.
     narrow_variant_parameters:
         BTreeMap<*const DeclarationId, build::NarrowVariantParameter<'a, 'g>>,

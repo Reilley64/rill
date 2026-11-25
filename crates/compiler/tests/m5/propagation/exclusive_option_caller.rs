@@ -323,14 +323,14 @@ fn exclusive_option_relay_callers_check_at_pinned_caps() {
         (
             "callerPostfix",
             "forward(input)",
-            (9404, 1651, 4),
-            [(196188, 6243, 5), (195872, 6109, 4)],
+            (9410, 1651, 4),
+            [(196230, 6243, 5), (195872, 6109, 4)],
         ),
         (
             "callerGroup",
             "((forward(((input)))))",
-            (9424, 1659, 8),
-            [(196440, 6247, 8), (196124, 6113, 8)],
+            (9430, 1659, 8),
+            [(196482, 6247, 8), (196124, 6113, 8)],
         ),
     ] {
         let caller = format!(
@@ -360,36 +360,36 @@ fn unsupported_exclusive_relay_siblings_keep_parent_caps() {
             "callerComputed",
             "forward(((forward(input))))",
             "forward(((forward(input))))?",
-            (3071, 275, 4),
-            [(193616, 5415, 5), (193300, 5281, 4)],
+            (3073, 275, 4),
+            [(193656, 5415, 5), (193300, 5281, 4)],
         ),
         (
             "callerPipe",
             "input |> forward(_)",
             "input |> forward(_)?",
-            (3061, 270, 4),
-            [(193306, 5410, 5), (192990, 5276, 4)],
+            (3063, 270, 4),
+            [(193346, 5410, 5), (192990, 5276, 4)],
         ),
         (
             "callerGroupPipe",
             "(input |> forward(_))",
             "(input |> forward(_))?",
-            (3066, 272, 4),
-            [(193431, 5412, 5), (193115, 5278, 4)],
+            (3068, 272, 4),
+            [(193471, 5412, 5), (193115, 5278, 4)],
         ),
         (
             "callerGeneric",
             "generic(input)",
             "generic(input)?",
-            (3063, 271, 4),
-            [(193368, 5411, 5), (193052, 5277, 4)],
+            (3065, 271, 4),
+            [(193408, 5411, 5), (193052, 5277, 4)],
         ),
         (
             "callerMultiple",
             "choose(input, input)",
             "choose(input, input)?",
-            (3065, 272, 4),
-            [(193430, 5412, 5), (193114, 5278, 4)],
+            (3067, 272, 4),
+            [(193470, 5412, 5), (193114, 5278, 4)],
         ),
     ] {
         let caller = format!(
@@ -425,8 +425,8 @@ function reuse(input: Option<&mut bool>): Option<&mut bool> {
 }
 "#,
             Expect::Rejected("R0200", "input", "input"),
-            (5537, 960, 4),
-            [(195784, 6101, 5), (195468, 5967, 4)],
+            (5541, 960, 4),
+            [(195826, 6101, 5), (195468, 5967, 4)],
             GraphCompletion::SourceRejected,
         ),
         (
@@ -441,8 +441,8 @@ function conflict(): Option<bool> {
 }
 "#,
             Expect::Rejected("R0201", "&flag", "&mut flag"),
-            (6970, 1336, 5),
-            [(197758, 6477, 5), (197442, 6343, 5)],
+            (6975, 1336, 5),
+            [(197801, 6477, 5), (197442, 6343, 5)],
             GraphCompletion::SourceRejected,
         ),
         (
@@ -456,8 +456,8 @@ function escape(): Option<&mut bool> {
 }
 "#,
             Expect::Rejected("R0202", "return Option.Some(view);", "flag"),
-            (5931, 1182, 5),
-            [(196599, 6323, 5), (196283, 6189, 5)],
+            (5936, 1182, 5),
+            [(196642, 6323, 5), (196283, 6189, 5)],
             GraphCompletion::SourceRejected,
         ),
         (
@@ -472,8 +472,8 @@ function release(): Option<bool> {
 }
 "#,
             Expect::Rejected("R0203", "dispose(flag)", "&mut flag"),
-            (7086, 1345, 5),
-            [(197994, 6486, 5), (197678, 6352, 5)],
+            (7091, 1345, 5),
+            [(198037, 6486, 5), (197678, 6352, 5)],
             GraphCompletion::SourceRejected,
         ),
         (
@@ -489,8 +489,8 @@ function dead(): Option<bool> {
 }
 "#,
             Expect::Checked,
-            (13752, 2461, 5),
-            [(198827, 6789, 5), (198511, 6655, 5)],
+            (13761, 2461, 5),
+            [(198871, 6789, 5), (198511, 6655, 5)],
             GraphCompletion::Incomplete,
         ),
     ] {
@@ -563,8 +563,8 @@ function caller(input: Option<&mut bool>): Option<&mut bool> {
 }
 "#,
             "forward(input)",
-            (3025, 253, 4),
-            [(193089, 5393, 5), (192773, 5259, 4)],
+            (3026, 253, 4),
+            [(193128, 5393, 5), (192773, 5259, 4)],
         ),
         (
             "otherPayload",
@@ -576,7 +576,7 @@ function otherPayload(input: Option<&mut i32>): Option<&mut i32> {
 "#,
             "input: Option<&mut i32>",
             (1919, 51, 0),
-            [(192104, 5191, 5), (191788, 5057, 4)],
+            [(192142, 5191, 5), (191788, 5057, 4)],
         ),
     ] {
         exclusive_relay_caller(

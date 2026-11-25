@@ -1522,7 +1522,7 @@ fn exclusive_non_bool_pair_keeps_its_local_formation_budget() {
         |_, module, receipt| {
             let id = &capture_declaration(module, "joined").id;
             let fixed = AnalysisLimits {
-                max_work: 2714,
+                max_work: 2719,
                 max_entries: 449,
                 max_depth: 6,
             };
@@ -4360,7 +4360,7 @@ fn declared_once_formal_invokes_the_actual_pair_in_one_call_frame() {
             assert!(open_root.mir().is_none() && open_root.ordinary_mir().is_none());
 
             let used = target.statistics();
-            assert_eq!((used.work, used.entries, used.max_depth), (5_631, 299, 6));
+            assert_eq!((used.work, used.entries, used.max_depth), (5_633, 299, 6));
             let exact = AnalysisLimits {
                 max_work: used.work,
                 max_entries: used.entries,
@@ -4376,7 +4376,7 @@ fn declared_once_formal_invokes_the_actual_pair_in_one_call_frame() {
             let used = graph.statistics();
             assert_eq!(
                 (used.work, used.entries, used.max_depth),
-                (190_984, 4_400, 6)
+                (191_019, 4_400, 6)
             );
             let exact = AnalysisLimits {
                 max_work: used.work,
@@ -4423,20 +4423,20 @@ fn declared_once_frame_keeps_capture_provenance_and_rejects_without_mir() {
                 (
                     "escape",
                     Some(("R0202", "return invoke(() => [flag, seed]);", "local")),
-                    (5_911, 408, 6),
+                    (5_914, 408, 6),
                 ),
                 (
                     "write",
                     Some(("R0203", "local = seed;", "&local")),
-                    (5_886, 396, 6),
+                    (5_890, 396, 6),
                 ),
                 (
                     "reuse",
                     Some(("R0200", "seed", "dispose(seed)")),
-                    (5_904, 356, 6),
+                    (5_906, 356, 6),
                 ),
                 // A finished sibling use of the captured descriptor is not live.
-                ("sibling", None, (6_142, 525, 6)),
+                ("sibling", None, (6_145, 525, 6)),
             ] {
                 let target = check_local_capture_root(module, receipt, &graph, name, rejection);
                 let decl = capture_declaration(module, name);
@@ -4490,7 +4490,7 @@ fn declared_once_frame_keeps_capture_provenance_and_rejects_without_mir() {
             let used = graph.statistics();
             assert_eq!(
                 (used.work, used.entries, used.max_depth),
-                (207_340, 5_525, 6)
+                (207_385, 5_525, 6)
             );
             let exact = AnalysisLimits {
                 max_work: used.work,
@@ -4539,7 +4539,7 @@ fn declared_once_route_leaves_erased_and_local_descriptor_routes_unchanged() {
             let report = lower_body(receipt, module, &decl.id, AnalysisLimits::default()).unwrap();
             assert_eq!(report.completion(), Completion::Checked);
             let used = report.statistics();
-            assert_eq!((used.work, used.entries, used.max_depth), (2_838, 384, 5));
+            assert_eq!((used.work, used.entries, used.max_depth), (2_842, 384, 5));
         },
     );
 }

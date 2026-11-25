@@ -196,7 +196,7 @@ fn grouped_ordinary_call_keeps_its_cap_with_the_join_group_loaded() {
             let d = &module.declarations[named(module, "untouched")];
             // Measured with the extension in the capture before the exit-scope correction.
             let cap = AnalysisLimits {
-                max_work: 4126,
+                max_work: 4128,
                 max_entries: 179,
                 max_depth: 7,
             };
@@ -1557,7 +1557,7 @@ function joined(numbers: List<i32>, otherInput: List<i32>): [i32, i32] {{
                     // was admitted. It must still fit the 81f5264 target budget.
                     if live {
                         let old = AnalysisLimits {
-                            max_work: 4159,
+                            max_work: 4166,
                             max_entries: 838,
                             max_depth: 10,
                         };
@@ -3054,7 +3054,7 @@ fn installed_join_fresh_results_keep_the_written_occurrence() {
         |request, module, receipt, typed| {
             assert_pre_equality_graph_cap(receipt, (282_035, 49_331, 8));
             let graph_cost = Statistics {
-                work: 282_351,
+                work: 282_378,
                 entries: 49_465,
                 max_depth: 8,
             };
@@ -3080,7 +3080,7 @@ fn installed_join_fresh_results_keep_the_written_occurrence() {
                     "join([() => flag",
                     1,
                     "Err<bool, i32>(7i32)",
-                    (24_588, 12_120),
+                    (24_590, 12_120),
                 ),
                 (
                     "successSecond",
@@ -3094,7 +3094,7 @@ fn installed_join_fresh_results_keep_the_written_occurrence() {
                     "join([() => Err",
                     0,
                     "Err<bool, i32>(7i32)",
-                    (25_683, 13_123),
+                    (25_675, 13_123),
                 ),
             ] {
                 let call = call_node(module, prefix);

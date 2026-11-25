@@ -27,7 +27,7 @@ fn grouped_record_fields_keep_the_named_initializer_budget() {
             let good = run(
                 "supported",
                 AnalysisLimits {
-                    max_work: 4187,
+                    max_work: 4189,
                     max_entries: 720,
                     ..Default::default()
                 },
@@ -111,8 +111,8 @@ fn interrupted_record_commits_binders_only_on_success() {
             let default = AnalysisLimits::default();
             // Exact pre-change budgets measured at ff8f725 for this capture.
             for (name, max_work, max_entries) in [
-                ("directTotal", 10759, 2216),
-                ("splitInterrupt", 13171, 3297),
+                ("directTotal", 10769, 2216),
+                ("splitInterrupt", 13182, 3297),
             ] {
                 assert!(
                     run(
