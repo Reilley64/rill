@@ -21,7 +21,7 @@ echo "== layout (LLVM struct { i8 tag, [n x payload] } against the rule: tag, th
 
 echo "== calls across the boundary (A: C calls the IR function, B: IR calls the C function)"
 ./harness --list | while read -r name dirs; do
-  for dir in $dirs; do
+  for dir in $(echo "$dirs" | sed "s/./& /g"); do
     ./harness "$name" "$dir" > /dev/null 2>&1
     rc=$?
     if [ "$rc" -eq 0 ]; then result=match
