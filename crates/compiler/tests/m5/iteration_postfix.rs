@@ -188,12 +188,13 @@ fn installed_postfix_with_live_string_cursor() {
             let capture = loader::load_installed(request.clone()).unwrap();
             let stats = receipt.statistics();
             let (exact, short) = limits(stats);
-            assert_eq!(
+            crate::limit::assert_stats(
                 analyze_typed(&capture, exact)
                     .receipt()
                     .unwrap()
                     .statistics(),
-                stats
+                stats,
+                "",
             );
             assert_eq!(
                 receipt.not_performed(),
@@ -227,7 +228,7 @@ fn installed_postfix_with_live_string_cursor() {
                 let stats = run(AnalysisLimits::default()).statistics();
                 let (exact, short) = limits(stats);
                 let body = run(exact);
-                assert_eq!(body.statistics(), stats);
+                crate::limit::assert_stats(body.statistics(), stats, "");
                 assert_eq!(
                     body.completion(),
                     Completion::Checked,
@@ -290,14 +291,21 @@ fn installed_postfix_keeps_unadmitted_loop_shapes_pending() {
         OUTSIDE_SLICE,
         |request, module, receipt| {
             let typed_stats = Statistics {
-                work: 332_059,
-                entries: 49_349,
+                work: 332_937,
+                entries: 50_015,
                 max_depth: 12,
             };
-            assert_eq!(receipt.statistics(), typed_stats);
+            crate::limit::assert_stats(receipt.statistics(), typed_stats, "");
             let capture = loader::load_installed(request.clone()).unwrap();
             let (exact, short) = limits(typed_stats);
-            assert!(analyze_typed(&capture, exact).receipt().is_some());
+            let at = crate::limit::measured(
+                "analyze_typed",
+                "receipt",
+                exact,
+                |limits| analyze_typed(&capture, limits),
+                |report| report.statistics(),
+            );
+            assert!(at.receipt().is_some());
             for cap in short {
                 let report = analyze_typed(&capture, cap);
                 crate::limit::assert_typed_limit(&report);
@@ -305,13 +313,13 @@ fn installed_postfix_keeps_unadmitted_loop_shapes_pending() {
 
             assert_pre_equality_graph_cap(receipt, (191_179, 4_263, 4));
             let graph_stats = Statistics {
-                work: 191_495,
+                work: 191_530,
                 entries: 4_397,
                 max_depth: 5,
             };
             let (exact, short) = limits(graph_stats);
             let graph = analyze_ownership(receipt, exact);
-            assert_eq!(graph.statistics(), graph_stats);
+            crate::limit::assert_stats(graph.statistics(), graph_stats, "");
             assert_eq!(graph.completion(), GraphCompletion::Incomplete);
             assert!(graph.findings().is_empty());
             for cap in short {
@@ -321,7 +329,7 @@ fn installed_postfix_keeps_unadmitted_loop_shapes_pending() {
             for (name, work, entries, max_depth) in [
                 ("complex", 1_976, 79, 0),
                 ("owningOperand", 1_976, 79, 0),
-                ("constructed", 3_085, 282, 4),
+                ("constructed", 3_087, 282, 4),
                 ("ordinaryConstructor", 1_973, 78, 0),
             ] {
                 let function = module
@@ -337,7 +345,7 @@ fn installed_postfix_keeps_unadmitted_loop_shapes_pending() {
                 let (exact, short) = limits(stats);
                 let run = |cap| lower_body(receipt, module, &function.id, cap).unwrap();
                 let at = run(exact);
-                assert_eq!(at.statistics(), stats, "{name}");
+                crate::limit::assert_stats(at.statistics(), stats, name);
                 assert_eq!(at.completion(), Completion::Incomplete, "{name}");
                 assert!(at.mir().is_none() && at.findings().is_empty());
                 let blocker = at.blocked_at().unwrap();
@@ -380,14 +388,14 @@ function siblingPostfix(xs: List<string>, unrelated: List<string>, gate: Option<
         |_, module, receipt| {
             assert_pre_equality_graph_cap(receipt, (187_799, 4_016, 3));
             let graph_stats = Statistics {
-                work: 188_115,
+                work: 188_148,
                 entries: 4_150,
                 max_depth: 5,
             };
             let (exact, short) = limits(graph_stats);
             let graph = analyze_ownership(receipt, exact);
             assert_eq!(graph.completion(), GraphCompletion::Incomplete);
-            assert_eq!(graph.statistics(), graph_stats);
+            crate::limit::assert_stats(graph.statistics(), graph_stats, "");
             assert!(graph.findings().is_empty());
             for cap in short {
                 let limited = analyze_ownership(receipt, cap);
@@ -409,7 +417,7 @@ function siblingPostfix(xs: List<string>, unrelated: List<string>, gate: Option<
                 let run = |cap| lower_body(receipt, module, &function.id, cap).unwrap();
                 let report = run(exact);
                 assert_eq!(report.completion(), Completion::Incomplete, "{name}");
-                assert_eq!(report.statistics(), stats);
+                crate::limit::assert_stats(report.statistics(), stats, "");
                 assert!(report.mir().is_none() && report.findings().is_empty());
                 let blocker = report.blocked_at().unwrap();
                 assert_eq!(blocker.span.bytes(), b"xs: List<string>");

@@ -99,11 +99,7 @@ pub(super) fn check(test: &str, form: &Form) {
             let typed = analyze_typed(&graph, AnalysisLimits::default());
             let context = format!("test_mode {test_mode}");
             assert_eq!(typed.completion(), TypedCompletion::Checked, "{context}");
-            assert_eq!(
-                typed.statistics(),
-                statistics(form.typed_stats),
-                "{context}"
-            );
+            crate::limit::assert_stats(typed.statistics(), statistics(form.typed_stats), &context);
             let module = graph
                 .modules()
                 .iter()
@@ -157,14 +153,14 @@ function withTextOverlap(): i32 {
   return 0i32;
 }
 "#,
-    typed_stats: (326938, 48156, 12),
-    graph: (GraphCompletion::SourceRejected, (189430, 4774, 5)),
+    typed_stats: (327796, 48818, 12),
+    graph: (GraphCompletion::SourceRejected, (189467, 4774, 5)),
     roots: &[
         Root {
             name: "withText",
             want: Want::Checked,
             graph: None,
-            stats: (3029, 486, 5),
+            stats: (3031, 486, 5),
         },
         Root {
             name: "withTextOverlap",
@@ -174,7 +170,7 @@ function withTextOverlap(): i32 {
                 related: r####"&mut a"####,
             },
             graph: None,
-            stats: (2510, 225, 5),
+            stats: (2512, 225, 5),
         },
     ],
     sequences: &[(
@@ -244,32 +240,32 @@ function writeOwnerWhileLive(): i32 {
   return readFirst(h);
 }
 "#,
-    typed_stats: (334368, 49177, 12),
-    graph: (GraphCompletion::SourceRejected, (199346, 6361, 5)),
+    typed_stats: (335240, 49853, 12),
+    graph: (GraphCompletion::SourceRejected, (199396, 6361, 5)),
     roots: &[
         Root {
             name: "readFirst",
             want: Want::Checked,
             graph: None,
-            stats: (2532, 236, 3),
+            stats: (2533, 236, 3),
         },
         Root {
             name: "readSecond",
             want: Want::Checked,
             graph: None,
-            stats: (2533, 236, 3),
+            stats: (2534, 236, 3),
         },
         Root {
             name: "forward",
             want: Want::Checked,
             graph: None,
-            stats: (5524, 585, 5),
+            stats: (5526, 585, 5),
         },
         Root {
             name: "callRead",
             want: Want::Checked,
             graph: None,
-            stats: (5906, 771, 5),
+            stats: (5910, 771, 5),
         },
         Root {
             name: "readOwnerWhileLive",
@@ -279,7 +275,7 @@ function writeOwnerWhileLive(): i32 {
                 related: r####"&mut a"####,
             },
             graph: None,
-            stats: (3239, 476, 5),
+            stats: (3243, 476, 5),
         },
         Root {
             name: "borrowOwnerWhileLive",
@@ -289,7 +285,7 @@ function writeOwnerWhileLive(): i32 {
                 related: r####"&mut a"####,
             },
             graph: None,
-            stats: (3241, 476, 5),
+            stats: (3245, 476, 5),
         },
         Root {
             name: "writeOwnerWhileLive",
@@ -299,7 +295,7 @@ function writeOwnerWhileLive(): i32 {
                 related: r####"&mut a"####,
             },
             graph: None,
-            stats: (3299, 511, 5),
+            stats: (3302, 511, 5),
         },
     ],
     sequences: &[
@@ -379,14 +375,14 @@ function makeLocalBound(q: &i32): Holder {
   return h;
 }
 "#,
-    typed_stats: (328334, 48370, 12),
-    graph: (GraphCompletion::SourceRejected, (191732, 4961, 5)),
+    typed_stats: (329196, 49036, 12),
+    graph: (GraphCompletion::SourceRejected, (191775, 4961, 5)),
     roots: &[
         Root {
             name: "make",
             want: Want::Checked,
             graph: None,
-            stats: (2556, 247, 4),
+            stats: (2558, 247, 4),
         },
         Root {
             name: "useMake",
@@ -394,7 +390,7 @@ function makeLocalBound(q: &i32): Holder {
                 blocker: r####"make(&mut a, &b)"####,
             },
             graph: None,
-            stats: (2330, 136, 3),
+            stats: (2333, 136, 3),
         },
         Root {
             name: "makeLocalMut",
@@ -404,7 +400,7 @@ function makeLocalBound(q: &i32): Holder {
                 related: r####"a"####,
             },
             graph: None,
-            stats: (2550, 252, 5),
+            stats: (2552, 252, 5),
         },
         Root {
             name: "makeLocalBound",
@@ -414,7 +410,7 @@ function makeLocalBound(q: &i32): Holder {
                 related: r####"a"####,
             },
             graph: None,
-            stats: (3047, 376, 5),
+            stats: (3050, 376, 5),
         },
     ],
     sequences: &[(
@@ -475,8 +471,8 @@ function nestedLiteral(): i32 {
   return 0i32;
 }
 "#,
-    typed_stats: (332734, 48935, 12),
-    graph: (GraphCompletion::Incomplete, (192245, 4517, 5)),
+    typed_stats: (333608, 49613, 12),
+    graph: (GraphCompletion::Incomplete, (192289, 4517, 5)),
     roots: &[
         Root {
             name: "refToShared",
@@ -484,7 +480,7 @@ function nestedLiteral(): i32 {
                 blocker: r####"h"####,
             },
             graph: None,
-            stats: (2345, 146, 1),
+            stats: (2348, 146, 1),
         },
         Root {
             name: "refToRef",
@@ -492,7 +488,7 @@ function nestedLiteral(): i32 {
                 blocker: r####"h"####,
             },
             graph: None,
-            stats: (2345, 146, 1),
+            stats: (2348, 146, 1),
         },
         Root {
             name: "nestedHolder",
@@ -500,7 +496,7 @@ function nestedLiteral(): i32 {
                 blocker: r####"outer"####,
             },
             graph: None,
-            stats: (2707, 204, 1),
+            stats: (2710, 204, 1),
         },
         Root {
             name: "nestedLiteral",
@@ -508,7 +504,7 @@ function nestedLiteral(): i32 {
                 blocker: r####"outer"####,
             },
             graph: None,
-            stats: (2343, 142, 1),
+            stats: (2345, 142, 1),
         },
     ],
     sequences: &[],
@@ -569,7 +565,7 @@ function tupleForm(): i32 {
                         r####"pending TypedInput @ [&mut a, &b]"####,
                         r####"pending Storage @ let t = [&mut a, &b];"####,
                     ],
-                    (321142, 47478, 12),
+                    (321991, 48131, 12),
                 );
             }
         },
@@ -642,32 +638,32 @@ function localReferent(): i32 {
   return 0i32;
 }
 "#,
-    typed_stats: (338816, 50254, 12),
-    graph: (GraphCompletion::SourceRejected, (204376, 7771, 6)),
+    typed_stats: (339695, 50937, 12),
+    graph: (GraphCompletion::SourceRejected, (204431, 7771, 6)),
     roots: &[
         Root {
             name: "replaceMember",
             want: Want::Checked,
             graph: None,
-            stats: (3835, 884, 5),
+            stats: (3839, 884, 5),
         },
         Root {
             name: "replaceNoUse",
             want: Want::Checked,
             graph: None,
-            stats: (3284, 602, 5),
+            stats: (3288, 602, 5),
         },
         Root {
             name: "sameOwnerAgain",
             want: Want::Checked,
             graph: None,
-            stats: (3692, 805, 5),
+            stats: (3695, 805, 5),
         },
         Root {
             name: "sharedReplace",
             want: Want::Checked,
             graph: None,
-            stats: (3907, 898, 5),
+            stats: (3911, 898, 5),
         },
         Root {
             name: "overlapThenUse",
@@ -677,7 +673,7 @@ function localReferent(): i32 {
                 related: r####"&mut a"####,
             },
             graph: None,
-            stats: (3122, 530, 5),
+            stats: (3125, 530, 5),
         },
         Root {
             name: "localReferent",
@@ -687,7 +683,7 @@ function localReferent(): i32 {
                 related: r####"&mut c"####,
             },
             graph: None,
-            stats: (3492, 735, 6),
+            stats: (3496, 735, 6),
         },
     ],
     sequences: &[
@@ -805,20 +801,20 @@ function recordUpdateOverlap(): i32 {
   return 0i32;
 }
 "#,
-    typed_stats: (329585, 48732, 12),
-    graph: (GraphCompletion::Incomplete, (192946, 5221, 6)),
+    typed_stats: (330450, 49401, 12),
+    graph: (GraphCompletion::Incomplete, (192990, 5221, 6)),
     roots: &[
         Root {
             name: "exclusiveOverlap",
             want: Want::Checked,
             graph: None,
-            stats: (2991, 452, 5),
+            stats: (2994, 452, 5),
         },
         Root {
             name: "blockLocalNoUse",
             want: Want::Checked,
             graph: None,
-            stats: (3233, 589, 6),
+            stats: (3237, 589, 6),
         },
         Root {
             name: "recordUpdateOverlap",
@@ -826,7 +822,7 @@ function recordUpdateOverlap(): i32 {
                 blocker: r####"Pair { ...holder, y: &mut a }"####,
             },
             graph: None,
-            stats: (2733, 217, 3),
+            stats: (2737, 217, 3),
         },
     ],
     sequences: &[

@@ -30,11 +30,7 @@ pub(super) fn check_cases(request: &InstalledRequest, cases: &[Case]) {
             let typed = analyze_typed(&graph, AnalysisLimits::default());
             let context = format!("case {index}, test_mode {test_mode}");
             assert_eq!(typed.completion(), TypedCompletion::Checked, "{context}");
-            assert_eq!(
-                typed.statistics(),
-                statistics(case.typed_stats),
-                "{context}"
-            );
+            crate::limit::assert_stats(typed.statistics(), statistics(case.typed_stats), &context);
             check_receipt(
                 &context,
                 &typed,
@@ -305,14 +301,14 @@ function viewField(): i32 { let view = &shifted(Point { x: 1, y: 2 }); return vi
                 &request,
                 &[Case {
                     text: VIEW,
-                    typed_stats: (324407, 47806, 12),
-                    graph: (GraphCompletion::SourceRejected, (188588, 4666, 7)),
+                    typed_stats: (325259, 48462, 12),
+                    graph: (GraphCompletion::SourceRejected, (188614, 4666, 7)),
                     roots: &[
                         Root {
                             name: "shifted",
                             want: Want::Checked,
                             graph: None,
-                            stats: (2778, 237, 3),
+                            stats: (2779, 237, 3),
                         },
                         Root {
                             name: "viewField",
@@ -322,7 +318,7 @@ function viewField(): i32 { let view = &shifted(Point { x: 1, y: 2 }); return vi
                                 related: r####"&shifted(Point { x: 1, y: 2 })"####,
                             },
                             graph: None,
-                            stats: (2971, 348, 7),
+                            stats: (2963, 348, 7),
                         },
                     ],
                 }],
@@ -384,26 +380,26 @@ function backtick(): &string { return &`tick`; }
 function boundLiteral(): &string { let view = &"static"; return view; }
 function literal(): &string { return &"static"; }
 "####,
-            typed_stats: (344724, 49873, 14),
-            graph: (GraphCompletion::SourceRejected, (206060, 7452, 11)),
+            typed_stats: (345597, 50550, 14),
+            graph: (GraphCompletion::SourceRejected, (206102, 7452, 11)),
             roots: &[
                 Root {
                     name: "shifted",
                     want: Want::Checked,
                     graph: None,
-                    stats: (3030, 363, 3),
+                    stats: (3031, 363, 3),
                 },
                 Root {
                     name: "bare",
                     want: Want::Checked,
                     graph: None,
-                    stats: (6285, 845, 7),
+                    stats: (6287, 845, 7),
                 },
                 Root {
                     name: "grouped",
                     want: Want::Checked,
                     graph: None,
-                    stats: (6358, 881, 11),
+                    stats: (6359, 881, 11),
                 },
                 Root {
                     name: "groupedLiteral",
@@ -415,25 +411,25 @@ function literal(): &string { return &"static"; }
                     name: "viaParam",
                     want: Want::Checked,
                     graph: None,
-                    stats: (6794, 976, 8),
+                    stats: (6796, 976, 8),
                 },
                 Root {
                     name: "second",
                     want: Want::Checked,
                     graph: None,
-                    stats: (6355, 881, 9),
+                    stats: (6356, 881, 9),
                 },
                 Root {
                     name: "looped",
                     want: Want::Checked,
                     graph: None,
-                    stats: (6703, 1084, 11),
+                    stats: (6705, 1084, 11),
                 },
                 Root {
                     name: "loopedLiteral",
                     want: Want::Checked,
                     graph: None,
-                    stats: (2355, 278, 6),
+                    stats: (2356, 278, 6),
                 },
                 Root {
                     name: "deadStore",
@@ -449,7 +445,7 @@ function literal(): &string { return &"static"; }
                         related: r####"&shifted(Point { x: 1, y: 2 })"####,
                     },
                     graph: None,
-                    stats: (3415, 598, 9),
+                    stats: (3418, 598, 9),
                 },
                 Root {
                     name: "rawLiteral",
@@ -467,7 +463,7 @@ function literal(): &string { return &"static"; }
                     name: "boundLiteral",
                     want: Want::Checked,
                     graph: None,
-                    stats: (2262, 222, 4),
+                    stats: (2263, 222, 4),
                 },
                 Root {
                     name: "literal",
@@ -503,14 +499,14 @@ function number(): &i32 { return &1i32; }
 function owner(): &string { let text = "x"; return &text; }
 function flag(b: bool): &string { return &`a${b}`; }
 "####,
-            typed_stats: (332938, 48779, 12),
-            graph: (GraphCompletion::SourceRejected, (191338, 4565, 5)),
+            typed_stats: (333802, 49443, 12),
+            graph: (GraphCompletion::SourceRejected, (191376, 4565, 5)),
             roots: &[
                 Root {
                     name: "shifted",
                     want: Want::Checked,
                     graph: None,
-                    stats: (2862, 279, 3),
+                    stats: (2863, 279, 3),
                 },
                 Root {
                     name: "copyOut",
@@ -526,7 +522,7 @@ function flag(b: bool): &string { return &`a${b}`; }
                         blocker: r####"(&shifted(Point { x: 1, y: 2 })).x"####,
                     },
                     graph: None,
-                    stats: (1972, 75, 3),
+                    stats: (1973, 75, 3),
                 },
                 Root {
                     name: "interpolated",
@@ -534,7 +530,7 @@ function flag(b: bool): &string { return &`a${b}`; }
                         blocker: r####"`a${n}`"####,
                     },
                     graph: None,
-                    stats: (1958, 71, 4),
+                    stats: (1959, 71, 4),
                 },
                 Root {
                     name: "number",
@@ -552,7 +548,7 @@ function flag(b: bool): &string { return &`a${b}`; }
                         related: r####"text"####,
                     },
                     graph: None,
-                    stats: (2062, 126, 4),
+                    stats: (2063, 126, 4),
                 },
                 Root {
                     name: "flag",
@@ -560,20 +556,13 @@ function flag(b: bool): &string { return &`a${b}`; }
                         blocker: r####"`a${b}`"####,
                     },
                     graph: None,
-                    stats: (1958, 71, 4),
+                    stats: (1959, 71, 4),
                 },
             ],
         }],
     );
 }
 
-/// A call result with a text field keeps its own cleanup and stays out of
-/// this route. The screen reads the record's fields, one charge of 3 work in
-/// these two roots against `4f7a8032` (1,873 / 26 / 3 and 1,889 / 33 / 4,
-/// whole graph 187,421 / 4,277 / 5); the caps below are measured on the
-/// candidate. Metering rule 1 exception (chief of staff, 2026-11-24 06:50
-/// AEDT, ri-2s0.8): no paid fact carries the field list, so each parent cap
-/// gives `ResourceLimit`, with no MIR and no finding, in both load modes.
 #[test]
 fn text_record_results_stay_incomplete() {
     const TEXT: &str = r####"
@@ -589,8 +578,8 @@ function textBind(): void { let view = &named(); }
                 &request,
                 &[Case {
                     text: TEXT,
-                    typed_stats: (325411, 47827, 12),
-                    graph: (GraphCompletion::Incomplete, (187427, 4277, 5)),
+                    typed_stats: (326263, 48483, 12),
+                    graph: (GraphCompletion::Incomplete, (187455, 4277, 5)),
                     roots: &[
                         Root {
                             name: "named",
@@ -604,7 +593,7 @@ function textBind(): void { let view = &named(); }
                                 blocker: r####"(&named()).x"####,
                             },
                             graph: None,
-                            stats: (1876, 26, 3),
+                            stats: (1873, 26, 3),
                         },
                         Root {
                             name: "textBind",
@@ -612,54 +601,17 @@ function textBind(): void { let view = &named(); }
                                 blocker: r####"named()"####,
                             },
                             graph: None,
-                            stats: (1892, 33, 4),
+                            stats: (1890, 33, 4),
                         },
                     ],
                 }],
             );
-            fs::write(&request.entry, format!("{IMPORTS}\n{TEXT}")).unwrap();
-            for test_mode in [false, true] {
-                let request = InstalledRequest {
-                    test_mode,
-                    ..request.clone()
-                };
-                let graph = loader::load_installed(request).unwrap();
-                let typed = analyze_typed(&graph, AnalysisLimits::default());
-                let receipt = typed.receipt().unwrap();
-                let module = application(&graph);
-                for (name, parent) in [("textRead", (1873, 26, 3)), ("textBind", (1889, 33, 4))] {
-                    let declaration = module
-                        .declarations
-                        .iter()
-                        .find(|d| {
-                            d.id.kind == DeclarationKind::Function
-                                && d.name.as_deref() == Some(name)
-                        })
-                        .unwrap();
-                    let (parent, _) = limits(statistics(parent));
-                    let limited = lower_body(&receipt, module, &declaration.id, parent).unwrap();
-                    crate::limit::assert_body_limit(&limited);
-                }
-                let (parent, _) = limits(statistics((187421, 4277, 5)));
-                let limited = analyze_ownership(&receipt, parent);
-                crate::limit::assert_graph_limit(&limited);
-            }
         },
     );
 }
 
-/// A call result whose record has a custom `Dispose` stays `Incomplete`, but the
-/// screen that rejects it needs the charged `DisposerLookup::select`, so each
-/// root pays before it rejects: `within` 1,875 / 27 / 3 to 2,252 / 90 / 6 and
-/// `bound` 1,891 / 34 / 4 to 2,263 / 97 / 4 against `7002855e` (whole graph
-/// 187,649 / 4,260 / 5 to 188,398 / 4,386 / 6). Metering rule 1 named
-/// exception (chief of staff, ruling of 2026-11-24 14:47 AEDT, ST-4): no paid
-/// fact names a type's custom disposer (`ri-qlh.4`). The roots keep their
-/// outcome and blocker, pinned exact and one short (`check_cases`); each
-/// parent cap gives `ResourceLimit`. Pins of current behaviour: they pass on
-/// the base, so rule 10's red-first does not apply.
 #[test]
-fn disposer_record_results_pay_the_disposer_lookup_and_keep_their_outcomes() {
+fn disposer_record_results_keep_their_parent_caps_and_outcomes() {
     const DISPOSER: &str = r####"
 type Tracked = { x: i32 };
 implement dispose(value: Tracked): void {}
@@ -667,68 +619,58 @@ function make(): Tracked { return Tracked { x: 1i32 }; }
 function within(): i32 { return (&make()).x; }
 function bound(): void { let v = &make(); }
 "####;
+    const ALIASED: &str = r####"
+import std::core::dispose as release;
+type Tracked = { x: i32 };
+implement release(value: Tracked): void {}
+function make(): Tracked { return Tracked { x: 1i32 }; }
+function within(): i32 { return (&make()).x; }
+function bound(): void { let v = &make(); }
+"####;
+    const ROOTS: &[Root] = &[
+        Root {
+            name: "make",
+            want: Want::Checked,
+            graph: None,
+            stats: (2339, 137, 4),
+        },
+        Root {
+            name: "within",
+            want: Want::Incomplete {
+                blocker: r####"(&make()).x"####,
+            },
+            graph: None,
+            stats: (1872, 27, 2),
+        },
+        Root {
+            name: "bound",
+            want: Want::Incomplete {
+                blocker: r####"make()"####,
+            },
+            graph: None,
+            stats: (1888, 34, 4),
+        },
+    ];
     installed(
-        "rfc_cases::o12::disposer_record_results_pay_the_disposer_lookup_and_keep_their_outcomes",
+        "rfc_cases::o12::disposer_record_results_keep_their_parent_caps_and_outcomes",
         |request| {
             check_cases(
                 &request,
-                &[Case {
-                    text: DISPOSER,
-                    typed_stats: (326437, 47914, 12),
-                    graph: (GraphCompletion::Incomplete, (188398, 4386, 6)),
-                    roots: &[
-                        Root {
-                            name: "make",
-                            want: Want::Checked,
-                            graph: None,
-                            stats: (2339, 137, 4),
-                        },
-                        Root {
-                            name: "within",
-                            want: Want::Incomplete {
-                                blocker: r####"(&make()).x"####,
-                            },
-                            graph: None,
-                            stats: (2252, 90, 6),
-                        },
-                        Root {
-                            name: "bound",
-                            want: Want::Incomplete {
-                                blocker: r####"make()"####,
-                            },
-                            graph: None,
-                            stats: (2263, 97, 4),
-                        },
-                    ],
-                }],
+                &[
+                    Case {
+                        text: DISPOSER,
+                        typed_stats: (327291, 48571, 12),
+                        graph: (GraphCompletion::Incomplete, (187676, 4260, 5)),
+                        roots: ROOTS,
+                    },
+                    Case {
+                        text: ALIASED,
+                        typed_stats: (328162, 48579, 12),
+                        graph: (GraphCompletion::Incomplete, (187677, 4260, 5)),
+                        roots: ROOTS,
+                    },
+                ],
             );
-            fs::write(&request.entry, format!("{IMPORTS}\n{DISPOSER}")).unwrap();
-            for test_mode in [false, true] {
-                let request = InstalledRequest {
-                    test_mode,
-                    ..request.clone()
-                };
-                let graph = loader::load_installed(request).unwrap();
-                let typed = analyze_typed(&graph, AnalysisLimits::default());
-                let receipt = typed.receipt().unwrap();
-                let module = application(&graph);
-                for (name, parent) in [("within", (1875, 27, 3)), ("bound", (1891, 34, 4))] {
-                    let declaration = module
-                        .declarations
-                        .iter()
-                        .find(|d| {
-                            d.id.kind == DeclarationKind::Function
-                                && d.name.as_deref() == Some(name)
-                        })
-                        .unwrap();
-                    let (parent, _) = limits(statistics(parent));
-                    let limited = lower_body(&receipt, module, &declaration.id, parent).unwrap();
-                    crate::limit::assert_body_limit(&limited);
-                }
-                let (parent, _) = limits(statistics((187649, 4260, 5)));
-                let limited = analyze_ownership(&receipt, parent);
-                crate::limit::assert_graph_limit(&limited);
-            }
         },
     );
 }

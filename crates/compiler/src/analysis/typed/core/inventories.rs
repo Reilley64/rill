@@ -17,24 +17,37 @@ pub(in crate::analysis::typed) struct InventoryCompleteness {
 pub(in crate::analysis) struct InstalledOrdinaryScope<'g> {
     context: GraphId,
     routine: Option<super::routine::RoutineRole<'g>>,
+    output: Vec<&'g DeclarationId>,
 }
 
 impl<'g> InstalledOrdinaryScope<'g> {
     pub(in crate::analysis::typed) fn from_closed_roles(
         graph: &Graph,
         routine: Option<super::routine::RoutineRole<'g>>,
+        output: &[(&'g DeclarationId, PrimitiveOperation)],
     ) -> Self {
         Self {
             context: graph.id(),
             routine,
+            output: output.iter().map(|(family, _)| *family).collect(),
         }
     }
 
-    pub(in crate::analysis) fn contains(&self, family: &DeclarationId) -> bool {
-        family.context == self.context
-            && family.kind == DeclarationKind::Family
-            && (family.module.origin == Origin::Application
-                || self.routine.is_some_and(|role| &role.family.id == family))
+    pub(in crate::analysis) fn contains(
+        &self,
+        family: &DeclarationId,
+        mut step: impl FnMut(usize) -> Work<()>,
+    ) -> Work<bool> {
+        if family.context != self.context || family.kind != DeclarationKind::Family {
+            return Ok(false);
+        }
+        if family.module.origin == Origin::Application
+            || self.routine.is_some_and(|role| &role.family.id == family)
+        {
+            return Ok(true);
+        }
+        step(1)?;
+        Ok(self.output.contains(&family))
     }
 
     pub(in crate::analysis) fn routine(&self) -> Option<super::routine::RoutineRole<'g>> {

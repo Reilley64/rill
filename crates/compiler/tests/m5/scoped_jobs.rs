@@ -36,13 +36,13 @@ fn unsupported_list_arrow_shapes_keep_the_old_caps() {
             let typed = compiler::analysis::typed::analyze_typed(
                 &graph,
                 AnalysisLimits {
-                    max_work: 335319,
-                    max_entries: 50011,
+                    max_work: 335982,
+                    max_entries: 50674,
                     max_depth: 12,
                 },
             );
             assert!(typed.receipt().is_some());
-            for (name, max_work, max_entries) in [("partial", 2367, 148), ("mixed", 2372, 152)] {
+            for (name, max_work, max_entries) in [("partial", 2368, 148), ("mixed", 2373, 152)] {
                 let d = module
                     .declarations
                     .iter()
@@ -314,7 +314,7 @@ fn installed_two_list_arrow_frames() {
                 module,
                 &decl("unknown").id,
                 AnalysisLimits {
-                    max_work: 2611,
+                    max_work: 2612,
                     max_entries: 253,
                     max_depth: 3,
                 },
@@ -971,9 +971,9 @@ fn grouped_list_index_and_unadmitted_selectors() {
             crate::limit::assert_body_limit(&limited);
             // Exact budgets for these unchanged pending routes on 9b020d1.
             for (name, max_work, max_entries) in [
-                ("dynamic", 2008, 88),
-                ("unknown", 1983, 84),
-                ("exclusive", 1983, 84),
+                ("dynamic", 2010, 88),
+                ("unknown", 1984, 84),
+                ("exclusive", 1984, 84),
             ] {
                 let pending = run(
                     name,

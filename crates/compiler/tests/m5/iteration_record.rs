@@ -120,21 +120,27 @@ fn record_yield_cleans_the_partial_item_then_the_suffix() {
         SOURCE,
         |request, module, receipt, typed| {
             let capture = loader::load_installed(request.clone()).unwrap();
-            let receipt_stats = stats(383_358, 55_353, 12);
-            assert_eq!(receipt.statistics(), receipt_stats);
+            let receipt_stats = stats(384_367, 56_096, 12);
+            crate::limit::assert_stats(receipt.statistics(), receipt_stats, "");
             let (exact, short) = limits(receipt_stats);
-            let at = analyze_typed(&capture, exact);
-            assert_eq!(at.receipt().unwrap().statistics(), receipt_stats);
+            let at = crate::limit::measured(
+                "analyze_typed",
+                "receipt",
+                exact,
+                |limits| analyze_typed(&capture, limits),
+                |report| report.statistics(),
+            );
+            crate::limit::assert_stats(at.receipt().unwrap().statistics(), receipt_stats, "");
             for cap in short {
                 let limited = analyze_typed(&capture, cap);
                 crate::limit::assert_typed_limit(&limited);
             }
 
             assert_pre_equality_graph_cap(receipt, (234_907, 13_094, 9));
-            let graph_stats = stats(235_223, 13_228, 9);
+            let graph_stats = stats(234_943, 13_167, 9);
             let (exact, short) = limits(graph_stats);
             let graph = analyze_ownership(receipt, exact);
-            assert_eq!(graph.statistics(), graph_stats);
+            crate::limit::assert_stats(graph.statistics(), graph_stats, "");
             assert_eq!(graph.completion(), GraphCompletion::SourceRejected);
             assert!(graph.inventory_complete());
             assert_eq!(graph.test_mode(), request.test_mode);
@@ -147,34 +153,25 @@ fn record_yield_cleans_the_partial_item_then_the_suffix() {
             let lane = Lane::new(module, typed);
             let loop_head: &[u8] =
                 b"for (let item of [Entry{take: a, keep: b}, Entry{take: c, keep: d}])";
-            // From `dead` on, the caps are the parent's, measured at 057c5005
-            // before the record lane, except `mixed` (parent 2,512/350/2) and
-            // `custom` (parent 2,522/358/2). Rejecting those element types
-            // reads the record's fields and selects its disposer; no earlier
-            // fact supplies either. Rule 1 exception (chief of staff,
-            // 2026-11-23, ri-2s0.10): each parent cap, measured at 057c5005
-            // in a scratch worktree, now gives `ResourceLimit` (asserted
-            // after this table). The dead and pruned loops are never
-            // lowered, so they open no List.
             for (name, expected, cap) in [
-                ("onBreak", Completion::Checked, stats(5_605, 1_356, 7)),
-                ("grouped", Completion::Checked, stats(5_611, 1_356, 8)),
-                ("scoped", Completion::Checked, stats(5_607, 1_356, 8)),
-                ("wrapped", Completion::Checked, stats(6_065, 1_604, 9)),
-                ("whole", Completion::Checked, stats(5_318, 1_209, 5)),
-                ("exhausted", Completion::Checked, stats(5_624, 1_362, 7)),
-                ("reused", Completion::SourceRejected, stats(5_655, 1_409, 7)),
+                ("onBreak", Completion::Checked, stats(5_610, 1_356, 7)),
+                ("grouped", Completion::Checked, stats(5_616, 1_356, 8)),
+                ("scoped", Completion::Checked, stats(5_612, 1_356, 8)),
+                ("wrapped", Completion::Checked, stats(6_071, 1_604, 9)),
+                ("whole", Completion::Checked, stats(5_323, 1_209, 5)),
+                ("exhausted", Completion::Checked, stats(5_629, 1_362, 7)),
+                ("reused", Completion::SourceRejected, stats(5_660, 1_409, 7)),
                 (
                     "movedSource",
                     Completion::SourceRejected,
-                    stats(5_351, 1_224, 5),
+                    stats(5_356, 1_224, 5),
                 ),
-                ("dead", Completion::Checked, stats(2_690, 426, 2)),
-                ("pruned", Completion::Checked, stats(2_738, 456, 4)),
-                ("onPostfix", Completion::Incomplete, stats(3_649, 562, 4)),
-                ("textLiteral", Completion::Incomplete, stats(2_512, 350, 2)),
-                ("mixed", Completion::Incomplete, stats(2_515, 350, 2)),
-                ("custom", Completion::Incomplete, stats(2_894, 419, 2)),
+                ("dead", Completion::Checked, stats(2_694, 426, 2)),
+                ("pruned", Completion::Checked, stats(2_742, 456, 4)),
+                ("onPostfix", Completion::Incomplete, stats(3_654, 562, 4)),
+                ("textLiteral", Completion::Incomplete, stats(2_514, 350, 2)),
+                ("mixed", Completion::Incomplete, stats(2_514, 350, 2)),
+                ("custom", Completion::Incomplete, stats(2_526, 358, 2)),
             ] {
                 let function = module
                     .declarations
@@ -189,7 +186,7 @@ fn record_yield_cleans_the_partial_item_then_the_suffix() {
                     .unwrap();
                 let (exact, short) = limits(cap);
                 let body = run(exact);
-                assert_eq!(body.statistics(), cap, "{name}");
+                crate::limit::assert_stats(body.statistics(), cap, name);
                 assert_eq!(body.completion(), expected, "{name}");
                 assert_eq!(root.ordinary_completion(), expected, "{name}");
                 for cap in short {
@@ -251,18 +248,6 @@ fn record_yield_cleans_the_partial_item_then_the_suffix() {
                         );
                     }
                 }
-            }
-            for (name, parent) in [
-                ("mixed", stats(2_512, 350, 2)),
-                ("custom", stats(2_522, 358, 2)),
-            ] {
-                let function = module
-                    .declarations
-                    .iter()
-                    .find(|d| d.name.as_deref() == Some(name))
-                    .unwrap();
-                let limited = lower_body(receipt, module, &function.id, limits(parent).0).unwrap();
-                crate::limit::assert_body_limit(&limited);
             }
         },
     );
@@ -669,10 +654,10 @@ fn string_on_break_keeps_its_cap() {
                 .iter()
                 .find(|d| d.name.as_deref() == Some("onBreak"))
                 .unwrap();
-            let cap = stats(2_837, 457, 6);
+            let cap = stats(2_841, 457, 6);
             let (exact, short) = limits(cap);
             let body = lower_body(receipt, module, &function.id, exact).unwrap();
-            assert_eq!(body.statistics(), cap);
+            crate::limit::assert_stats(body.statistics(), cap, "");
             assert_eq!(body.completion(), Completion::Checked);
             for cap in short {
                 let limited = lower_body(receipt, module, &function.id, cap).unwrap();

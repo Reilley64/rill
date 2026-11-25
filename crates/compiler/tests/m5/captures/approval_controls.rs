@@ -33,7 +33,7 @@ fn assert_pinned(test: &str, pin: &Pin) {
     probe_report(test, pin.source, |request, module, typed| {
         assert_eq!(typed.completion(), pin.completion, "{}", pin.source);
         assert_ne!(typed.completion(), TypedCompletion::SourceRejected);
-        assert_eq!(typed.statistics(), pin.used, "{}", pin.source);
+        crate::limit::assert_stats(typed.statistics(), pin.used, pin.source);
         assert_eq!(
             typed.receipt().is_some(),
             pin.completion == TypedCompletion::Checked
@@ -71,9 +71,15 @@ fn assert_pinned(test: &str, pin: &Pin) {
             max_entries: pin.used.entries,
             max_depth: pin.used.max_depth,
         };
-        let bounded = analyze_typed(&graph, exact);
+        let bounded = crate::limit::measured(
+            "analyze_typed",
+            pin.source,
+            exact,
+            |limits| analyze_typed(&graph, limits),
+            |report| report.statistics(),
+        );
         assert_eq!(bounded.completion(), pin.completion);
-        assert_eq!(bounded.statistics(), pin.used);
+        crate::limit::assert_stats(bounded.statistics(), pin.used, pin.source);
         for short in short_capture_limits(exact) {
             let limited = analyze_typed(&graph, short);
             crate::limit::assert_typed_limit(&limited);
@@ -104,7 +110,7 @@ function probe(seed: bool): void {
     let _ = packed;
 }
 "#,
-            stats(326_118, 47_867, 12),
+            stats(326_974, 48_526, 12),
         ),
         (
             r#"
@@ -120,7 +126,7 @@ function probe(seed: bool): void {
     let _ = packed;
 }
 "#,
-            stats(325_900, 47_778, 12),
+            stats(326_755, 48_436, 12),
         ),
     ] {
         assert_pinned(
@@ -171,7 +177,7 @@ fn guard_job_does_not_enter_the_join() {
         &Pin {
             source: &control,
             completion: TypedCompletion::Checked,
-            used: stats(428_968, 49_646, 12),
+            used: stats(429_836, 50_316, 12),
             obligations: &[],
         },
     );
@@ -180,7 +186,7 @@ fn guard_job_does_not_enter_the_join() {
         &Pin {
             source: &guarded,
             completion: TypedCompletion::Incomplete,
-            used: stats(429_031, 49_346, 13),
+            used: stats(429_900, 50_017, 13),
             obligations: &[
                 (
                     FamilySelection,
@@ -199,7 +205,7 @@ fn guard_job_does_not_enter_the_join() {
         &Pin {
             source: &format!("{JOIN}\n{direct}\n"),
             completion: TypedCompletion::Incomplete,
-            used: stats(425_275, 48_775, 12),
+            used: stats(426_139, 49_442, 12),
             obligations: &[(
                 FamilySelection,
                 "join([() => true, () => { let _ = lease; return true; }])",
@@ -215,8 +221,8 @@ fn guard_capture_requirements_are_incomplete_at_the_call() {
     const TEST: &str =
         "captures::approval_controls::guard_capture_requirements_are_incomplete_at_the_call";
     for (predicate, used) in [
-        ("sendable", stats(323_000, 47_591, 12)),
-        ("shareable", stats(323_001, 47_591, 12)),
+        ("sendable", stats(323_850, 48_245, 12)),
+        ("shareable", stats(323_851, 48_245, 12)),
     ] {
         let source = format!(
             "function need<T>(value: T): bool where {predicate}(T) {{ let _ = value; return true; }}

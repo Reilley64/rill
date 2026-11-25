@@ -196,16 +196,17 @@ fn grouped_ordinary_call_keeps_its_cap_with_the_join_group_loaded() {
             let d = &module.declarations[named(module, "untouched")];
             // Measured with the extension in the capture before the exit-scope correction.
             let cap = AnalysisLimits {
-                max_work: 4126,
+                max_work: 4128,
                 max_entries: 179,
                 max_depth: 7,
             };
             let local = lower_body(&receipt, module, &d.id, cap).unwrap();
             assert!(local.mir().is_some());
             let s = local.statistics();
-            assert_eq!(
+            crate::limit::assert_triple(
                 (s.work, s.entries, s.max_depth),
-                (cap.max_work, cap.max_entries, cap.max_depth)
+                (cap.max_work, cap.max_entries, cap.max_depth),
+                "",
             );
         },
     );
@@ -1534,13 +1535,14 @@ function joined(numbers: List<i32>, otherInput: List<i32>): [i32, i32] {{
                     let observed =
                         |s: compiler::analysis::Statistics| (s.work, s.entries, s.max_depth);
                     let typed_stats = typed.statistics();
-                    assert_eq!(
+                    crate::limit::assert_triple(
                         observed(typed_stats),
                         if live {
-                            (492686, 56808, 12)
+                            (493639, 57528, 12)
                         } else {
-                            (492687, 56810, 12)
-                        }
+                            (493640, 57530, 12)
+                        },
+                        "",
                     );
                     let (exact, short) = budget_caps(typed_stats);
                     let replay = analyze_typed(&graph, exact);
@@ -1557,7 +1559,7 @@ function joined(numbers: List<i32>, otherInput: List<i32>): [i32, i32] {{
                     // was admitted. It must still fit the 81f5264 target budget.
                     if live {
                         let old = AnalysisLimits {
-                            max_work: 4159,
+                            max_work: 4166,
                             max_entries: 838,
                             max_depth: 10,
                         };
@@ -1968,15 +1970,15 @@ fn unsupported_reference_children_preserve_prior_typed_caps() {
                 (
                     "input: &i32, work: () => &i32",
                     "() => input, work",
-                    486328,
-                    55357,
+                    487274,
+                    56072,
                     12,
                 ),
                 (
                     "input: &i32",
                     "() => input, () => { let local = 2i32; return &(local + 1i32); }",
-                    488293,
-                    55667,
+                    489008,
+                    56382,
                     14,
                 ),
             ] {
@@ -1987,13 +1989,16 @@ fn unsupported_reference_children_preserve_prior_typed_caps() {
                         ..request.clone()
                     })
                     .unwrap();
-                    let old = analyze_typed(
-                        &graph,
+                    let old = crate::limit::measured(
+                        "analyze_typed",
+                        "old",
                         AnalysisLimits {
                             max_work,
                             max_entries,
                             max_depth,
                         },
+                        |l| analyze_typed(&graph, l),
+                        |r| r.statistics(),
                     );
                     assert_eq!(old.completion(), TypedCompletion::Incomplete);
                     assert!(old.receipt().is_none());
@@ -2380,10 +2385,10 @@ fn unsupported_comparison_operands_keep_their_old_typed_budgets() {
             // Exact a1f4db7 caps on the original result-order capture, changing
             // only the Boolean child's displayed expression.
             for (expr, max_work, max_entries, max_depth) in [
-                ("29i32 == (&numbers)[1u64]", 490624, 56179, 12),
-                ("((29i32)) == (((&numbers)[1u64]))", 491529, 56271, 14),
-                ("(&numbers)[1u64] == (2i32+27i32)", 491173, 56245, 12),
-                ("((&numbers)[1u64]+0i32) == 29i32", 491178, 56245, 14),
+                ("29i32 == (&numbers)[1u64]", 491341, 56896, 12),
+                ("((29i32)) == (((&numbers)[1u64]))", 492246, 56988, 14),
+                ("(&numbers)[1u64] == (2i32+27i32)", 491890, 56962, 12),
+                ("((&numbers)[1u64]+0i32) == 29i32", 491895, 56962, 14),
             ] {
                 fs::write(
                     &request.entry,
@@ -3054,13 +3059,13 @@ fn installed_join_fresh_results_keep_the_written_occurrence() {
         |request, module, receipt, typed| {
             assert_pre_equality_graph_cap(receipt, (282_035, 49_331, 8));
             let graph_cost = Statistics {
-                work: 282_351,
+                work: 282_378,
                 entries: 49_465,
                 max_depth: 8,
             };
             let (exact, graph_short) = budget_caps(graph_cost);
             let graph = analyze_ownership(receipt, exact);
-            assert_eq!(graph.statistics(), graph_cost);
+            crate::limit::assert_stats(graph.statistics(), graph_cost, "");
             assert_eq!(graph.completion(), GraphCompletion::Incomplete);
             assert!(
                 graph
@@ -3080,7 +3085,7 @@ fn installed_join_fresh_results_keep_the_written_occurrence() {
                     "join([() => flag",
                     1,
                     "Err<bool, i32>(7i32)",
-                    (24_588, 12_120),
+                    (24_590, 12_120),
                 ),
                 (
                     "successSecond",
@@ -3094,7 +3099,7 @@ fn installed_join_fresh_results_keep_the_written_occurrence() {
                     "join([() => Err",
                     0,
                     "Err<bool, i32>(7i32)",
-                    (25_683, 13_123),
+                    (25_675, 13_123),
                 ),
             ] {
                 let call = call_node(module, prefix);
@@ -3164,7 +3169,7 @@ fn installed_join_fresh_results_keep_the_written_occurrence() {
                 };
                 let (exact, short) = budget_caps(body_cost);
                 let local = lower_body(receipt, module, &d.id, exact).unwrap();
-                assert_eq!(local.statistics(), body_cost);
+                crate::limit::assert_stats(local.statistics(), body_cost, "");
                 let root = graph
                     .roots()
                     .iter()
@@ -3200,14 +3205,20 @@ fn installed_join_fresh_results_keep_the_written_occurrence() {
             let loaded = loader::load_installed(request.clone()).unwrap();
             captured_keys(&loaded, true);
             let typed_cost = Statistics {
-                work: 444_520,
-                entries: 51_426,
+                work: 445_392,
+                entries: 52_097,
                 max_depth: 12,
             };
             let (exact, short) = budget_caps(typed_cost);
-            let checked = analyze_typed(&loaded, exact);
+            let checked = crate::limit::measured(
+                "analyze_typed",
+                "checked",
+                exact,
+                |limits| analyze_typed(&loaded, limits),
+                |report| report.statistics(),
+            );
             assert!(checked.receipt().is_some());
-            assert_eq!(checked.statistics(), typed_cost);
+            crate::limit::assert_stats(checked.statistics(), typed_cost, "");
             for cap in short {
                 let limited = analyze_typed(&loaded, cap);
                 crate::limit::assert_typed_limit(&limited);
@@ -3572,13 +3583,19 @@ fn an_unproved_join_does_not_invent_a_discard() {
             let loaded = loader::load_installed(request.clone()).unwrap();
             captured_keys(&loaded, true);
             let cost = Statistics {
-                work: 426_757,
-                entries: 49_016,
+                work: 427_624,
+                entries: 49_682,
                 max_depth: 12,
             };
             let (exact, short) = budget_caps(cost);
-            let typed = analyze_typed(&loaded, exact);
-            assert_eq!(typed.statistics(), cost);
+            let typed = crate::limit::measured(
+                "analyze_typed",
+                "typed",
+                exact,
+                |l| analyze_typed(&loaded, l),
+                |r| r.statistics(),
+            );
+            crate::limit::assert_stats(typed.statistics(), cost, "");
             assert_eq!(typed.completion(), TypedCompletion::Incomplete);
             assert!(typed.receipt().is_none());
             let uses = typed.result_use().unwrap();
@@ -3699,14 +3716,20 @@ fn reference_pair_reserves_before_it_builds_each_slot() {
         |request, _, _| {
             let graph = loader::load_installed(request.clone()).unwrap();
             let pinned = compiler::analysis::Statistics {
-                work: 426_800,
-                entries: 49_151,
+                work: 427_665,
+                entries: 49_819,
                 max_depth: 12,
             };
             let (exact, short) = budget_caps(pinned);
-            let typed = analyze_typed(&graph, exact);
+            let typed = crate::limit::measured(
+                "analyze_typed",
+                "typed",
+                exact,
+                |l| analyze_typed(&graph, l),
+                |r| r.statistics(),
+            );
             assert_eq!(typed.completion(), TypedCompletion::Checked);
-            assert_eq!(typed.statistics(), pinned);
+            crate::limit::assert_stats(typed.statistics(), pinned, "");
             let module = app(&graph);
             let call = call_node(module, "join([");
             assert!(
@@ -3727,9 +3750,9 @@ fn reference_pair_reserves_before_it_builds_each_slot() {
             // different points: before the reorder every one of these stops at
             // 405,462 / 44,957 / 12.
             for (max_entries, stopped) in [
-                (44964, (405247, 44963, 12)),
-                (44962, (405244, 44960, 12)),
-                (44959, (405216, 44957, 12)),
+                (45632, (406112, 45631, 12)),
+                (45630, (406109, 45628, 12)),
+                (45627, (406081, 45625, 12)),
             ] {
                 let limited = analyze_typed(
                     &graph,
@@ -3739,14 +3762,14 @@ fn reference_pair_reserves_before_it_builds_each_slot() {
                     },
                 );
                 crate::limit::assert_typed_limit(&limited);
-                assert_eq!(
+                crate::limit::assert_stats(
                     limited.statistics(),
                     compiler::analysis::Statistics {
                         work: stopped.0,
                         entries: stopped.1,
                         max_depth: stopped.2,
                     },
-                    "entries cap {max_entries}"
+                    format!("entries cap {max_entries}"),
                 );
             }
         },

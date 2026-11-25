@@ -455,7 +455,7 @@ fn canonical_copy_typed_handoff_is_exactly_bounded() {
                     max_depth: used.max_depth,
                 };
                 let exact_typed = check(exact);
-                assert_eq!(exact_typed.statistics(), used);
+                crate::limit::assert_stats(exact_typed.statistics(), used, "");
                 assert_eq!(exact_typed.receipt().unwrap().context(), graph.id());
                 for short in short_capture_limits(exact) {
                     let short = check(short);
@@ -561,7 +561,7 @@ fn local_exclusive_capture_transfers_the_loan_until_discard() {
                 max_depth: used.max_depth,
             };
             let exact_graph = analyze_ownership(receipt, exact);
-            assert_eq!(exact_graph.statistics(), used);
+            crate::limit::assert_stats(exact_graph.statistics(), used, "");
             assert_eq!(exact_graph.completion(), GraphCompletion::SourceRejected);
             for name in ["clear", "writeLive", "readLive", "reuse"] {
                 let decl = capture_declaration(module, name);
@@ -1522,7 +1522,7 @@ fn exclusive_non_bool_pair_keeps_its_local_formation_budget() {
         |_, module, receipt| {
             let id = &capture_declaration(module, "joined").id;
             let fixed = AnalysisLimits {
-                max_work: 2714,
+                max_work: 2719,
                 max_entries: 449,
                 max_depth: 6,
             };
@@ -4323,9 +4323,10 @@ fn declared_once_formal_invokes_the_actual_pair_in_one_call_frame() {
         |_, module, receipt, typed| {
             use compiler::analysis::ownership::DependencyContract;
             let stats = typed.statistics();
-            assert_eq!(
+            crate::limit::assert_triple(
                 (stats.work, stats.entries, stats.max_depth),
-                (325_496, 47_955, 12)
+                (326_347, 48_610, 12),
+                "",
             );
             let graph = analyze_ownership(receipt, AnalysisLimits::default());
             let target = check_local_capture_root(module, receipt, &graph, "caller", None);
@@ -4360,7 +4361,11 @@ fn declared_once_formal_invokes_the_actual_pair_in_one_call_frame() {
             assert!(open_root.mir().is_none() && open_root.ordinary_mir().is_none());
 
             let used = target.statistics();
-            assert_eq!((used.work, used.entries, used.max_depth), (5_631, 299, 6));
+            crate::limit::assert_triple(
+                (used.work, used.entries, used.max_depth),
+                (5_633, 299, 6),
+                "",
+            );
             let exact = AnalysisLimits {
                 max_work: used.work,
                 max_entries: used.entries,
@@ -4374,9 +4379,10 @@ fn declared_once_formal_invokes_the_actual_pair_in_one_call_frame() {
             }
             assert_pre_equality_graph_cap(receipt, (190_668, 4_266, 6));
             let used = graph.statistics();
-            assert_eq!(
+            crate::limit::assert_triple(
                 (used.work, used.entries, used.max_depth),
-                (190_984, 4_400, 6)
+                (191_019, 4_400, 6),
+                "",
             );
             let exact = AnalysisLimits {
                 max_work: used.work,
@@ -4414,29 +4420,30 @@ fn declared_once_frame_keeps_capture_provenance_and_rejects_without_mir() {
         ),
         |_, module, receipt, typed| {
             let stats = typed.statistics();
-            assert_eq!(
+            crate::limit::assert_triple(
                 (stats.work, stats.entries, stats.max_depth),
-                (335_147, 49_199, 12)
+                (336_012, 49_867, 12),
+                "",
             );
             let graph = analyze_ownership(receipt, AnalysisLimits::default());
             for (name, rejection, caps) in [
                 (
                     "escape",
                     Some(("R0202", "return invoke(() => [flag, seed]);", "local")),
-                    (5_911, 408, 6),
+                    (5_914, 408, 6),
                 ),
                 (
                     "write",
                     Some(("R0203", "local = seed;", "&local")),
-                    (5_886, 396, 6),
+                    (5_890, 396, 6),
                 ),
                 (
                     "reuse",
                     Some(("R0200", "seed", "dispose(seed)")),
-                    (5_904, 356, 6),
+                    (5_906, 356, 6),
                 ),
                 // A finished sibling use of the captured descriptor is not live.
-                ("sibling", None, (6_142, 525, 6)),
+                ("sibling", None, (6_145, 525, 6)),
             ] {
                 let target = check_local_capture_root(module, receipt, &graph, name, rejection);
                 let decl = capture_declaration(module, name);
@@ -4471,7 +4478,7 @@ fn declared_once_frame_keeps_capture_provenance_and_rejects_without_mir() {
                     }
                 }
                 let used = target.statistics();
-                assert_eq!((used.work, used.entries, used.max_depth), caps, "{name}");
+                crate::limit::assert_triple((used.work, used.entries, used.max_depth), caps, name);
                 let exact = AnalysisLimits {
                     max_work: used.work,
                     max_entries: used.entries,
@@ -4488,9 +4495,10 @@ fn declared_once_frame_keeps_capture_provenance_and_rejects_without_mir() {
             }
             assert_pre_equality_graph_cap(receipt, (207_024, 5_391, 6));
             let used = graph.statistics();
-            assert_eq!(
+            crate::limit::assert_triple(
                 (used.work, used.entries, used.max_depth),
-                (207_340, 5_525, 6)
+                (207_385, 5_525, 6),
+                "",
             );
             let exact = AnalysisLimits {
                 max_work: used.work,
@@ -4520,9 +4528,10 @@ fn declared_once_route_leaves_erased_and_local_descriptor_routes_unchanged() {
             );
             assert!(typed.receipt().is_none());
             let stats = typed.statistics();
-            assert_eq!(
+            crate::limit::assert_triple(
                 (stats.work, stats.entries, stats.max_depth),
-                (323_671, 47_678, 12)
+                (324_521, 48_332, 12),
+                "",
             );
             let pending = typed.result_use().unwrap().pending();
             assert!(
@@ -4539,7 +4548,11 @@ fn declared_once_route_leaves_erased_and_local_descriptor_routes_unchanged() {
             let report = lower_body(receipt, module, &decl.id, AnalysisLimits::default()).unwrap();
             assert_eq!(report.completion(), Completion::Checked);
             let used = report.statistics();
-            assert_eq!((used.work, used.entries, used.max_depth), (2_838, 384, 5));
+            crate::limit::assert_triple(
+                (used.work, used.entries, used.max_depth),
+                (2_842, 384, 5),
+                "",
+            );
         },
     );
 }
@@ -4558,26 +4571,26 @@ fn declared_once_siblings_keep_their_parent_typed_caps() {
             "grouped-actual",
             wrapper.clone() + &caller("return invoke((() => [flag, seed]));"),
             "job()",
-            (324_403, 47_797, 12),
+            (325_254, 48_452, 12),
         ),
         (
             "grouped-call",
             wrapper.clone() + &caller("return (invoke(() => [flag, seed]));"),
             "job()",
-            (324_307, 47_790, 12),
+            (325_158, 48_445, 12),
         ),
         (
             "grouped-receiver",
             wrapper.replace("return job();", "return (job)();")
                 + &caller("return invoke(() => [flag, seed]);"),
             "(job)()",
-            (324_231, 47_787, 12),
+            (325_082, 48_442, 12),
         ),
         (
             "scoped",
             wrapper.clone() + &caller("{ return invoke(() => [flag, seed]); }"),
             "job()",
-            (324_206, 47_782, 12),
+            (325_057, 48_437, 12),
         ),
         (
             "loop",
@@ -4586,13 +4599,13 @@ fn declared_once_siblings_keep_their_parent_typed_caps() {
                     "while (seed) { return invoke(() => [flag, seed]); } return [flag, seed];",
                 ),
             "job()",
-            (324_581, 47_893, 12),
+            (325_432, 48_548, 12),
         ),
         (
             "bound",
             wrapper.clone() + &caller("let out = invoke(() => [flag, seed]); return out;"),
             "job()",
-            (324_153, 47_783, 12),
+            (325_005, 48_439, 12),
         ),
     ] {
         probe_report(
@@ -4608,7 +4621,7 @@ fn declared_once_siblings_keep_their_parent_typed_caps() {
                     "{name}"
                 );
                 let used = typed.statistics();
-                assert_eq!((used.work, used.entries, used.max_depth), caps, "{name}");
+                crate::limit::assert_triple((used.work, used.entries, used.max_depth), caps, name);
                 let graph = loader::load_installed(request.clone()).unwrap();
                 let exact = AnalysisLimits {
                     max_work: used.work,
@@ -4617,7 +4630,7 @@ fn declared_once_siblings_keep_their_parent_typed_caps() {
                 };
                 let replay = analyze_typed(&graph, exact);
                 assert_eq!(replay.completion(), TypedCompletion::Incomplete, "{name}");
-                assert_eq!(replay.statistics(), used, "{name}");
+                crate::limit::assert_stats(replay.statistics(), used, name);
                 for short in short_capture_limits(exact) {
                     let limited = analyze_typed(&graph, short);
                     crate::limit::assert_typed_limit(&limited);

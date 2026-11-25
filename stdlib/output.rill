@@ -1,0 +1,12 @@
+// Standard output and fatal exit. The primitives call privately bound compiler operations.
+export function log<S>(text: S): void;
+export function panic<S>(message: S): never;
+
+function writeLine(text: &string): void;
+function panicText(message: &string): never;
+
+implement log(text: string): void { writeLine(&text); }
+implement log(text: &string): void { writeLine(text); }
+
+implement panic(message: string): never { panicText(&message); }
+implement panic(message: &string): never { panicText(message); }

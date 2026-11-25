@@ -1,5 +1,6 @@
 //! Construct ownership operations from the M4 type and control facts.
 use super::*;
+use crate::analysis::declarations::FieldClass;
 use crate::analysis::ordinary::{self, HypotheticalOutcome};
 use crate::analysis::scalars::data::{
     Access, Construction, Constructor, DataExpression, PathProjection, Pattern, PatternBinder,
@@ -534,11 +535,11 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             module,
             body,
             facts,
-            locals: BTreeMap::new(),
+            locals: OrdinalMap::new(),
             exclusive_field_reborrows: 0,
-            nested_record_values: BTreeMap::new(),
-            nested_tuple_parameters: BTreeMap::new(),
-            nested_tuple_bindings: BTreeMap::new(),
+            nested_record_values: OrdinalMap::new(),
+            nested_tuple_parameters: OrdinalMap::new(),
+            nested_tuple_bindings: OrdinalMap::new(),
             narrow_variant_parameters: BTreeMap::new(),
             whole_child_patterns: BTreeSet::new(),
             retained: BTreeMap::new(),
@@ -674,20 +675,20 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             let slot =
                 self.allocate_slot(node, true, StorageCleanup::DisposeListI32(disposal), None)?;
             self.budget.reserve(1)?;
-            // The key ends in the declaration's module path: charge each probe.
-            let probes = 1 + self.locals.len().max(1).ilog2() as usize;
-            graph::charge_key(&parameter.declaration.id.module, probes, self.budget)?;
+            self.budget.step(1)?;
             self.locals.insert(&parameter.declaration.id, slot);
             return Ok(slot);
         }
         if let Some(slot) = self.nested_record_region(node, ty)? {
             self.budget.reserve(1)?;
+            self.budget.step(1)?;
             self.nested_record_values
                 .insert(&parameter.declaration.id, slot);
             return Ok(slot);
         }
         if let Some(slot) = self.nested_tuple_region(node, ty)? {
             self.budget.reserve(1)?;
+            self.budget.step(1)?;
             self.nested_tuple_parameters
                 .insert(&parameter.declaration.id, slot);
             return Ok(slot);
@@ -905,6 +906,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
     fn local(&mut self, id: &'g DeclarationId, node: NodeId, ty: &Type<'g>) -> ResultOf<Slot> {
         let slot = self.slot(node, ty)?;
         self.budget.reserve(1)?;
+        self.budget.step(1)?;
         self.locals.insert(id, slot);
         Ok(slot)
     }
@@ -1713,9 +1715,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         {
             return Ok(None);
         }
-        // The key ends in the declaration's module path: charge each probe.
-        let probes = 1 + self.locals.len().max(1).ilog2() as usize;
-        graph::charge_key(&path.root.module, probes, self.budget)?;
+        self.budget.step(1)?;
         Ok(Some(
             *self.locals.get(path.root).ok_or(Stop::Pending(node))?,
         ))
@@ -2638,6 +2638,8 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                     expression_depth,
                 )? {
                     self.lower_propagating_value_call(node, call, None, next, expression_depth)
+                } else if let Some((facts, call)) = self.output_call_statement(expression) {
+                    self.call_output(expression, facts, call, None, next, expression_depth)
                 } else {
                     self.discard(node, value, next, depth + 1)
                 }
@@ -2932,8 +2934,13 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         if produced.path.is_some()
             || produced.access != Access::Owned
             || !matches!(produced.ty.as_ref(), TypeTerm::Nominal { .. })
-            || !self.scalar_record(&produced.ty)?
         {
+            return Ok(None);
+        }
+        if self.scalar_record_with_custom_disposer(&produced.ty) {
+            return Err(Stop::Pending(value));
+        }
+        if !self.scalar_record(&produced.ty)? {
             return Ok(None);
         }
         let (borrow, depth) = self.ungroup_expression_at(base, depth + 1)?;
@@ -3024,8 +3031,13 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         }
         let boolean = matches!(produced.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "bool");
         if !boolean {
-            // A flat record of scalars: O12's borrowed temporary (RFC 0007).
-            if read.is_some() || !self.scalar_record(&produced.ty)? {
+            if read.is_some() {
+                return Ok(None);
+            }
+            if self.scalar_record_with_custom_disposer(&produced.ty) {
+                return Err(Stop::Pending(call_node));
+            }
+            if !self.scalar_record(&produced.ty)? {
                 return Ok(None);
             }
             let (_, result) = self.direct_application_signature(call_node, call)?;
@@ -3433,7 +3445,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         let scratch = self.clone_region(from, source)?;
         let mut tail = self.cleanup(node, &[scratch], next)?;
         if let Some((site, binder)) = binder {
-            graph::charge_key(&binder.declaration.module, self.locals.len(), self.budget)?;
+            self.budget.step(1)?;
             let into = *self
                 .locals
                 .get(binder.declaration)
@@ -3594,7 +3606,6 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             Binding::Discard => Ok(()),
             Binding::IrrefutableVariant { binder, .. } => {
                 if let Some((site, binder)) = binder {
-                    graph::charge_key(&binder.declaration.module, self.locals.len(), self.budget)?;
                     self.budget.reserve(1)?;
                     locals.push(self.local(binder.declaration, site, &binder.ty)?);
                 }
@@ -3611,15 +3622,18 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 };
                 let local = if let Some(slot) = nested {
                     self.budget.reserve(1)?;
+                    self.budget.step(1)?;
                     self.nested_record_values.insert(declaration, slot);
                     slot
                 } else if let Some(from) = self.nested_tuple_transfer_source(initializer, ty)? {
                     let slot = self.clone_region(from, site)?;
                     self.budget.reserve(1)?;
+                    self.budget.step(1)?;
                     self.nested_tuple_bindings.insert(declaration, (slot, from));
                     slot
                 } else if let Some(slot) = self.scoped_result_destination(initializer, site, ty)? {
                     self.budget.reserve(1)?;
+                    self.budget.step(1)?;
                     self.locals.insert(declaration, slot);
                     slot
                 } else {
@@ -5397,6 +5411,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             .iter()
             .find(|member| member.declaration.id == field.field.id && member.ty == facts.ty)
             .ok_or(Stop::Pending(node))?;
+        self.budget.step(1)?;
         let descriptor = *self.locals.get(path.root).ok_or(Stop::Pending(node))?;
         Ok((descriptor, Projection::Field(member.declaration)))
     }
@@ -5646,6 +5661,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 Action::UnloweredRebuildRead(slot)
             } else if facts.access != Access::Owned && owns_text(&facts.ty) {
                 let path = facts.path.as_ref().ok_or(Stop::Pending(node))?;
+                self.budget.step(1)?;
                 let root = *self.locals.get(path.root).ok_or(Stop::Pending(node))?;
                 Action::ForbiddenBorrowedMove(root)
             } else if let Some(from) = self.scalar_field_through_reference(node, facts)? {
@@ -5902,9 +5918,26 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         self.emit(node, action, Edges::Next(next))
     }
 
+    fn scalar_record_with_custom_disposer(&self, ty: &Type<'g>) -> bool {
+        let TypeTerm::Nominal { declaration, .. } = ty.as_ref() else {
+            return false;
+        };
+        let inventory = self.typed.inventory();
+        inventory.field_class(declaration) == FieldClass::TextFreeScalars
+            && inventory.custom_dispose(declaration)
+    }
+
     /// An application record whose fields are all scalars, so that ending its
     /// storage is its whole cleanup. A different shape stays where it was.
     fn scalar_record(&mut self, ty: &Type<'g>) -> ResultOf<bool> {
+        if let TypeTerm::Nominal { declaration, .. } = ty.as_ref()
+            && matches!(
+                self.typed.inventory().field_class(declaration),
+                FieldClass::Text | FieldClass::Other
+            )
+        {
+            return Ok(false);
+        }
         let Some(fields) = self.record_fields(ty)? else {
             return Ok(false);
         };
@@ -8085,6 +8118,97 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         self.expression(*argument, Some(stage), call_pc, depth + 1)
     }
 
+    fn output_call_statement(
+        &self,
+        node: NodeId,
+    ) -> Option<(&'a ExpressionFacts<'g>, &'a CallFacts<'g>)> {
+        let facts = self.value(node).ok()?;
+        let call = facts.call.as_deref()?;
+        (matches!(facts.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == "never")
+            && call.callee.module.origin == Origin::Standard
+            && call.callee.module.path == "output.rill")
+            .then_some((facts, call))
+    }
+
+    fn call_output(
+        &mut self,
+        node: NodeId,
+        facts: &ExpressionFacts<'g>,
+        call: &CallFacts<'g>,
+        into: Option<Slot>,
+        next: Pc,
+        depth: usize,
+    ) -> ResultOf<Pc> {
+        let pending = || Stop::Pending(node);
+        let [argument] = call.arguments.as_slice() else {
+            return Err(pending());
+        };
+        if call.callee.kind != DeclarationKind::Family
+            || call.pipe_input.is_some()
+            || !call.defaults.is_empty()
+            || call.scoped_join.is_some()
+            || call.list_arrows.is_some()
+        {
+            return Err(pending());
+        }
+        let actual = self.value(*argument)?.ty.clone();
+        let text = |ty: &TypeTerm<'_>| matches!(ty, TypeTerm::Primitive(p) if p.name() == "string");
+        let borrowed = matches!(actual.as_ref(), TypeTerm::Reference { mutable: false, referent }
+            if text(referent));
+        let result_is =
+            |name: &str| matches!(facts.ty.as_ref(), TypeTerm::Primitive(p) if p.name() == name);
+        let (callee, result, shape_ok) = if call.substitution.is_empty() {
+            (
+                call.callee,
+                CallResult::Plain,
+                borrowed && call.selection.is_none(),
+            )
+        } else if let (Some(selection), [substitution]) =
+            (call.selection.as_ref(), call.substitution.as_slice())
+        {
+            (
+                selection.implementation,
+                CallResult::Plain,
+                (borrowed || text(&actual))
+                    && selection.substitution.is_empty()
+                    && selection.implementation.module == call.callee.module
+                    && selection.implementation.kind == DeclarationKind::Implementation
+                    && substitution.argument == actual
+                    && result_is("void"),
+            )
+        } else {
+            return Err(pending());
+        };
+        if !shape_ok {
+            return Err(pending());
+        }
+        graph::charge_key(&call.callee.module, 1, self.budget)?;
+        let result = if call.substitution.is_empty() {
+            match self.typed.output_bridge(call.callee) {
+                Some(PrimitiveOperation::WriteLine) if result_is("void") => CallResult::WriteLine,
+                Some(PrimitiveOperation::Panic) if result_is("never") => CallResult::Panic,
+                _ => return Err(pending()),
+            }
+        } else if self.typed.output_family(call.callee) == Some(PrimitiveOperation::WriteLine) {
+            result
+        } else {
+            return Err(pending());
+        };
+        self.budget.reserve(2)?;
+        let stage = self.slot(*argument, &actual)?;
+        let index = self.calls.len();
+        self.calls.push(Call {
+            callee,
+            forwarding_prefix: None,
+            args: vec![stage],
+            into,
+            result,
+            destination: None,
+        });
+        let call_pc = self.emit(node, Action::Call(index), Edges::Next(next))?;
+        self.expression(*argument, Some(stage), call_pc, depth + 1)
+    }
+
     fn call(
         &mut self,
         node: NodeId,
@@ -8197,6 +8321,12 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 return self.copy_closure(node, facts, call, into, next, depth);
             }
             return self.written_scalar_copy(node, facts, call, into, next, depth);
+        }
+        if checked_carrier.is_none()
+            && call.callee.module.origin == Origin::Standard
+            && call.callee.module.path == "output.rill"
+        {
+            return self.call_output(node, facts, call, into, next, depth);
         }
         if checked_carrier.is_none()
             && let Some(join) = call.scoped_join.as_deref()

@@ -1492,7 +1492,7 @@ pub(super) struct CancellationTrace<'a, 'g> {
     params: Vec<Slot>,
     retained: BTreeMap<Slot, RetainedContents>,
     facts: BuildFacts<'a, 'g>,
-    bindings: BTreeMap<&'g DeclarationId, Slot>,
+    bindings: OrdinalMap<Slot>,
     code: Vec<Instruction<'g>>,
     calls: Vec<Call<'a, 'g>>,
     known: KnownStates,
@@ -3682,6 +3682,19 @@ pub(super) fn run<'a, 'g>(
                             Operation::CallRetainingNoInput {
                                 callee: call.callee,
                                 destination,
+                            }
+                        }
+                    } else if matches!(call.result, CallResult::WriteLine | CallResult::Panic) {
+                        let [argument] = call.args.as_slice() else {
+                            return Err(Stop::Pending(node));
+                        };
+                        if matches!(call.result, CallResult::WriteLine) {
+                            Operation::WriteLine {
+                                text: local(*argument),
+                            }
+                        } else {
+                            Operation::Panic {
+                                message: local(*argument),
                             }
                         }
                     } else if matches!(call.result, CallResult::ScalarCopy) {

@@ -54,6 +54,7 @@ impl<'a, 'g> Build<'a, 'g, '_> {
             None,
         )?;
         self.budget.reserve(1)?;
+        self.budget.step(1)?;
         self.locals.insert(&parameter.declaration.id, slot);
         Ok(slot)
     }
@@ -521,6 +522,13 @@ impl<'a, 'g> Build<'a, 'g, '_> {
         let TypeTerm::Nominal { declaration, .. } = yielded.as_ref() else {
             return Err(pending());
         };
+        if matches!(
+            self.typed.inventory().field_class(declaration),
+            FieldClass::TextFreeScalars | FieldClass::Other
+        ) || self.typed.inventory().custom_dispose(declaration)
+        {
+            return Err(pending());
+        }
         let fields = self.record_fields(yielded)?.ok_or_else(pending)?;
         self.budget.step(fields.len())?;
         if fields.is_empty() || !fields.iter().all(|field| owns_text(&field.ty)) {

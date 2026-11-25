@@ -438,3 +438,41 @@ fn a_typed_resource_limit_blocks_as_itself_with_the_typed_statistics() {
         },
     );
 }
+
+#[test]
+fn hello_world_is_compilable_with_the_log_body_among_its_functions_in_both_modes() {
+    installed(
+        "compilable::hello_world_is_compilable_with_the_log_body_among_its_functions_in_both_modes",
+        |request| {
+            for source in [
+                "import std::log;\n\nlog(\"hello world\");\n",
+                "import std::log;\nlet s = \"x\";\nlog(&s);\n",
+            ] {
+                fs::write(&request.entry, source).unwrap();
+                for test_mode in [false, true] {
+                    let request = InstalledRequest {
+                        test_mode,
+                        ..request.clone()
+                    };
+                    let graph = loader::load_installed(request).unwrap();
+                    let limits = AnalysisLimits::default();
+                    let typed = analyze_typed(&graph, limits);
+                    assert!(typed.receipt().is_some());
+                    let analysis = ProgramAnalysis::new(&graph, &typed, limits);
+                    let program = compilable(analysis.compilability());
+                    assert_eq!(program.startup().site().module.path, "main.rill");
+                    let functions: Vec<_> = program
+                        .functions()
+                        .iter()
+                        .map(|body| (body.site().module.path.clone(), starts(body)))
+                        .collect();
+                    assert_eq!(
+                        functions,
+                        [("output.rill".to_owned(), "implement log".to_owned())]
+                    );
+                    assert!(program.active_disposers().is_empty());
+                }
+            }
+        },
+    );
+}

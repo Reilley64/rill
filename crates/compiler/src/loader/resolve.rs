@@ -23,6 +23,7 @@ struct Engine {
     outcomes: Vec<ImportOutcome>,
     findings: Vec<Finding>,
     pending: VecDeque<ModuleKey>,
+    next_ordinal: usize,
     installed: Option<InstalledProfile>,
     error_storage: Option<(PathBuf, Vec<u8>)>,
 }
@@ -42,6 +43,7 @@ pub(super) fn load(
         outcomes: Vec::new(),
         findings: Vec::new(),
         pending: VecDeque::new(),
+        next_ordinal: 0,
         installed,
         error_storage: None,
     };
@@ -73,6 +75,14 @@ pub(super) fn load(
                 })
                 .collect(),
             routine_index,
+            declaration_count: engine.next_ordinal,
+            implementation_at: {
+                let mut at = vec![None; engine.next_ordinal];
+                for (index, implementation) in implementations.iter().enumerate() {
+                    at[implementation.declaration.ordinal.index()] = Some(index);
+                }
+                at
+            },
             bindings,
             imports: engine.outcomes,
             implementations,
@@ -196,14 +206,31 @@ impl Engine {
                 self.add_module(Origin::Standard, path)?;
             }
         }
-        while let Some(key) = self.pending.pop_front() {
-            self.host.charge(1)?;
-            let mut imports =
-                collect::collect(self.modules.get_mut(&key).unwrap(), &mut self.host)?;
-            for import in &mut imports {
-                self.discover(import)?;
+        let mut demanded = false;
+        loop {
+            while let Some(key) = self.pending.pop_front() {
+                self.host.charge(1)?;
+                let mut imports = collect::collect(
+                    self.modules.get_mut(&key).unwrap(),
+                    &mut self.host,
+                    &mut self.next_ordinal,
+                )?;
+                for import in &mut imports {
+                    demanded |= self
+                        .installed
+                        .is_some_and(|profile| profile.demands(import));
+                    self.discover(import)?;
+                }
+                self.imports.extend(imports);
             }
-            self.imports.extend(imports);
+            let Some(profile) = self.installed.filter(|_| demanded) else {
+                break;
+            };
+            demanded = false;
+            for &(facade, module, names) in profile.on_demand() {
+                self.host.charge(1 + names.len())?;
+                self.discover_on_demand(facade, module, names)?;
+            }
         }
         let metadata = self.capture_installed_metadata(complete)?;
         self.imports
@@ -773,7 +800,7 @@ impl Engine {
             let pending = self.pending.pop_front();
             debug_assert_eq!(pending.as_ref(), Some(&loaded));
             let module = self.modules.get_mut(&loaded).unwrap();
-            let mut imports = collect::collect(module, &mut self.host)?;
+            let mut imports = collect::collect(module, &mut self.host, &mut self.next_ordinal)?;
             for declaration in &module.declarations {
                 self.host.charge(1)?;
                 if matches!(
@@ -937,6 +964,38 @@ impl Engine {
         Ok(key)
     }
 
+    fn discover_on_demand(&mut self, facade: &str, module: &str, names: &[&str]) -> Result<()> {
+        let key = ModuleKey {
+            origin: Origin::Standard,
+            path: facade.to_owned(),
+        };
+        let Some(facade) = self.modules.get(&key) else {
+            return Ok(());
+        };
+        let span = facade.syntax.nodes[facade.syntax.root].span.clone();
+        let mut import = Import {
+            module: key,
+            path: vec![module.to_owned()],
+            items: Some(
+                names
+                    .iter()
+                    .map(|&name| collect::ImportItem {
+                        name: name.to_owned(),
+                        alias: name.to_owned(),
+                        span: span.clone(),
+                    })
+                    .collect(),
+            ),
+            alias: module.to_owned(),
+            public: true,
+            span,
+            starts: Vec::new(),
+        };
+        self.discover(&mut import)?;
+        self.imports.push(import);
+        Ok(())
+    }
+
     fn discover(&mut self, import: &mut Import) -> Result<()> {
         let mut origin = import.module.origin;
         let mut directory = PathBuf::new();
@@ -986,6 +1045,17 @@ impl Engine {
                 }
             }
         } else {
+            if import.path[0] == "std" {
+                // docs/rfcs/0002-modules-and-program-loading.md
+                let candidate = self.roots[&origin].join("std.rill");
+                if let Some(probe) = self.host.probe(&candidate, Some(&self.roots[&origin]))?
+                    && probe.kind == Kind::File
+                {
+                    import
+                        .starts
+                        .push((self.add_module(origin, probe.path)?, 0));
+                }
+            }
             for (index, segment) in segments.iter().enumerate() {
                 self.host.charge(1)?;
                 directory.push(segment);

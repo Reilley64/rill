@@ -133,7 +133,7 @@ fn assert_reuse(report: &Report<'_>, helper: &loader::Module, source: &str, owne
     );
 }
 
-fn assert_limits(
+pub(super) fn assert_limits(
     receipt: &TypedReceipt<'_, '_>,
     module: &loader::Module,
     owner: BodyOwner<'_>,
@@ -145,14 +145,17 @@ fn assert_limits(
         entries,
         max_depth,
     };
-    assert_eq!(report.statistics(), stats);
+    crate::limit::assert_stats(report.statistics(), stats, "");
+    if crate::limit::reporting() {
+        return;
+    }
     let limits = AnalysisLimits {
         max_work: work,
         max_entries: entries,
         max_depth,
     };
     let exact = lower_root(receipt, module, owner, limits).unwrap();
-    assert_eq!(exact.statistics(), stats);
+    crate::limit::assert_stats(exact.statistics(), stats, "");
     assert_eq!(exact.completion(), report.completion());
     assert_eq!(exact.mir().is_some(), report.mir().is_some());
     assert_eq!(exact.findings().len(), report.findings().len());
@@ -196,7 +199,7 @@ fn imported_startup_is_a_lexical_root_in_both_modes() {
             helper,
             owner,
             &report,
-            [(2025, 91, 3), (2041, 101, 3)][index],
+            [(2027, 91, 3), (2044, 101, 3)][index],
         );
         if index == 1 {
             assert_reuse(&report, helper, &reuse, "text");
@@ -265,7 +268,7 @@ fn unused_canonical_plain_implementation_is_a_root() {
                 helper,
                 owner,
                 &report,
-                [(2092, 134, 3), (2056, 116, 3)][index],
+                [(2094, 134, 3), (2059, 116, 3)][index],
             );
             if index == 1 {
                 assert_reuse(&report, helper, &reuse, "value");
@@ -311,7 +314,7 @@ fn expectation_checks_its_reached_helper_before_publishing_mir() {
                 helper,
                 owner,
                 &report,
-                [(4058, 205, 3), (4026, 189, 3)][index],
+                [(4060, 205, 3), (4029, 189, 3)][index],
             );
             if index == 1 {
                 assert_reuse(&report, helper, &reuse, "value");

@@ -1270,13 +1270,13 @@ fn withheld_ordinary_issues_are_still_metered_by_generics() {
     let ordinary = analyze_ordinary(
         &graph,
         AnalysisLimits {
-            max_work: 402,
+            max_work: 417,
             ..AnalysisLimits::default()
         },
     );
     assert_eq!(
         (ordinary.statistics().work, ordinary.statistics().entries),
-        (402, 90)
+        (417, 105)
     );
     assert!(ordinary.declaration_issues().is_empty());
     let report = analyze_generics(&ordinary, AnalysisLimits::default());
@@ -1284,6 +1284,6 @@ fn withheld_ordinary_issues_are_still_metered_by_generics() {
     let statistics = report.statistics();
     assert_eq!(
         (statistics.work, statistics.entries, statistics.max_depth),
-        (404, 92, 2)
+        (419, 107, 2)
     );
 }

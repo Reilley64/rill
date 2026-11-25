@@ -177,15 +177,15 @@ fn installed_replacement_without_the_proved_leaf_stays_unresolved() {
             let graph = analyze_ownership(
                 receipt,
                 AnalysisLimits {
-                    max_work: 203674,
+                    max_work: 203721,
                     max_entries: 8260,
                     max_depth: 5,
                 },
             );
             assert_eq!(graph.completion(), GraphCompletion::Incomplete);
             for (name, work, entries) in [
-                ("replaceInitialized", 12804, 1835),
-                ("replaceNoEntry", 12872, 1871),
+                ("replaceInitialized", 12810, 1835),
+                ("replaceNoEntry", 12879, 1871),
             ] {
                 let report = lower_body(
                     receipt,

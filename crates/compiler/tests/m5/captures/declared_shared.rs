@@ -105,9 +105,10 @@ fn declared_shared_formal_reads_the_lent_actual_in_one_call_frame() {
         |_, module, receipt, typed| {
             // B2's M4 receipt for `declared-shared-actual`.
             let stats = typed.statistics();
-            assert_eq!(
+            crate::limit::assert_triple(
                 (stats.work, stats.entries, stats.max_depth),
-                (324_437, 47_828, 12)
+                (325_288, 48_483, 12),
+                "",
             );
             let graph = analyze_ownership(receipt, AnalysisLimits::default());
             let target = check_local_capture_root(module, receipt, &graph, "caller", None);
@@ -136,13 +137,21 @@ fn declared_shared_formal_reads_the_lent_actual_in_one_call_frame() {
             assert!(open.mir().is_none() && open.findings().is_empty());
             assert_eq!(open.blocked_at().unwrap().span.bytes(), b"job()");
             let used = open.statistics();
-            assert_eq!((used.work, used.entries, used.max_depth), (1_883, 33, 3));
+            crate::limit::assert_triple(
+                (used.work, used.entries, used.max_depth),
+                (1_884, 33, 3),
+                "",
+            );
             let open_root = capture_graph_root(module, &graph, run);
             assert_eq!(open_root.ordinary_completion(), Completion::Incomplete);
             assert!(open_root.mir().is_none() && open_root.ordinary_mir().is_none());
 
             let used = target.statistics();
-            assert_eq!((used.work, used.entries, used.max_depth), (5_199, 201, 6));
+            crate::limit::assert_triple(
+                (used.work, used.entries, used.max_depth),
+                (5_201, 201, 6),
+                "",
+            );
             let lower = |limit| lower_body(receipt, module, &decl.id, limit).unwrap();
             assert_declared_shared_frame(module, lower(exact(used)).mir().unwrap(), b"flag: bool");
             for short in short_capture_limits(exact(used)) {
@@ -151,9 +160,10 @@ fn declared_shared_formal_reads_the_lent_actual_in_one_call_frame() {
             }
             assert_pre_equality_graph_cap(receipt, (189_816, 4_168, 6));
             let used = graph.statistics();
-            assert_eq!(
+            crate::limit::assert_triple(
                 (used.work, used.entries, used.max_depth),
-                (190_132, 4_302, 6)
+                (190_167, 4_302, 6),
+                "",
             );
             let bounded = analyze_ownership(receipt, exact(used));
             assert_declared_shared_frame(
@@ -185,23 +195,24 @@ fn declared_shared_frame_checks_the_lent_owner_and_rejects_without_mir() {
         ),
         |_, module, receipt, typed| {
             let stats = typed.statistics();
-            assert_eq!(
+            crate::limit::assert_triple(
                 (stats.work, stats.entries, stats.max_depth),
-                (332_188, 48_802, 12)
+                (333_050, 49_468, 12),
+                "",
             );
             let graph = analyze_ownership(receipt, AnalysisLimits::default());
             for (name, rejection, caps) in [
-                ("caller", None, (5_371, 252, 6)),
+                ("caller", None, (5_373, 252, 6)),
                 // A second actual caller closes its own frame.
-                ("second", None, (5_371, 252, 6)),
+                ("second", None, (5_373, 252, 6)),
                 // Replacing `f` while a shared borrow of it is still live.
                 (
                     "write",
                     Some(("R0203", "f = () => flag;", "&f")),
-                    (5_530, 339, 6),
+                    (5_533, 339, 6),
                 ),
                 // A finished shared borrow of `f` does not block the frame's loan.
-                ("sibling", None, (5_613, 367, 6)),
+                ("sibling", None, (5_616, 367, 6)),
             ] {
                 let target = check_local_capture_root(module, receipt, &graph, name, rejection);
                 let decl = capture_declaration(module, name);
@@ -222,7 +233,7 @@ fn declared_shared_frame_checks_the_lent_owner_and_rejects_without_mir() {
                     }
                 }
                 let used = target.statistics();
-                assert_eq!((used.work, used.entries, used.max_depth), caps, "{name}");
+                crate::limit::assert_triple((used.work, used.entries, used.max_depth), caps, name);
                 let lower = |limit| lower_body(receipt, module, &decl.id, limit).unwrap();
                 let replay = lower(exact(used));
                 assert_eq!(replay.completion(), target.completion(), "{name}");
@@ -234,9 +245,10 @@ fn declared_shared_frame_checks_the_lent_owner_and_rejects_without_mir() {
             }
             assert_pre_equality_graph_cap(receipt, (204_090, 4_970, 6));
             let used = graph.statistics();
-            assert_eq!(
+            crate::limit::assert_triple(
                 (used.work, used.entries, used.max_depth),
-                (204_406, 5_104, 6)
+                (204_449, 5_104, 6),
+                "",
             );
             let bounded = analyze_ownership(receipt, exact(used));
             assert_eq!(bounded.findings().len(), 1);
@@ -262,7 +274,7 @@ fn declared_shared_siblings_keep_their_parent_caps() {
                 (ResultUseBlocker::Storage, "&mut f"),
             ]
             .as_slice(),
-            (323_113, 47_642, 12),
+            (323_964, 48_297, 12),
         ),
         (
             "bound",
@@ -270,7 +282,7 @@ fn declared_shared_siblings_keep_their_parent_caps() {
                 "{SHARED}function caller(flag: bool): bool {{ let f: () => bool = () => flag; let out = run(&f); return out; }}\n"
             ),
             [(ResultUseBlocker::CallBoundary, "job()")].as_slice(),
-            (323_205, 47_673, 12),
+            (324_057, 48_329, 12),
         ),
         // Review ci-uaa1 (ri-785.7 #1): an owned once wrapper whose body
         // invokes another function, not its formal.
@@ -278,7 +290,7 @@ fn declared_shared_siblings_keep_their_parent_caps() {
             "otherOwned",
             "function other(): bool { return true; }\nfunction invokeOther<F>(job: F): bool where callableOnce(F, [], bool) { return other(); }\nfunction callerOther(flag: bool): bool { return invokeOther(() => flag); }\n".to_string(),
             [(ResultUseBlocker::Containment, "job: F")].as_slice(),
-            (324_002, 47_618, 12),
+            (324_853, 48_273, 12),
         ),
     ] {
         probe_report(
@@ -300,11 +312,11 @@ fn declared_shared_siblings_keep_their_parent_caps() {
                     .collect();
                 assert_eq!(found, expected, "{name}");
                 let used = typed.statistics();
-                assert_eq!((used.work, used.entries, used.max_depth), caps, "{name}");
+                crate::limit::assert_triple((used.work, used.entries, used.max_depth), caps, name);
                 let graph = loader::load_installed(request.clone()).unwrap();
                 let replay = analyze_typed(&graph, exact(used));
                 assert_eq!(replay.completion(), TypedCompletion::Incomplete, "{name}");
-                assert_eq!(replay.statistics(), used, "{name}");
+                crate::limit::assert_stats(replay.statistics(), used, name);
                 for short in short_capture_limits(exact(used)) {
                     let limited = analyze_typed(&graph, short);
                     crate::limit::assert_typed_limit(&limited);
@@ -319,15 +331,15 @@ fn declared_shared_siblings_keep_their_parent_caps() {
         |_, module, receipt| {
             let graph = analyze_ownership(receipt, AnalysisLimits::default());
             for (name, at, caps) in [
-                ("plain", "same(&flag)", (1_907, 46, 3)),
-                ("ignored", "skip(&f)", (1_917, 55, 3)),
+                ("plain", "same(&flag)", (1_908, 46, 3)),
+                ("ignored", "skip(&f)", (1_919, 55, 3)),
             ] {
                 check_capture_blocker(module, receipt, &graph, name, at);
                 assert_incomplete_at_caps(module, receipt, name, at, caps);
             }
             assert_parent_graph_cap(receipt, (187_611, 4_040, 3));
             assert_pre_equality_graph_cap(receipt, (187_616, 4_040, 3));
-            assert_graph_incomplete_at_caps(receipt, &graph, (187_927, 4_174, 5));
+            assert_graph_incomplete_at_caps(receipt, &graph, (187_963, 4_174, 5));
         },
     );
     probe(
@@ -341,10 +353,10 @@ fn declared_shared_siblings_keep_their_parent_caps() {
                 receipt,
                 "ignoredOther",
                 "skipOther(&f)",
-                (1_899, 46, 3),
+                (1_901, 46, 3),
             );
             assert_parent_graph_cap(receipt, (186_959, 4_049, 3));
-            assert_graph_incomplete_at_caps(receipt, &graph, (187_275, 4_183, 5));
+            assert_graph_incomplete_at_caps(receipt, &graph, (187_310, 4_183, 5));
         },
     );
     // Local invocations of a one-capture arrow are not frames: `f()` and
@@ -355,14 +367,14 @@ fn declared_shared_siblings_keep_their_parent_caps() {
         |_, module, receipt| {
             let graph = analyze_ownership(receipt, AnalysisLimits::default());
             for (name, at, caps) in [
-                ("local", "d()", (1_906, 49, 5)),
-                ("direct", "f()", (1_898, 44, 5)),
+                ("local", "d()", (1_909, 49, 5)),
+                ("direct", "f()", (1_900, 44, 5)),
             ] {
                 check_capture_blocker(module, receipt, &graph, name, at);
                 assert_incomplete_at_caps(module, receipt, name, at, caps);
             }
             assert_pre_equality_graph_cap(receipt, (186_671, 4_033, 5));
-            assert_graph_incomplete_at_caps(receipt, &graph, (186_987, 4_167, 5));
+            assert_graph_incomplete_at_caps(receipt, &graph, (187_025, 4_167, 5));
         },
     );
 }
@@ -400,7 +412,7 @@ fn assert_incomplete_at_caps(
     let decl = capture_declaration(module, name);
     let lower = |limit| lower_body(receipt, module, &decl.id, limit).unwrap();
     let used = lower(AnalysisLimits::default()).statistics();
-    assert_eq!((used.work, used.entries, used.max_depth), caps, "{name}");
+    crate::limit::assert_triple((used.work, used.entries, used.max_depth), caps, name);
     let replay = lower(exact(used));
     assert_eq!(replay.completion(), Completion::Incomplete, "{name}");
     assert_eq!(replay.blocked_at().unwrap().span.bytes(), at.as_bytes());
@@ -416,7 +428,7 @@ fn assert_graph_incomplete_at_caps(
     caps: (usize, usize, usize),
 ) {
     let used = graph.statistics();
-    assert_eq!((used.work, used.entries, used.max_depth), caps);
+    crate::limit::assert_triple((used.work, used.entries, used.max_depth), caps, "");
     assert_eq!(graph.completion(), GraphCompletion::Incomplete);
     assert_eq!(
         analyze_ownership(receipt, exact(used)).completion(),

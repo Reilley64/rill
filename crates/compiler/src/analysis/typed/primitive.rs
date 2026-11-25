@@ -46,6 +46,10 @@ pub enum PrimitiveOperation {
     Show(Primitive),
     CopyText,
     DisposeText,
+    /// Write the borrowed text and one newline to standard output.
+    WriteLine,
+    /// End the program, reporting the borrowed text. It never returns.
+    Panic,
 }
 
 impl PrimitiveOperation {

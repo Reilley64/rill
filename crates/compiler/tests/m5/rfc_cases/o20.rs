@@ -27,10 +27,10 @@ fn check(test: &str, cases: &[Case]) {
                 let typed = analyze_typed(&graph, AnalysisLimits::default());
                 let context = format!("case {index}, test_mode {test_mode}");
                 assert_eq!(typed.completion(), TypedCompletion::Checked, "{context}");
-                assert_eq!(
+                crate::limit::assert_stats(
                     typed.statistics(),
                     statistics(case.typed_stats),
-                    "{context}"
+                    &context,
                 );
                 check_receipt(
                     &context,
@@ -211,13 +211,13 @@ fn admitted_interpolation_forms_check() {
 type Outer = { lock: LockGuard<i32>; value: i32; }
 function render(outer: Outer): string { return `${(outer.value)}-${((outer.value))}`; }
 "#,
-                typed_stats: (324644, 48067, 12),
-                graph: (GraphCompletion::Incomplete, (186924, 4314, 6)),
+                typed_stats: (325498, 48721, 12),
+                graph: (GraphCompletion::Incomplete, (186958, 4314, 6)),
                 roots: &[Root {
                     name: "render",
                     want: Want::Checked,
                     graph: None,
-                    stats: (2511, 218, 6),
+                    stats: (2512, 218, 6),
                 }],
             },
             Case {
@@ -225,13 +225,13 @@ function render(outer: Outer): string { return `${(outer.value)}-${((outer.value
 type Outer = { lock: LockGuard<i32>; value: i32; }
 function render(outer: Outer): string { return (`${outer.value}-${outer.value}`); }
 "#,
-                typed_stats: (324576, 48030, 12),
-                graph: (GraphCompletion::Incomplete, (186797, 4312, 5)),
+                typed_stats: (325430, 48684, 12),
+                graph: (GraphCompletion::Incomplete, (186831, 4312, 5)),
                 roots: &[Root {
                     name: "render",
                     want: Want::Checked,
                     graph: None,
-                    stats: (2504, 216, 5),
+                    stats: (2505, 216, 5),
                 }],
             },
             Case {
@@ -239,13 +239,13 @@ function render(outer: Outer): string { return (`${outer.value}-${outer.value}`)
 type Outer = { lock: LockGuard<i32>; value: i32; }
 function render(outer: Outer): string { let text = `${outer.value}`; return text; }
 "#,
-                typed_stats: (323667, 47825, 12),
-                graph: (GraphCompletion::Incomplete, (186786, 4341, 5)),
+                typed_stats: (324520, 48480, 12),
+                graph: (GraphCompletion::Incomplete, (186821, 4341, 5)),
                 roots: &[Root {
                     name: "render",
                     want: Want::Checked,
                     graph: None,
-                    stats: (2552, 245, 4),
+                    stats: (2554, 245, 4),
                 }],
             },
             Case {
@@ -253,13 +253,13 @@ function render(outer: Outer): string { let text = `${outer.value}`; return text
 type Outer = { lock: LockGuard<i32>; value: i32; }
 function render(outer: Outer): void { `${outer.value}`; }
 "#,
-                typed_stats: (323590, 47798, 12),
-                graph: (GraphCompletion::Incomplete, (186530, 4271, 5)),
+                typed_stats: (324442, 48452, 12),
+                graph: (GraphCompletion::Incomplete, (186564, 4271, 5)),
                 roots: &[Root {
                     name: "render",
                     want: Want::Checked,
                     graph: None,
-                    stats: (2417, 175, 4),
+                    stats: (2418, 175, 4),
                 }],
             },
             Case {
@@ -267,26 +267,26 @@ function render(outer: Outer): void { `${outer.value}`; }
 type Outer = { lock: LockGuard<i32>; value: i32; }
 function render(again: bool, outer: Outer): string { while (again) { return `${outer.value}`; } return "none"; }
 "#,
-                typed_stats: (324013, 47879, 12),
-                graph: (GraphCompletion::Incomplete, (187156, 4416, 6)),
+                typed_stats: (324866, 48534, 12),
+                graph: (GraphCompletion::Incomplete, (187191, 4416, 6)),
                 roots: &[Root {
                     name: "render",
                     want: Want::Checked,
                     graph: None,
-                    stats: (2680, 320, 6),
+                    stats: (2682, 320, 6),
                 }],
             },
             Case {
                 text: r#"
 function render(value: i32): string { return `${value}-${1i32}`; }
 "#,
-                typed_stats: (322710, 47889, 12),
-                graph: (GraphCompletion::Incomplete, (185879, 4217, 5)),
+                typed_stats: (323561, 48540, 12),
+                graph: (GraphCompletion::Incomplete, (185913, 4217, 5)),
                 roots: &[Root {
                     name: "render",
                     want: Want::Checked,
                     graph: None,
-                    stats: (2050, 122, 4),
+                    stats: (2051, 122, 4),
                 }],
             },
         ],
@@ -308,15 +308,15 @@ fn unsupported_holes_keep_their_parent_caps() {
 type Flagged = { lock: LockGuard<i32>; ready: bool; }
 function render(outer: Flagged): string { return `${outer.ready}`; }
 "#,
-                typed_stats: (323603, 47800, 12),
-                graph: (GraphCompletion::Incomplete, (186240, 4174, 5)),
+                typed_stats: (324455, 48454, 12),
+                graph: (GraphCompletion::Incomplete, (186274, 4174, 5)),
                 roots: &[Root {
                     name: "render",
                     want: Want::Incomplete {
                         blocker: r####"`${outer.ready}`"####,
                     },
                     graph: None,
-                    stats: (2226, 79, 3),
+                    stats: (2227, 79, 3),
                 }],
             },
             Case {
@@ -324,15 +324,15 @@ function render(outer: Flagged): string { return `${outer.ready}`; }
 type Named = { lock: LockGuard<i32>; name: string; }
 function render(outer: Named): string { return `${outer.name}`; }
 "#,
-                typed_stats: (323606, 47800, 12),
-                graph: (GraphCompletion::Incomplete, (186240, 4174, 5)),
+                typed_stats: (324458, 48454, 12),
+                graph: (GraphCompletion::Incomplete, (186274, 4174, 5)),
                 roots: &[Root {
                     name: "render",
                     want: Want::Incomplete {
                         blocker: r####"`${outer.name}`"####,
                     },
                     graph: None,
-                    stats: (2226, 79, 3),
+                    stats: (2227, 79, 3),
                 }],
             },
             Case {
@@ -340,15 +340,15 @@ function render(outer: Named): string { return `${outer.name}`; }
 type Outer = { lock: LockGuard<i32>; value: i32; }
 function render(outer: Outer): string { return `${outer.value + outer.value}`; }
 "#,
-                typed_stats: (324002, 47858, 12),
-                graph: (GraphCompletion::Incomplete, (186426, 4177, 5)),
+                typed_stats: (324854, 48512, 12),
+                graph: (GraphCompletion::Incomplete, (186460, 4177, 5)),
                 roots: &[Root {
                     name: "render",
                     want: Want::Incomplete {
                         blocker: r####"`${outer.value + outer.value}`"####,
                     },
                     graph: None,
-                    stats: (2232, 82, 3),
+                    stats: (2233, 82, 3),
                 }],
             },
             Case {
@@ -357,14 +357,14 @@ type Outer = { lock: LockGuard<i32>; value: i32; }
 function twice(value: i32): i32 { return value; }
 function render(outer: Outer): string { return `${twice(outer.value)}`; }
 "#,
-                typed_stats: (325196, 47900, 12),
-                graph: (GraphCompletion::Incomplete, (186950, 4251, 5)),
+                typed_stats: (326050, 48556, 12),
+                graph: (GraphCompletion::Incomplete, (186985, 4251, 5)),
                 roots: &[
                     Root {
                         name: "twice",
                         want: Want::Checked,
                         graph: None,
-                        stats: (1987, 83, 3),
+                        stats: (1988, 83, 3),
                     },
                     Root {
                         name: "render",
@@ -372,7 +372,7 @@ function render(outer: Outer): string { return `${twice(outer.value)}`; }
                             blocker: r####"`${twice(outer.value)}`"####,
                         },
                         graph: None,
-                        stats: (2240, 86, 3),
+                        stats: (2241, 86, 3),
                     },
                 ],
             },
@@ -381,15 +381,15 @@ function render(outer: Outer): string { return `${twice(outer.value)}`; }
 type Outer = { lock: LockGuard<i32>; value: i32; }
 function render(outer: &Outer): string { return `${outer.value}`; }
 "#,
-                typed_stats: (323584, 47809, 12),
-                graph: (GraphCompletion::Incomplete, (185931, 4116, 5)),
+                typed_stats: (324436, 48463, 12),
+                graph: (GraphCompletion::Incomplete, (185965, 4116, 5)),
                 roots: &[Root {
                     name: "render",
                     want: Want::Incomplete {
                         blocker: r####"`${outer.value}`"####,
                     },
                     graph: None,
-                    stats: (1857, 21, 3),
+                    stats: (1858, 21, 3),
                 }],
             },
         ],

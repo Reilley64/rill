@@ -1,4 +1,5 @@
 //! Capture the first-party installation without taking authority from a request.
+use super::collect::Import;
 use super::*;
 use std::path::Path;
 
@@ -126,6 +127,29 @@ impl InstalledProfile {
         }
     }
 
+    pub(super) fn on_demand(
+        self,
+    ) -> &'static [(&'static str, &'static str, &'static [&'static str])] {
+        match self {
+            Self::Native => &[("std.rill", "output", &["log", "panic"])],
+        }
+    }
+
+    pub(super) fn demands(self, import: &Import) -> bool {
+        let named =
+            |name: &str, module: &str, names: &[&str]| name == module || names.contains(&name);
+        import.path.first().is_some_and(|s| s == "std")
+            && self
+                .on_demand()
+                .iter()
+                .any(|&(_, module, names)| match import.path.get(1) {
+                    Some(name) => named(name, module, names),
+                    None => import.items.as_ref().is_none_or(|items| {
+                        items.iter().any(|item| named(&item.name, module, names))
+                    }),
+                })
+    }
+
     pub(super) fn conversion_metadata(self) -> &'static [&'static str] {
         match self {
             Self::Native => &["bytes.rill"],
@@ -146,6 +170,9 @@ impl InstalledProfile {
         // member of the baseline required by every admitted role.
         if path == "routine.rill" {
             return Some(include_bytes!("../../../../stdlib/routine.rill"));
+        }
+        if path == "output.rill" {
+            return Some(include_bytes!("../../../../stdlib/output.rill"));
         }
         self.sources()
             .iter()

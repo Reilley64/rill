@@ -182,6 +182,36 @@ impl<'g> TypedReport<'g> {
         &self.core.primitives.providers
     }
 
+    /// The operation that a `log` or `panic` family of the pinned output module stands for.
+    pub fn output_family(
+        &self,
+        family: &crate::loader::DeclarationId,
+    ) -> Option<PrimitiveOperation> {
+        self.core
+            .primitives
+            .output
+            .iter()
+            .find_map(|&(id, operation)| (id == family).then_some(operation))
+    }
+
+    /// The operation of a private `writeLine` or `panicText` binding in the pinned output module.
+    pub fn output_bridge(
+        &self,
+        bridge: &crate::loader::DeclarationId,
+    ) -> Option<PrimitiveOperation> {
+        self.core
+            .primitives
+            .bridges
+            .get(bridge)
+            .copied()
+            .filter(|operation| {
+                matches!(
+                    operation,
+                    PrimitiveOperation::WriteLine | PrimitiveOperation::Panic
+                )
+            })
+    }
+
     pub fn primitive_protection(&self) -> &[PrimitiveProtection<'g>] {
         &self.core.primitives.protection
     }
@@ -383,8 +413,9 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
         _ => Ok(None),
     };
     let routine = routine_role.unwrap_or_default();
-    let ordinary_scope = matches!(roles_complete, Ok(true))
-        .then(|| core::InstalledOrdinaryScope::from_closed_roles(graph, routine));
+    let ordinary_scope = matches!(roles_complete, Ok(true)).then(|| {
+        core::InstalledOrdinaryScope::from_closed_roles(graph, routine, &core.primitives.output)
+    });
     let mut bodies = analyze_integrated_bodies(
         &inventory,
         budget,

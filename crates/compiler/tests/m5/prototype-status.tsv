@@ -1,63 +1,63 @@
 # Prototype status: one row per program and installed load mode, regenerated through the public pipeline by prototype_status::committed_table_matches_the_pipeline (`mise run status:prototypes`).
 # Columns: program, mode (run, test), load (ok, or the first failure as kind:code:message:source text), typed (typed completion, - without one), then the application roots of the ownership graph by completion (checked counts roots with MIR; - without a receipt).
 program	mode	load	typed	checked	incomplete	source_rejected	resource_limit
-hello-world	run	SourceRejected:R0400:import has no public target:import std::log;	-	-	-	-	-
-hello-world	test	SourceRejected:R0400:import has no public target:import std::log;	-	-	-	-	-
-prototypes/01-basics.rill	run	SourceRejected:R0400:import has no public target:import std::log;	-	-	-	-	-
-prototypes/01-basics.rill	test	SourceRejected:R0400:import has no public target:import std::log;	-	-	-	-	-
-prototypes/02-caused-by-errors.rill	run	SourceRejected:R0400:import has no public target:import std::log;	-	-	-	-	-
-prototypes/02-caused-by-errors.rill	test	SourceRejected:R0400:import has no public target:import std::log;	-	-	-	-	-
+hello-world	run	ok	Checked	1	0	0	0
+hello-world	test	ok	Checked	1	0	0	0
+prototypes/01-basics.rill	run	ok	Checked	4	5	0	0
+prototypes/01-basics.rill	test	ok	Checked	4	5	0	0
+prototypes/02-caused-by-errors.rill	run	ok	Incomplete	-	-	-	-
+prototypes/02-caused-by-errors.rill	test	ok	Incomplete	-	-	-	-
 prototypes/03-overloads.rill	run	SourceRejected:R0400:import has no public target:map	-	-	-	-	-
 prototypes/03-overloads.rill	test	SourceRejected:R0400:import has no public target:map	-	-	-	-	-
 prototypes/04-concurrency-safety.rill	run	SourceRejected:R0400:import has no public target:spawn	-	-	-	-	-
 prototypes/04-concurrency-safety.rill	test	SourceRejected:R0400:import has no public target:spawn	-	-	-	-	-
 prototypes/05-records-match.rill	run	SourceRejected:R0400:import has no public target:map	-	-	-	-	-
 prototypes/05-records-match.rill	test	SourceRejected:R0400:import has no public target:map	-	-	-	-	-
-prototypes/06-mutation.rill	run	SourceRejected:R0400:import has no public target:import std::log;	-	-	-	-	-
-prototypes/06-mutation.rill	test	SourceRejected:R0400:import has no public target:import std::log;	-	-	-	-	-
-prototypes/07-modules/main.rill	run	SourceRejected:R0400:import has no public target:import std::log;	-	-	-	-	-
-prototypes/07-modules/main.rill	test	SourceRejected:R0400:import has no public target:import std::log;	-	-	-	-	-
+prototypes/06-mutation.rill	run	ok	Incomplete	-	-	-	-
+prototypes/06-mutation.rill	test	ok	Incomplete	-	-	-	-
+prototypes/07-modules/main.rill	run	ok	Checked	13	30	0	0
+prototypes/07-modules/main.rill	test	ok	Checked	13	30	0	0
 prototypes/08-numbers-strings.rill	run	SourceRejected:R0400:import has no public target:slice	-	-	-	-	-
 prototypes/08-numbers-strings.rill	test	SourceRejected:R0400:import has no public target:slice	-	-	-	-	-
 prototypes/09-library-contracts.rill	run	SourceRejected:R0400:import has no public target:spawnWithStack	-	-	-	-	-
 prototypes/09-library-contracts.rill	test	SourceRejected:R0400:import has no public target:spawnWithStack	-	-	-	-	-
-prototypes/10-batch-report/main.rill	run	SourceRejected:R0400:import has no public target:log	-	-	-	-	-
-prototypes/10-batch-report/main.rill	test	SourceRejected:R0400:import has no public target:log	-	-	-	-	-
+prototypes/10-batch-report/main.rill	run	SourceRejected:R0400:import has no public target:map	-	-	-	-	-
+prototypes/10-batch-report/main.rill	test	SourceRejected:R0400:import has no public target:map	-	-	-	-	-
 prototypes/11-conversions.rill	run	SourceRejected:R0400:import has no public target:ConversionError	-	-	-	-	-
 prototypes/11-conversions.rill	test	SourceRejected:R0400:import has no public target:ConversionError	-	-	-	-	-
-prototypes/12-streaming-io.rill	run	SourceRejected:R0400:import has no public target:import std::panic;	-	-	-	-	-
-prototypes/12-streaming-io.rill	test	SourceRejected:R0400:import has no public target:import std::panic;	-	-	-	-	-
-prototypes/13-filesystem.rill	run	SourceRejected:R0400:import has no public target:import std::panic;	-	-	-	-	-
-prototypes/13-filesystem.rill	test	SourceRejected:R0400:import has no public target:import std::panic;	-	-	-	-	-
-prototypes/14-environment-inputs.rill	run	SourceRejected:R0400:import has no public target:import std::panic;	-	-	-	-	-
-prototypes/14-environment-inputs.rill	test	SourceRejected:R0400:import has no public target:import std::panic;	-	-	-	-	-
+prototypes/12-streaming-io.rill	run	SourceRejected:R0400:import has no public target:length	-	-	-	-	-
+prototypes/12-streaming-io.rill	test	SourceRejected:R0400:import has no public target:length	-	-	-	-	-
+prototypes/13-filesystem.rill	run	SourceRejected:R0400:import has no public target:Path	-	-	-	-	-
+prototypes/13-filesystem.rill	test	SourceRejected:R0400:import has no public target:Path	-	-	-	-	-
+prototypes/14-environment-inputs.rill	run	SourceRejected:R0400:import has no public target:Inputs	-	-	-	-	-
+prototypes/14-environment-inputs.rill	test	SourceRejected:R0400:import has no public target:Inputs	-	-	-	-	-
 prototypes/15-secure-random.rill	run	SourceRejected:R0400:import has no public target:randomBytes	-	-	-	-	-
 prototypes/15-secure-random.rill	test	SourceRejected:R0400:import has no public target:randomBytes	-	-	-	-	-
 prototypes/16-sql-codecs/main.rill	run	SourceRejected:R0400:import has no public target:import std::sql::Parameter;	-	-	-	-	-
 prototypes/16-sql-codecs/main.rill	test	SourceRejected:R0400:import has no public target:import std::sql::Parameter;	-	-	-	-	-
-prototypes/17-json.rill	run	SourceRejected:R0400:import has no public target:import std::panic;	-	-	-	-	-
-prototypes/17-json.rill	test	SourceRejected:R0400:import has no public target:import std::panic;	-	-	-	-	-
-prototypes/18-time-values.rill	run	SourceRejected:R0400:import has no public target:import std::panic;	-	-	-	-	-
-prototypes/18-time-values.rill	test	SourceRejected:R0400:import has no public target:import std::panic;	-	-	-	-	-
-prototypes/19-clocks-cancellation.rill	run	SourceRejected:R0400:import has no public target:import std::panic;	-	-	-	-	-
-prototypes/19-clocks-cancellation.rill	test	SourceRejected:R0400:import has no public target:import std::panic;	-	-	-	-	-
+prototypes/17-json.rill	run	SourceRejected:R0400:import has no public target:import std::string::append;	-	-	-	-	-
+prototypes/17-json.rill	test	SourceRejected:R0400:import has no public target:import std::string::append;	-	-	-	-	-
+prototypes/18-time-values.rill	run	SourceRejected:R0400:import has no public target:TimeError	-	-	-	-	-
+prototypes/18-time-values.rill	test	SourceRejected:R0400:import has no public target:TimeError	-	-	-	-	-
+prototypes/19-clocks-cancellation.rill	run	SourceRejected:R0400:import has no public target:SignedDuration	-	-	-	-	-
+prototypes/19-clocks-cancellation.rill	test	SourceRejected:R0400:import has no public target:SignedDuration	-	-	-	-	-
 prototypes/20-stacks-recursion.rill	run	SourceRejected:R0400:import has no public target:spawnWithStack	-	-	-	-	-
 prototypes/20-stacks-recursion.rill	test	SourceRejected:R0400:import has no public target:spawnWithStack	-	-	-	-	-
 prototypes/21-diagnostics/empty.rill	run	ok	Checked	2	0	0	0
 prototypes/21-diagnostics/empty.rill	test	ok	Checked	2	0	0	0
-prototypes/21-diagnostics/expect-failures.rill	run	SourceRejected:R0400:import has no public target:import std::log;	-	-	-	-	-
-prototypes/21-diagnostics/expect-failures.rill	test	SourceRejected:R0400:import has no public target:import std::log;	-	-	-	-	-
+prototypes/21-diagnostics/expect-failures.rill	run	ok	Checked	3	3	0	0
+prototypes/21-diagnostics/expect-failures.rill	test	ok	Checked	3	3	0	0
 prototypes/21-diagnostics/locations.rill	run	ok	Checked	2	1	0	0
 prototypes/21-diagnostics/locations.rill	test	ok	Checked	2	1	0	0
 prototypes/21-diagnostics/valid.rill	run	ok	Incomplete	-	-	-	-
 prototypes/21-diagnostics/valid.rill	test	ok	Incomplete	-	-	-	-
 prototypes/21-diagnostics/warning.rill	run	ok	Checked	2	0	0	0
 prototypes/21-diagnostics/warning.rill	test	ok	Checked	2	0	0	0
-prototypes/22-networking.rill	run	SourceRejected:R0400:import has no public target:import std::panic;	-	-	-	-	-
-prototypes/22-networking.rill	test	SourceRejected:R0400:import has no public target:import std::panic;	-	-	-	-	-
-prototypes/23-tls/values.rill	run	SourceRejected:R0400:import has no public target:import std::panic;	-	-	-	-	-
-prototypes/23-tls/values.rill	test	SourceRejected:R0400:import has no public target:import std::panic;	-	-	-	-	-
+prototypes/22-networking.rill	run	SourceRejected:R0400:import has no public target:import std::hash::hash;	-	-	-	-	-
+prototypes/22-networking.rill	test	SourceRejected:R0400:import has no public target:import std::hash::hash;	-	-	-	-	-
+prototypes/23-tls/values.rill	run	SourceRejected:R0400:import has no public target:import std::hash::hash;	-	-	-	-	-
+prototypes/23-tls/values.rill	test	SourceRejected:R0400:import has no public target:import std::hash::hash;	-	-	-	-	-
 prototypes/24-progress-io.rill	run	SourceRejected:R0400:import has no public target:length	-	-	-	-	-
 prototypes/24-progress-io.rill	test	SourceRejected:R0400:import has no public target:length	-	-	-	-	-
-prototypes/25-http.rill	run	SourceRejected:R0400:import has no public target:import std::panic;	-	-	-	-	-
-prototypes/25-http.rill	test	SourceRejected:R0400:import has no public target:import std::panic;	-	-	-	-	-
+prototypes/25-http.rill	run	SourceRejected:R0400:import has no public target:length	-	-	-	-	-
+prototypes/25-http.rill	test	SourceRejected:R0400:import has no public target:length	-	-	-	-	-

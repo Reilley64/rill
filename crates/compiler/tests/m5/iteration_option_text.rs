@@ -295,26 +295,26 @@ fn unrelated_and_unadmitted_option_lists_keep_the_first_blocker() {
         |request, module, receipt, typed| {
             let capture = loader::load_installed(request.clone()).unwrap();
             let pinned = Statistics {
-                work: 330_599,
-                entries: 48_955,
+                work: 331_472,
+                entries: 49_620,
                 max_depth: 12,
             };
-            assert_eq!(typed.statistics(), pinned);
+            crate::limit::assert_stats(typed.statistics(), pinned, "");
             let (exact, short) = limits(pinned);
-            assert_eq!(analyze_typed(&capture, exact).statistics(), pinned);
+            crate::limit::assert_stats(analyze_typed(&capture, exact).statistics(), pinned, "");
             for cap in short {
                 crate::limit::assert_typed_limit(&analyze_typed(&capture, cap));
             }
             assert_pre_equality_graph_cap(receipt, (189_508, 4_050, 3));
             let stats = Statistics {
-                work: 189_824,
+                work: 189_857,
                 entries: 4_184,
                 max_depth: 5,
             };
             let (exact, short) = limits(stats);
             let graph = analyze_ownership(receipt, exact);
             assert_eq!(graph.completion(), GraphCompletion::Incomplete);
-            assert_eq!(graph.statistics(), stats);
+            crate::limit::assert_stats(graph.statistics(), stats, "");
             assert!(graph.findings().is_empty());
             for cap in short {
                 let limited = analyze_ownership(receipt, cap);
@@ -340,7 +340,7 @@ fn unrelated_and_unadmitted_option_lists_keep_the_first_blocker() {
                 let run = |cap| lower_body(receipt, module, &function.id, cap).unwrap();
                 let report = run(exact);
                 assert_eq!(report.completion(), Completion::Incomplete, "{name}");
-                assert_eq!(report.statistics(), stats);
+                crate::limit::assert_stats(report.statistics(), stats, "");
                 assert!(report.mir().is_none() && report.findings().is_empty());
                 let blocker = report.blocked_at().unwrap();
                 assert_eq!(blocker.span.bytes(), b"xs: List<Option<string>>");
@@ -375,13 +375,13 @@ function dead(xs: List<Option<string>>): Option<bool> {
             assert_eq!(typed.completion(), TypedCompletion::Incomplete);
             let capture = loader::load_installed(request.clone()).unwrap();
             let pinned = Statistics {
-                work: 321_791,
-                entries: 47_670,
+                work: 322_644,
+                entries: 48_323,
                 max_depth: 12,
             };
-            assert_eq!(typed.statistics(), pinned);
+            crate::limit::assert_stats(typed.statistics(), pinned, "");
             let (exact, short) = limits(pinned);
-            assert_eq!(analyze_typed(&capture, exact).statistics(), pinned);
+            crate::limit::assert_stats(analyze_typed(&capture, exact).statistics(), pinned, "");
             for cap in short {
                 crate::limit::assert_typed_limit(&analyze_typed(&capture, cap));
             }
@@ -422,7 +422,7 @@ const REVIEW_COUNTEREXAMPLES: [(
             max_depth: 0,
         },
         Statistics {
-            work: 186_285,
+            work: 186_318,
             entries: 4_114,
             max_depth: 5,
         },
@@ -439,7 +439,7 @@ const REVIEW_COUNTEREXAMPLES: [(
             max_depth: 0,
         },
         Statistics {
-            work: 186_476,
+            work: 186_509,
             entries: 4_118,
             max_depth: 5,
         },
@@ -455,7 +455,7 @@ const REVIEW_COUNTEREXAMPLES: [(
             max_depth: 0,
         },
         Statistics {
-            work: 186_538,
+            work: 186_571,
             entries: 4_119,
             max_depth: 5,
         },
@@ -466,12 +466,12 @@ const REVIEW_COUNTEREXAMPLES: [(
         "function probe(xs: List<Option<string>>): Option<bool> { for (let item of xs) { let s = \"owned\"; let moved = s; let again = s; break; } return Option.Some(true); }",
         Some("again = s"),
         Statistics {
-            work: 4_717,
+            work: 4_722,
             entries: 721,
             max_depth: 5,
         },
         Statistics {
-            work: 189_392,
+            work: 189_430,
             entries: 4_817,
             max_depth: 5,
         },
@@ -481,12 +481,12 @@ const REVIEW_COUNTEREXAMPLES: [(
         "function probe(xs: List<Option<string>>): void { for (let item of xs) { let s = \"owned\"; let moved = s; let again = s; break; } }",
         Some("again = s"),
         Statistics {
-            work: 3_535,
+            work: 3_540,
             entries: 474,
             max_depth: 5,
         },
         Statistics {
-            work: 187_970,
+            work: 188_008,
             entries: 4_570,
             max_depth: 5,
         },
@@ -515,7 +515,7 @@ fn review_counterexamples_keep_their_outcomes_at_exact_caps() {
                 let run = |cap| lower_body(receipt, module, &f.id, cap).unwrap();
                 let target = run(exact);
                 assert_eq!(target.completion(), expected, "{source}");
-                assert_eq!(target.statistics(), targeted, "{source}");
+                crate::limit::assert_stats(target.statistics(), targeted, source);
                 assert!(target.mir().is_none());
                 for cap in short {
                     let limited = run(cap);
@@ -524,7 +524,7 @@ fn review_counterexamples_keep_their_outcomes_at_exact_caps() {
                 assert_pre_equality_graph_cap(receipt, pre_equality);
                 let (exact, short) = limits(whole);
                 let graph = analyze_ownership(receipt, exact);
-                assert_eq!(graph.statistics(), whole, "{source}");
+                crate::limit::assert_stats(graph.statistics(), whole, source);
                 let root = graph
                     .roots()
                     .iter()

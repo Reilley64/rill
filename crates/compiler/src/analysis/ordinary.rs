@@ -1,6 +1,7 @@
 //! M4.5 ordinary headers and input facts over an immutable loaded graph.
 use super::declarations::{
-    Budget, CheckFinding, Contract, PreludeContracts, Schema, check_inventory,
+    Budget, CheckFinding, Contract, DeclarationSummaries, FieldClass, PreludeContracts, Schema,
+    check_inventory,
 };
 use super::*;
 use crate::loader::Implementation;
@@ -124,6 +125,7 @@ pub struct OrdinaryAnalysis<'g> {
     lexical: Option<Arc<Lexical<'g>>>,
     families: BTreeMap<&'g DeclarationId, FamilyFacts<'g>>,
     types: PartialFacts<'g>,
+    summaries: DeclarationSummaries,
     declaration_issues: Vec<DeclarationIssue<'g>>,
     /// Issues a `ResourceLimit` report no longer publishes. `analyze_generics`
     /// still meters them, so its statistics on this input do not move.
@@ -148,6 +150,7 @@ impl<'g> OrdinaryAnalysis<'g> {
             headers,
             // Metered, not published (`withheld_issues`), or facts, identity
             // and counters.
+            summaries: _summaries,
             graph: _graph,
             lexical: _lexical,
             families: _families,
@@ -200,6 +203,14 @@ impl<'g> OrdinaryAnalysis<'g> {
 
     pub(super) fn headers(&self) -> &metadata::Headers<'g> {
         &self.headers
+    }
+
+    pub(super) fn field_class(&self, id: &DeclarationId) -> FieldClass {
+        self.summaries.fields(id)
+    }
+
+    pub(super) fn custom_dispose(&self, id: &DeclarationId) -> bool {
+        self.summaries.custom_dispose(id)
     }
 
     pub(super) fn family_probes(&self) -> usize {
@@ -594,7 +605,8 @@ impl<'g> OrdinaryAnalysis<'g> {
                 schema: Schema::ConsumingDispose,
             },
         };
-        let (result, facts) = check_inventory(self.graph, &self.types, schemas, budget);
+        let (result, mut facts) = check_inventory(self.graph, &self.types, schemas, budget);
+        self.summaries = facts.take_summaries();
         if self.lexical.is_some() && result.is_ok() {
             for checked in facts.declarations() {
                 budget.step(1)?;
@@ -818,6 +830,7 @@ fn analyze_ordinary_types(
         families: BTreeMap::new(),
         lexical: analyzer.lexical,
         types: analyzer.facts,
+        summaries: DeclarationSummaries::default(),
         declaration_issues: Vec::new(),
         withheld_issues: Vec::new(),
         unusable: BTreeSet::new(),

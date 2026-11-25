@@ -194,17 +194,39 @@ fn parameter<'a, 'g>(candidate: &'a SourceCandidate<'_, 'g>, column: usize) -> &
 }
 
 impl<'r, 'g> Checker<'r, 'g> {
-    pub(super) fn has_installed_ordinary_scope(&self, family: &DeclarationId) -> bool {
-        self.ordinary_scope
-            .as_ref()
-            .is_some_and(|scope| scope.contains(family))
+    pub(super) fn has_installed_ordinary_scope(&mut self, family: &DeclarationId) -> Work<bool> {
+        Self::in_installed_ordinary_scope(&self.ordinary_scope, &mut self.elab, family)
     }
 
-    fn ordinary_use_premise(&self, family: &DeclarationId) -> Option<InputPremise> {
-        if self.has_installed_ordinary_scope(family) {
-            self.arrow_premise
+    fn in_installed_ordinary_scope(
+        scope: &Option<crate::analysis::typed::InstalledOrdinaryScope<'g>>,
+        elab: &mut Analyzer<'g>,
+        family: &DeclarationId,
+    ) -> Work<bool> {
+        match scope {
+            Some(scope) => scope.contains(family, |n| elab.step(n)),
+            None => Ok(false),
+        }
+    }
+
+    pub(super) fn has_installed_ordinary_scope_within(
+        &self,
+        family: &DeclarationId,
+        budget: &mut Budget,
+    ) -> Work<bool> {
+        match &self.ordinary_scope {
+            Some(scope) => scope.contains(family, |n| budget.step(n)),
+            None => Ok(false),
+        }
+    }
+
+    fn ordinary_use_premise(&mut self, family: &DeclarationId) -> Work<Option<InputPremise>> {
+        if self.has_installed_ordinary_scope(family)? {
+            Ok(self.arrow_premise)
         } else {
-            Some(self.arrow_premise.map_or(PREMISE, |p| p.combine(PREMISE)))
+            Ok(Some(
+                self.arrow_premise.map_or(PREMISE, |p| p.combine(PREMISE)),
+            ))
         }
     }
 
@@ -556,7 +578,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             if inference.slots[&leaf].ty.is_some() || inference.slots[&leaf].blocked {
                 continue;
             }
-            if let Some(premise) = self.ordinary_use_premise(call.fact.callee) {
+            if let Some(premise) = self.ordinary_use_premise(call.fact.callee)? {
                 let slot = inference.slots.get_mut(&leaf).unwrap();
                 slot.ordinary_context = Some(
                     slot.ordinary_context
@@ -669,7 +691,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 _ => None,
             };
             let result = (|| {
-                if self.has_installed_ordinary_scope(call.fact.callee)
+                if self.has_installed_ordinary_scope(call.fact.callee)?
                     || eligible_local_disposer
                     || scope.and_then(|scope| scope.winner()).is_some()
                 {
@@ -698,7 +720,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 let premise = if eligible_local_disposer {
                     self.arrow_premise
                 } else {
-                    self.ordinary_use_premise(call.fact.callee)
+                    self.ordinary_use_premise(call.fact.callee)?
                 };
                 Ok((output, premise))
             })();
@@ -707,7 +729,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         } else {
             (
                 ConditionalOutput::default(),
-                self.ordinary_use_premise(call.fact.callee),
+                self.ordinary_use_premise(call.fact.callee)?,
             )
         };
         self.elab.reserve(
@@ -732,8 +754,12 @@ impl<'r, 'g> Checker<'r, 'g> {
                     premise = Some(premise.map_or(p, |a| a.combine(p)));
                 }
             }
-            let actual_scope =
-                eligible_local_disposer || self.has_installed_ordinary_scope(call.fact.callee);
+            let actual_scope = eligible_local_disposer
+                || Self::in_installed_ordinary_scope(
+                    &self.ordinary_scope,
+                    &mut self.elab,
+                    call.fact.callee,
+                )?;
             if proof.premise.is_none() && (!actual_scope || premise.is_none()) {
                 match (proof.state, &output.agreement, &output.ty) {
                     (GoalState::Proved, OutputAgreement::Agrees, Some(ty)) => {
@@ -915,7 +941,7 @@ impl<'r, 'g> Checker<'r, 'g> {
     ) -> Work<Comparison<'r, 'g>> {
         let inventory = self.input.ordinary.unwrap();
         let id = call.fact.callee;
-        let family = if self.has_installed_ordinary_scope(id) {
+        let family = if self.has_installed_ordinary_scope_within(id, budget)? {
             source::admitted_family(inventory, id, budget)?
         } else {
             source::family(inventory, id, budget)?
@@ -1135,7 +1161,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             if !committed {
                 self.elab.reserve(1)?;
                 inference.ordinary_tuples.insert(node);
-                if let Some(premise) = self.ordinary_use_premise(call.fact.callee) {
+                if let Some(premise) = self.ordinary_use_premise(call.fact.callee)? {
                     let slot = inference.slots.get_mut(&node).unwrap();
                     slot.ordinary_context = Some(
                         slot.ordinary_context
@@ -1159,7 +1185,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 }
             }
             if written.is_some_and(|a| a != count) || (projected && viable.is_empty()) {
-                if let Some(premise) = self.ordinary_use_premise(call.fact.callee) {
+                if let Some(premise) = self.ordinary_use_premise(call.fact.callee)? {
                     self.conditional_finding(module, node, ScalarFindingKind::Arity, premise)?;
                 } else {
                     self.finding(module, node, ScalarFindingKind::Arity)?;
@@ -1686,7 +1712,7 @@ impl<'r, 'g> Checker<'r, 'g> {
             )?;
             // The compiler operation needs actual argument occurrences at a
             // direct call; ordinary winners of the same family do not.
-            let formed = self.has_installed_ordinary_scope(written.declaration)
+            let formed = self.has_installed_ordinary_scope(written.declaration)?
                 && !scoped
                 && self.form_ordinary_value(inference, node, written, &goal, &output)?;
             self.elab.reserve(1)?;
@@ -1809,7 +1835,7 @@ impl<'r, 'g> Checker<'r, 'g> {
         ty: Type<'g>,
         family: &DeclarationId,
     ) -> Work<()> {
-        if let Some(premise) = self.ordinary_use_premise(family) {
+        if let Some(premise) = self.ordinary_use_premise(family)? {
             self.conditional_context(inference, node, ty, premise)
         } else {
             self.establish(inference, node, ty, true)
@@ -1922,7 +1948,9 @@ impl<'r, 'g> Checker<'r, 'g> {
             .evidence
             .get(call.instantiation.as_ref().or(call.goal.as_ref()).unwrap())
             .unwrap();
-        if self.has_installed_ordinary_scope(call.family) || call.checked_local_disposer {
+        if Self::in_installed_ordinary_scope(&self.ordinary_scope, &mut self.elab, call.family)?
+            || call.checked_local_disposer
+        {
             self.elab.reserve(call.defaults.len())?;
             facts.defaults = call.defaults.clone();
             if let Some(selection) = &proof.selection {
@@ -1978,7 +2006,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                                 })
                     })
                 || ((self.is_canonical_scalar_family(call.fact.callee)
-                    || self.has_installed_ordinary_scope(call.fact.callee))
+                    || self.has_installed_ordinary_scope(call.fact.callee)?)
                     && inference.slots[&node].blocked)
             {
                 continue;

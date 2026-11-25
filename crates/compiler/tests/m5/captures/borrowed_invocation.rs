@@ -249,7 +249,7 @@ fn borrowed_once_and_unproved_bodies_do_not_issue_receipts() {
             }
         "#,
             true,
-            caps(323_260, 47_753, 12),
+            caps(324_110, 48_407, 12),
         ),
         (
             r#"
@@ -261,7 +261,7 @@ fn borrowed_once_and_unproved_bodies_do_not_issue_receipts() {
             }
         "#,
             false,
-            caps(321_294, 47_560, 12),
+            caps(322_144, 48_214, 12),
         ),
         (
             r#"
@@ -277,7 +277,7 @@ fn borrowed_once_and_unproved_bodies_do_not_issue_receipts() {
             }
         "#,
             false,
-            caps(325_147, 48_005, 12),
+            caps(326_003, 48_665, 12),
         ),
     ] {
         probe_report(
@@ -312,7 +312,14 @@ fn borrowed_once_and_unproved_bodies_do_not_issue_receipts() {
                     );
                 }
                 let graph = loader::load_installed(request.clone()).unwrap();
-                assert_eq!(analyze_typed(&graph, limit).completion(), expected);
+                let at_limit = crate::limit::measured(
+                    "analyze_typed",
+                    "limit",
+                    limit,
+                    |limits| analyze_typed(&graph, limits),
+                    |report| report.statistics(),
+                );
+                assert_eq!(at_limit.completion(), expected);
                 for short in short_capture_limits(exact(typed.statistics())) {
                     let limited = analyze_typed(&graph, short);
                     crate::limit::assert_typed_limit(&limited);

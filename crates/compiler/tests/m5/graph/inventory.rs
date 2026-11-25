@@ -182,8 +182,8 @@ fn capture_cases() -> [Capture; 2] {
             name: "baseline",
             main: BASELINE_MAIN.into(),
             standard_modules: 17,
-            typed: [371_288, 54_059, 12],
-            graph: [203_014, 5_005, 5],
+            typed: [372_214, 54_755, 12],
+            graph: [203_059, 5_005, 5],
             pre_equality_graph: [202_698, 4_871, 3],
             before_o16_graph: None,
             app_roots: APP_BASELINE,
@@ -193,8 +193,8 @@ fn capture_cases() -> [Capture; 2] {
             name: "shared",
             main: format!("{BASELINE_MAIN}{JOIN}"),
             standard_modules: 18,
-            typed: [494_856, 56_822, 12],
-            graph: [244_835, 26_772, 10],
+            typed: [495_809, 57_543, 12],
+            graph: [244_886, 26_772, 10],
             pre_equality_graph: [243_206, 25_960, 10],
             before_o16_graph: Some([243_522, 26_094, 10]),
             app_roots: APP_SHARED,
@@ -237,11 +237,10 @@ fn installed_captures_state_the_graph_root_inventory() {
                     let typed = analyze_typed(&graph, AnalysisLimits::default());
                     let receipt = typed.receipt().expect("installed M4 receipt");
                     let used = typed.statistics();
-                    assert_eq!(
-                        [used.work, used.entries, used.max_depth],
-                        case.typed,
-                        "{}: M4 caps",
-                        case.name
+                    crate::limit::assert_triple(
+                        (used.work, used.entries, used.max_depth),
+                        (case.typed[0], case.typed[1], case.typed[2]),
+                        format!("{}: M4 caps", case.name),
                     );
                     assert_eq!(
                         graph
@@ -337,11 +336,10 @@ fn installed_captures_state_the_graph_root_inventory() {
                     );
 
                     let used = report.statistics();
-                    assert_eq!(
-                        [used.work, used.entries, used.max_depth],
-                        case.graph,
-                        "{}: graph meter",
-                        case.name
+                    crate::limit::assert_triple(
+                        (used.work, used.entries, used.max_depth),
+                        (case.graph[0], case.graph[1], case.graph[2]),
+                        format!("{}: graph meter", case.name),
                     );
                     let exact = AnalysisLimits {
                         max_work: used.work,
@@ -350,7 +348,7 @@ fn installed_captures_state_the_graph_root_inventory() {
                     };
                     let again = analyze_ownership(&receipt, exact);
                     assert_eq!(again.completion(), GraphCompletion::Incomplete);
-                    assert_eq!(again.statistics(), used);
+                    crate::limit::assert_stats(again.statistics(), used, "");
                     let [max_work, max_entries, max_depth] = case.pre_equality_graph;
                     let before_o16 =
                         case.before_o16_graph

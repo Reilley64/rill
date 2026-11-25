@@ -384,8 +384,7 @@ fn field_type<'a, 'g>(
         return Ok(None);
     }
     let headers = &typed.inventory().type_facts().declarations;
-    let probes = usize::BITS - headers.len().leading_zeros() + 1;
-    charge_key(&declaration.module, probes as usize, budget)?;
+    keyed::charge(&declaration.module, headers.len(), budget)?;
     let Some(DeclarationFacts {
         binders,
         shape: DeclarationShape::Record { fields },

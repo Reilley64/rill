@@ -18,6 +18,8 @@ mod cancellation;
 mod captures;
 #[path = "m5/compilable.rs"]
 mod compilable;
+#[path = "m5/declaration_ordinal.rs"]
+mod declaration_ordinal;
 #[path = "m5/disposers.rs"]
 mod disposers;
 #[path = "m5/field_routes.rs"]
@@ -42,6 +44,8 @@ mod o05_field_arithmetic;
 mod o15_arithmetic;
 #[path = "m5/o16_join_order.rs"]
 mod o16_join_order;
+#[path = "m5/output.rs"]
+mod output;
 #[path = "m5/patterns.rs"]
 mod patterns;
 #[path = "support/pipeline.rs"]
@@ -351,7 +355,7 @@ fn ownership_from_installed_source() {
             for (name, caps, cleanup) in [
                 (
                     "ordered",
-                    (3_011, 590, 4),
+                    (3_014, 590, 4),
                     &[
                         ("end", &b"dependent"[..]),
                         ("drop", b"source"),
@@ -360,7 +364,7 @@ fn ownership_from_installed_source() {
                 ),
                 (
                     "reinitialized",
-                    (3_106, 648, 4),
+                    (3_109, 648, 4),
                     &[
                         ("drop", &b"owner"[..]),
                         ("drop", b"owner"),
@@ -634,7 +638,7 @@ fn replacement_keeps_the_declaration_rank() {
                 receipt,
                 module,
                 "rank",
-                (2_073, 131, 3),
+                (2_075, 131, 3),
                 &[("drop", b"a"), ("drop", b"b"), ("drop", b"a")],
             );
         },
