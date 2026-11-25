@@ -361,6 +361,7 @@ impl<'g> PrimitiveCore<'g> {
                     continue;
                 };
                 budget.reserve(2)?;
+                crate::loader::keyed::charge(&bridge.id.module, self.bridges.len(), budget)?;
                 self.bridges.insert(&bridge.id, operation);
                 self.output.push((&family.id, operation));
             }
@@ -369,7 +370,9 @@ impl<'g> PrimitiveCore<'g> {
             && let Some(bridge) = check_append_binding(inventory, module, budget)?
         {
             budget.reserve(1)?;
-            self.bridges.insert(&bridge.id, PrimitiveOperation::AppendText);
+            crate::loader::keyed::charge(&bridge.id.module, self.bridges.len(), budget)?;
+            self.bridges
+                .insert(&bridge.id, PrimitiveOperation::AppendText);
         }
         Ok(())
     }

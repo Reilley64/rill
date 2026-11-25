@@ -20,6 +20,14 @@ pub(in crate::analysis) struct InstalledOrdinaryScope<'g> {
     output: Vec<&'g DeclarationId>,
 }
 
+struct Steps<'a, F>(&'a mut F);
+
+impl<F: FnMut(usize) -> Work<()>> crate::loader::keyed::Meter for Steps<'_, F> {
+    fn step(&mut self, n: usize) -> Result<(), ()> {
+        (self.0)(n)
+    }
+}
+
 impl<'g> InstalledOrdinaryScope<'g> {
     pub(in crate::analysis::typed) fn from_closed_roles(
         graph: &Graph,
@@ -46,7 +54,10 @@ impl<'g> InstalledOrdinaryScope<'g> {
         {
             return Ok(true);
         }
-        step(1)?;
+        if self.output.is_empty() {
+            return Ok(false);
+        }
+        crate::loader::keyed::charge(&family.module, self.output.len(), &mut Steps(&mut step))?;
         Ok(self.output.contains(&family))
     }
 

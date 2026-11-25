@@ -8160,7 +8160,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         if !shape_ok {
             return Err(pending());
         }
-        graph::charge_key(&call.callee.module, 1, self.budget)?;
+        keyed::charge(&call.callee.module, self.typed.bridge_count(), self.budget)?;
         let result = if call.substitution.is_empty() {
             match self.typed.output_bridge(call.callee) {
                 Some(PrimitiveOperation::WriteLine) if result_is("void") => CallResult::WriteLine,
@@ -8214,7 +8214,8 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         }
         let target_ty = self.value(*target)?.ty.clone();
         let text_ty = self.value(*text)?.ty.clone();
-        let string = |ty: &TypeTerm<'_>| matches!(ty, TypeTerm::Primitive(p) if p.name() == "string");
+        let string =
+            |ty: &TypeTerm<'_>| matches!(ty, TypeTerm::Primitive(p) if p.name() == "string");
         if !matches!(target_ty.as_ref(), TypeTerm::Reference { mutable: true, referent } if string(referent))
             || !matches!(text_ty.as_ref(), TypeTerm::Reference { mutable: false, referent } if string(referent))
         {
@@ -8246,7 +8247,10 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         let staged_text = self.expression(*text, Some(text_stage), call_pc, depth + 1)?;
         self.budget.step(1)?;
         let root = self.ungroup(*target)?;
-        if matches!(self.module.syntax.nodes[root].kind, NodeKind::Prefix("&mut")) {
+        if matches!(
+            self.module.syntax.nodes[root].kind,
+            NodeKind::Prefix("&mut")
+        ) {
             return self.expression(*target, Some(target_stage), staged_text, depth + 1);
         }
         self.budget.step(1)?;

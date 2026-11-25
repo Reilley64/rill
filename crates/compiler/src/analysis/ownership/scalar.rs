@@ -204,7 +204,6 @@ pub(super) fn implementation_frame<'g>(
         || !std::ptr::eq(body.site.module, &module.key)
         || body.site.node != source.body_node
         || body.flow.pending
-        || (body.flow.diverges && module.key.path != "output.rill")
         || !body.flow.breaks.is_empty()
         || !body.flow.continues.is_empty()
         || !matches!(body.owner, BodyOwner::Declaration(owner) if std::ptr::eq(owner, &declaration.id))
@@ -214,10 +213,16 @@ pub(super) fn implementation_frame<'g>(
         return Err(pending);
     }
     if module.key.path == "compare.rill" {
+        if body.flow.diverges {
+            return Err(pending);
+        }
         return compare::implementation_frame(typed, implementation, body, budget);
     }
     if module.key.path == "output.rill" {
         return output_frame(typed, implementation, body, budget);
+    }
+    if body.flow.diverges {
+        return Err(pending);
     }
     let (role, family) = if let Some(copy) = typed
         .copy_role()
@@ -301,7 +306,11 @@ fn output_frame<'g>(
     if !screened || body.flow.returns || body.flow.diverges == body.flow.normal {
         return Err(pending);
     }
-    budget.step(1)?;
+    keyed::charge(
+        &implementation.source.family.module,
+        typed.output_count(),
+        budget,
+    )?;
     let expected = match typed.output_family(&implementation.source.family) {
         Some(PrimitiveOperation::WriteLine) => "void",
         Some(PrimitiveOperation::Panic) => "never",

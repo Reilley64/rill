@@ -212,6 +212,10 @@ impl<'g> TypedReport<'g> {
             })
     }
 
+    pub(in crate::analysis) fn output_count(&self) -> usize {
+        self.core.primitives.output.len()
+    }
+
     pub(in crate::analysis) fn bridge_count(&self) -> usize {
         self.core.primitives.bridges.len()
     }
