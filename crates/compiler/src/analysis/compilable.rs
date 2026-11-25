@@ -3,7 +3,8 @@
 //! A program is compilable when its entry startup and every body reachable
 //! from it are `Checked`, although the whole graph has no complete state. This
 //! module is the one place the backend and the CLI ask; neither decides
-//! compilability itself.
+//! compilability itself. [`ProgramAnalysis`] is the entry point for a typed
+//! report with or without a receipt.
 //!
 //! The rule only reads a finished [`GraphReport`]. It takes no limits and
 //! spends no budget: no `step`, `reserve` or `charge_key`, so no cap moves and
@@ -17,12 +18,13 @@
 //! consulted. The rule is for ordinary execution: it reads the entry's
 //! startup, which test mode does not run.
 use super::{
-    Statistics,
+    AnalysisLimits, Statistics,
     ownership::{
         Completion, Dependency, DependencyContract, Finding, GraphCompletion, GraphReport, Mir,
-        RootReport,
+        RootReport, analyze_ownership,
     },
     scalars::{BodyOwner, Site},
+    typed::{CoreBlocker, TypedCompletion, TypedReport},
 };
 use crate::loader::{DeclarationId, Graph, Origin};
 use std::collections::{BTreeMap, VecDeque};
@@ -52,6 +54,22 @@ pub enum Blocker<'r, 'g> {
     SourceRejected { finding: &'r Finding<'g> },
     /// A cap ran out. Nothing else is read from the report.
     ResourceLimit { statistics: Statistics },
+    /// Typed analysis rejected the source, so ownership analysis did not run.
+    /// `findings` are the located typed findings in source order; it is empty
+    /// when the rejection comes from a finding the typed report does not
+    /// locate.
+    TypedRejected { findings: Vec<TypedFinding<'g>> },
+    /// Typed analysis could not finish and published no site to name. Report
+    /// it as an incomplete analysis, not as [`UNSUPPORTED_SHAPE`].
+    TypedUnlocated { core_blockers: Vec<CoreBlocker> },
+}
+
+/// A finding of typed analysis: its code, where it is and what it is.
+#[derive(Debug)]
+pub struct TypedFinding<'g> {
+    pub code: Option<&'static str>,
+    pub site: Site<'g>,
+    pub description: String,
 }
 
 /// A body that is `Checked`, with its ordinary MIR.
@@ -97,6 +115,113 @@ impl<'r, 'g> CompilableProgram<'r, 'g> {
     pub fn active_disposers(&self) -> &[CheckedBody<'r, 'g>] {
         &self.active_disposers
     }
+}
+
+/// The front end of one loaded program, read by the compilable-program rule:
+/// the typed report and, when typed analysis granted a receipt, the ownership
+/// graph built from it.
+pub struct ProgramAnalysis<'t, 'g> {
+    graph: &'g Graph,
+    typed: &'t TypedReport<'g>,
+    ownership: Option<GraphReport<'g>>,
+}
+
+impl<'t, 'g> ProgramAnalysis<'t, 'g> {
+    /// Run ownership analysis on a typed report that has a receipt. `graph` is
+    /// the loaded graph `typed` was built from.
+    pub fn new(graph: &'g Graph, typed: &'t TypedReport<'g>, limits: AnalysisLimits) -> Self {
+        let ownership = typed
+            .receipt()
+            .map(|receipt| analyze_ownership(&receipt, limits));
+        Self {
+            graph,
+            typed,
+            ownership,
+        }
+    }
+
+    /// Decide compilability once for the whole front end. A typed report with
+    /// no receipt blocks without reading ownership: `ResourceLimit` as itself,
+    /// `SourceRejected` with its located findings, and `Incomplete` at the
+    /// earliest site the typed report publishes (an unsupported body
+    /// obligation, a pending Result use or a conditional finding). With a
+    /// receipt, the result is [`compilable_program`] on the ownership report.
+    pub fn compilability(&self) -> Compilability<'_, 'g> {
+        if let Some(report) = &self.ownership {
+            return compilable_program(self.graph, report);
+        }
+        let typed = self.typed;
+        Compilability::Blocked(match typed.completion() {
+            TypedCompletion::ResourceLimit => Blocker::ResourceLimit {
+                statistics: typed.statistics(),
+            },
+            TypedCompletion::SourceRejected => Blocker::TypedRejected {
+                findings: typed_findings(typed),
+            },
+            TypedCompletion::Incomplete => match first_blocking_site(typed) {
+                Some(site) => Blocker::Incomplete { site },
+                None => Blocker::TypedUnlocated {
+                    core_blockers: typed.core_blockers().to_vec(),
+                },
+            },
+            TypedCompletion::Checked => unreachable!("a checked typed report grants a receipt"),
+        })
+    }
+}
+
+fn site_order(site: &Site<'_>) -> (String, usize, usize) {
+    (
+        format!("{:?}:{}", site.module.origin, site.module.path),
+        site.span.start(),
+        site.span.end(),
+    )
+}
+
+fn first_blocking_site<'g>(typed: &TypedReport<'g>) -> Option<Site<'g>> {
+    let bodies = typed.bodies();
+    let obligations = bodies.obligations().iter().map(|o| o.site);
+    let conditional = bodies.conditional_findings().iter().map(|c| c.finding.site);
+    let pending = typed
+        .result_use()
+        .into_iter()
+        .flat_map(|uses| uses.pending())
+        .map(|pending| pending.site);
+    obligations
+        .chain(conditional)
+        .chain(pending)
+        .min_by_key(site_order)
+}
+
+fn typed_findings<'g>(typed: &TypedReport<'g>) -> Vec<TypedFinding<'g>> {
+    let bodies = typed
+        .bodies()
+        .findings()
+        .iter()
+        .map(|finding| TypedFinding {
+            code: finding.kind.code(),
+            site: finding.site,
+            description: format!("{:?}", finding.kind),
+        });
+    let interfaces = typed
+        .public_interface_findings()
+        .iter()
+        .map(|finding| TypedFinding {
+            code: Some(finding.code()),
+            site: finding.site,
+            description: format!("{:?}", finding.kind),
+        });
+    let discards = typed
+        .result_use()
+        .into_iter()
+        .flat_map(|uses| uses.discards())
+        .map(|discard| TypedFinding {
+            code: Some(discard.code()),
+            site: discard.discard,
+            description: format!("a Result is discarded: {:?}", discard.kind),
+        });
+    let mut findings: Vec<_> = bodies.chain(interfaces).chain(discards).collect();
+    findings.sort_by_key(|finding| site_order(&finding.site));
+    findings
 }
 
 #[derive(Clone, Copy)]

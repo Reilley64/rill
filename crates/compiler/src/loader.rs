@@ -12,7 +12,9 @@ mod installed;
 mod resolve;
 use filesystem::Host;
 use installed::InstalledProfile;
-pub use installed::{CollectionArtifact, InstalledRequest, load_installed};
+pub use installed::{
+    CollectionArtifact, InstalledRequest, load_installed, pinned_ownership_archive,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Origin {
