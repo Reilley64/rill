@@ -3,7 +3,14 @@ use std::path::Path;
 use std::process::{Command, Output};
 
 const OPERATIONS: [&str; 4] = ["build", "check", "run", "test"];
+#[cfg(feature = "llvm")]
+const UNAVAILABLE: [&str; 1] = ["test"];
+#[cfg(not(feature = "llvm"))]
 const UNAVAILABLE: [&str; 3] = ["build", "run", "test"];
+#[cfg(feature = "llvm")]
+const SINGLE_ENTRY: [&str; 2] = ["check", "test"];
+#[cfg(not(feature = "llvm"))]
+const SINGLE_ENTRY: [&str; 4] = OPERATIONS;
 
 fn rill(args: &[&str]) -> Output {
     Command::new(env!("CARGO_BIN_EXE_rill"))
@@ -64,7 +71,7 @@ fn version_uses_the_package_version() {
 
 #[test]
 fn every_unavailable_command_fails_without_fake_output() {
-    for command in ["build", "run", "test", "lsp"] {
+    for command in UNAVAILABLE.into_iter().chain(["lsp"]) {
         assert_unavailable(&rill(&[command]), command);
     }
 }
@@ -97,7 +104,7 @@ fn source_and_lsp_input_are_not_read() {
     use std::thread;
     use std::time::{Duration, Instant};
 
-    for command in ["build", "run", "test", "lsp"] {
+    for command in UNAVAILABLE.into_iter().chain(["lsp"]) {
         let mut process = Command::new(env!("CARGO_BIN_EXE_rill"));
         process.arg(command);
         if command != "lsp" {
@@ -142,11 +149,13 @@ fn extra_arguments_and_unsupported_options_are_rejected() {
     for command in ["help", "--help", "-h", "version", "--version", "-V"] {
         assert_failure(&rill(&[command, "extra"]), "additional arguments");
     }
-    for command in OPERATIONS {
+    for command in SINGLE_ENTRY {
         assert_failure(
             &rill(&[command, "entry.rill", "extra"]),
             "at most one entry path",
         );
+    }
+    for command in OPERATIONS {
         for option in ["--unknown", "--help", "--report-format", "-"] {
             assert_failure(&rill(&[command, option]), "options are not supported");
         }

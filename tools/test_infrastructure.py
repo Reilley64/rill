@@ -394,12 +394,12 @@ class WorkflowTests(unittest.TestCase):
 
 
 class NativeAcceptanceTests(unittest.TestCase):
-    STEP = "Test: Verify native runtime acceptance is unavailable"
-
+    BUILD_STEP = "Build: Stage the prototypes installation"
+    TEST_STEP = "Test: Run the prototype acceptance through the staged rill"
     RELEASE_STEP = "Build and test: Verify release acceptance stops at the unavailable build"
     BUILD_STUB = f'exec "{sys.executable}" tools/unavailable.py build\n'
 
-    def run_step(self, mise_script, step_name=STEP, command="mise run test:runtime"):
+    def run_step(self, mise_script, step_name, command):
         workflow = yaml.load((doctor.ROOT / ".github/workflows/native.yml").read_text(), Loader=yaml.BaseLoader)
         steps = workflow["jobs"]["native"]["steps"]
         self.assertEqual([step["name"] for step in steps].count(step_name), 1)
@@ -413,15 +413,20 @@ class NativeAcceptanceTests(unittest.TestCase):
             return subprocess.run(["bash", "-e", "-c", script], cwd=doctor.ROOT,
                                   capture_output=True, text=True, env=env)
 
-    def test_the_stub_is_asserted_so_the_job_is_not_red_by_design(self):
-        result = self.run_step(f'[ "$1 $2" = "run test:runtime" ] && exec "{sys.executable}" tools/unavailable.py test:runtime\nexit 64\n')
-        self.assertEqual(result.returncode, 0, result.stderr)
-
-    def test_a_real_runtime_result_or_other_failure_still_fails_the_job(self):
-        for script in ["exit 0\n", "echo 'compile error' >&2\nexit 1\n",
-                       "echo 'unrelated is not implemented in this scaffold' >&2\nexit 2\n"]:
-            with self.subTest(script=script):
-                self.assertNotEqual(self.run_step(script).returncode, 0)
+    def test_the_prototype_steps_run_the_real_tasks_against_the_llvm_prefix(self):
+        workflow = yaml.load((doctor.ROOT / ".github/workflows/native.yml").read_text(), Loader=yaml.BaseLoader)
+        steps = workflow["jobs"]["native"]["steps"]
+        names = [step["name"] for step in steps]
+        for name, command in [(self.BUILD_STEP, "mise run build:prototypes"),
+                              (self.TEST_STEP, "mise run test:prototypes")]:
+            with self.subTest(step=name):
+                [step] = [step for step in steps if step["name"] == name]
+                self.assertEqual(step["run"], command)
+                self.assertEqual(step["env"]["LLVM_SYS_231_PREFIX"],
+                                 "${{ github.workspace }}/target/toolchains/llvm-23.1.5/${{ matrix.llvm }}")
+                self.assertEqual(step["env"]["LLVM_SYS_231_STRICT_VERSIONING"], "1")
+        self.assertLess(names.index(self.BUILD_STEP), names.index(self.TEST_STEP))
+        self.assertFalse([step for step in steps if "test:runtime" in step.get("run", "")])
 
     def run_release(self, mise_script):
         guard = '[ "$1 $2" != "run verify:release" ] && exit 64\n'
