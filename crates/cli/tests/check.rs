@@ -26,13 +26,16 @@ fn stderr(output: &Output) -> String {
     String::from_utf8(output.stderr.clone()).expect("UTF-8 report")
 }
 
-const READY: &str = "function ready(flag: bool): bool { return flag; }\n";
+const READY: &str = "function ready(text: &string): void {}\n";
+const REUSE: &str =
+    "function reuse(value: string): bool { let taken = value; let again = value; return true; }\n";
+const REUSE_AGAIN: &str = "function reuseAgain(item: string): bool { let taken = item; let again = item; return true; }\n";
 const MINUS: &str = "function minus(a: i32, b: i32): i32 { return a - b; }\n";
 
 #[test]
 fn a_clean_program_exits_zero_with_no_report() {
     let installation = Installation::stage("clean");
-    let output = installation.check(&format!("{READY}let ok = ready(true);\n"));
+    let output = installation.check(&format!("{READY}ready(&\"x\");\n"));
     assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
     assert!(output.stdout.is_empty(), "{output:?}");
     assert!(output.stderr.is_empty(), "{}", stderr(&output));
@@ -41,7 +44,7 @@ fn a_clean_program_exits_zero_with_no_report() {
 #[test]
 fn a_program_that_is_compilable_while_other_code_is_unsupported_exits_zero() {
     let installation = Installation::stage("unreachable-unsupported");
-    let output = installation.check(&format!("{READY}{MINUS}let ok = ready(true);\n"));
+    let output = installation.check(&format!("{READY}{MINUS}ready(&\"x\");\n"));
     assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
     assert!(output.stderr.is_empty(), "{}", stderr(&output));
 }
@@ -100,7 +103,7 @@ fn a_shape_typed_analysis_cannot_check_exits_one_with_r0605_and_its_span() {
 fn an_unsupported_shape_exits_one_with_r0605_and_its_span() {
     let installation = Installation::stage("unsupported-shape");
     let output = installation.check(&format!(
-        "{READY}{MINUS}let ok = ready(true);\nlet n = minus(3i32, 1i32);\n"
+        "{READY}{MINUS}ready(&\"x\");\nlet n = minus(3i32, 1i32);\n"
     ));
     assert_eq!(output.status.code(), Some(1), "{}", stderr(&output));
     assert!(output.stdout.is_empty(), "{output:?}");
@@ -108,6 +111,47 @@ fn an_unsupported_shape_exits_one_with_r0605_and_its_span() {
     assert!(report.contains("R0605"), "{report}");
     assert!(report.contains("main.rill:2:"), "{report}");
     assert!(report.contains("a - b"), "{report}");
+}
+
+#[test]
+fn a_shape_the_backend_does_not_lower_exits_one_with_r0605_and_its_exact_report() {
+    let installation = Installation::stage("backend-shape");
+    let output = installation.check("let flag = true;\n");
+    assert_eq!(output.status.code(), Some(1), "{}", stderr(&output));
+    assert!(output.stdout.is_empty(), "{output:?}");
+    let entry = fs::canonicalize(installation.root.join("app/main.rill")).unwrap();
+    assert_eq!(
+        stderr(&output),
+        format!(
+            "error[R0605]: valid source whose shape the compiler cannot compile yet\n --> {}:1:12\n  |\n1 | let flag = true;\n  |            ^^^^\n",
+            entry.display()
+        )
+    );
+}
+
+#[test]
+fn every_ownership_finding_is_reported_in_source_order() {
+    let installation = Installation::stage("every-finding");
+    let output = installation.check(&format!("{READY}{REUSE}{REUSE_AGAIN}ready(&\"x\");\n"));
+    assert_eq!(output.status.code(), Some(1), "{}", stderr(&output));
+    assert!(output.stdout.is_empty(), "{output:?}");
+    let entry = fs::canonicalize(installation.root.join("app/main.rill")).unwrap();
+    let entry = entry.display();
+    let report = |line: usize, source: &str, column: usize, name: &str| {
+        format!(
+            "error[R0200]: value used after it was moved\n --> {entry}:{line}:{column}\n  |\n{line} | {source}\n  | {}{}\n",
+            " ".repeat(column - 1),
+            "^".repeat(name.len())
+        )
+    };
+    assert_eq!(
+        stderr(&output),
+        format!(
+            "{}{}",
+            report(2, REUSE.trim_end(), 70, "value"),
+            report(3, REUSE_AGAIN.trim_end(), 73, "item")
+        )
+    );
 }
 
 #[test]
