@@ -292,15 +292,19 @@ fn unrelated_and_unadmitted_option_lists_keep_the_first_blocker() {
     probe_with_typed(
         "iteration::option_text::unrelated_and_unadmitted_option_lists_keep_the_first_blocker",
         OTHER_SOURCES,
-        |_, module, receipt, typed| {
-            assert_eq!(
-                typed.statistics(),
-                Statistics {
-                    work: 331_442,
-                    entries: 48_955,
-                    max_depth: 12
-                }
-            );
+        |request, module, receipt, typed| {
+            let capture = loader::load_installed(request.clone()).unwrap();
+            let pinned = Statistics {
+                work: 330_599,
+                entries: 48_955,
+                max_depth: 12,
+            };
+            assert_eq!(typed.statistics(), pinned);
+            let (exact, short) = limits(pinned);
+            assert_eq!(analyze_typed(&capture, exact).statistics(), pinned);
+            for cap in short {
+                crate::limit::assert_typed_limit(&analyze_typed(&capture, cap));
+            }
             assert_pre_equality_graph_cap(receipt, (189_508, 4_050, 3));
             let stats = Statistics {
                 work: 189_824,
@@ -367,16 +371,20 @@ function dead(xs: List<Option<string>>): Option<bool> {
     for (let item of xs) { let text = item?; continue; }
 }
 "#,
-        |_, _, typed| {
+        |request, _, typed| {
             assert_eq!(typed.completion(), TypedCompletion::Incomplete);
-            assert_eq!(
-                typed.statistics(),
-                Statistics {
-                    work: 322_591,
-                    entries: 47_670,
-                    max_depth: 12
-                }
-            );
+            let capture = loader::load_installed(request.clone()).unwrap();
+            let pinned = Statistics {
+                work: 321_791,
+                entries: 47_670,
+                max_depth: 12,
+            };
+            assert_eq!(typed.statistics(), pinned);
+            let (exact, short) = limits(pinned);
+            assert_eq!(analyze_typed(&capture, exact).statistics(), pinned);
+            for cap in short {
+                crate::limit::assert_typed_limit(&analyze_typed(&capture, cap));
+            }
             assert!(typed.receipt().is_none());
             let report = typed.result_use().unwrap();
             let [first] = report.pending() else {
