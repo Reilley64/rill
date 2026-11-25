@@ -66,7 +66,6 @@ fn stderr(output: &Output) -> String {
 const READY: &str = "function ready(flag: bool): bool { return flag; }\n";
 const MINUS: &str = "function minus(a: i32, b: i32): i32 { return a - b; }\n";
 
-#[cfg(all(target_arch = "aarch64", target_os = "macos"))]
 #[test]
 fn a_clean_program_exits_zero_with_no_report() {
     let installation = Installation::stage("clean");
@@ -76,7 +75,6 @@ fn a_clean_program_exits_zero_with_no_report() {
     assert!(output.stderr.is_empty(), "{}", stderr(&output));
 }
 
-#[cfg(all(target_arch = "aarch64", target_os = "macos"))]
 #[test]
 fn a_program_that_is_compilable_while_other_code_is_unsupported_exits_zero() {
     let installation = Installation::stage("unreachable-unsupported");
@@ -85,7 +83,6 @@ fn a_program_that_is_compilable_while_other_code_is_unsupported_exits_zero() {
     assert!(output.stderr.is_empty(), "{}", stderr(&output));
 }
 
-#[cfg(all(target_arch = "aarch64", target_os = "macos"))]
 #[test]
 fn a_type_error_exits_one_with_its_code_and_span() {
     let installation = Installation::stage("type-error");
@@ -98,7 +95,6 @@ fn a_type_error_exits_one_with_its_code_and_span() {
     assert!(report.contains("^^^^"), "{report}");
 }
 
-#[cfg(all(target_arch = "aarch64", target_os = "macos"))]
 #[test]
 fn a_missing_import_exits_one_with_its_code() {
     let installation = Installation::stage("missing-import");
@@ -107,7 +103,6 @@ fn a_missing_import_exits_one_with_its_code() {
     assert!(stderr(&output).contains("R0400"), "{}", stderr(&output));
 }
 
-#[cfg(all(target_arch = "aarch64", target_os = "macos"))]
 #[test]
 fn a_lexical_error_exits_one_with_its_code() {
     let installation = Installation::stage("lexical-error");
@@ -116,7 +111,6 @@ fn a_lexical_error_exits_one_with_its_code() {
     assert!(stderr(&output).contains("R0001"), "{}", stderr(&output));
 }
 
-#[cfg(all(target_arch = "aarch64", target_os = "macos"))]
 #[test]
 fn a_syntax_error_exits_one() {
     let installation = Installation::stage("syntax-error");
@@ -129,7 +123,6 @@ fn a_syntax_error_exits_one() {
     );
 }
 
-#[cfg(all(target_arch = "aarch64", target_os = "macos"))]
 #[test]
 fn a_shape_typed_analysis_cannot_check_exits_one_with_r0605_and_its_span() {
     let installation = Installation::stage("typed-unsupported");
@@ -140,7 +133,6 @@ fn a_shape_typed_analysis_cannot_check_exits_one_with_r0605_and_its_span() {
     assert!(report.contains("main.rill:2:1"), "{report}");
 }
 
-#[cfg(all(target_arch = "aarch64", target_os = "macos"))]
 #[test]
 fn an_unsupported_shape_exits_one_with_r0605_and_its_span() {
     let installation = Installation::stage("unsupported-shape");
