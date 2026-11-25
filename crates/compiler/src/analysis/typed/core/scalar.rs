@@ -69,6 +69,8 @@ pub(in crate::analysis) struct PrimitiveCore<'g> {
     pub providers: Vec<PrimitiveProvider<'g>>,
     pub protection: Vec<PrimitiveProtection<'g>>,
     pub bridges: std::collections::BTreeMap<&'g DeclarationId, PrimitiveOperation>,
+    /// The exported `log` and `panic` families of the pinned output module.
+    pub output: Vec<&'g DeclarationId>,
 }
 
 impl PrimitiveCore<'_> {
@@ -82,6 +84,7 @@ impl PrimitiveCore<'_> {
             equality: _equality,
             providers: _providers,
             bridges: _bridges,
+            output: _output,
         } = self;
         protection
             .iter()
@@ -344,6 +347,24 @@ impl<'g> PrimitiveCore<'g> {
             let module = pinned_module(graph, "format.rill", budget)?.unwrap();
             self.check_providers(inventory, module, show, PrimitiveRole::Show, budget)?;
         }
+        if let Some(module) = pinned_module(graph, "output.rill", budget)? {
+            for (family, name, operation, result) in [
+                ("log", "writeLine", PrimitiveOperation::WriteLine, "void"),
+                ("panic", "panicText", PrimitiveOperation::Panic, "never"),
+            ] {
+                let Some(bridge) = check_output_binding(inventory, module, name, result, budget)?
+                else {
+                    continue;
+                };
+                let Some(family) = check_output_family(inventory, module, family, result, budget)?
+                else {
+                    continue;
+                };
+                budget.reserve(2)?;
+                self.bridges.insert(&bridge.id, operation);
+                self.output.push(&family.id);
+            }
+        }
         Ok(())
     }
 
@@ -540,6 +561,81 @@ fn check_binding<'g>(
                 .is_some_and(|f| f.implementations.is_empty())
             && let Some(signature) = family_header(inventory, declaration, budget)?
             && exact_signature(signature, role, primitive)
+        {
+            return Ok(Some(declaration));
+        }
+    }
+    Ok(None)
+}
+
+/// An exported `name<S>(S): result` family of the pinned output module.
+fn check_output_family<'g>(
+    inventory: &OrdinaryAnalysis<'g>,
+    module: &'g Module,
+    name: &str,
+    result: &str,
+    budget: &mut Budget,
+) -> Work<Option<&'g Declaration>> {
+    let Some(declaration) = export(
+        inventory.graph(),
+        module,
+        Namespace::ValueFunction,
+        name,
+        budget,
+    )?
+    else {
+        return Ok(None);
+    };
+    if declaration.id.kind != DeclarationKind::Family {
+        return Ok(None);
+    }
+    let Some(header) = family_header(inventory, declaration, budget)? else {
+        return Ok(None);
+    };
+    let (
+        DeclarationShape::Function {
+            parameters,
+            result: actual,
+        },
+        [binder],
+    ) = (&header.shape, header.binders.as_slice())
+    else {
+        return Ok(None);
+    };
+    Ok(
+        (matches!(parameters.as_slice(), [input] if binder_is(&input.ty, binder))
+            && primitive_name(actual) == Some(result))
+        .then_some(declaration),
+    )
+}
+
+/// A private bodyless `name(&string): result` in the pinned output module.
+fn check_output_binding<'g>(
+    inventory: &OrdinaryAnalysis<'g>,
+    module: &'g Module,
+    name: &str,
+    result: &str,
+    budget: &mut Budget,
+) -> Work<Option<&'g Declaration>> {
+    for declaration in &module.declarations {
+        budget.step(1)?;
+        if !declaration.public
+            && declaration.scope.is_none()
+            && declaration.id.kind == DeclarationKind::Family
+            && declaration.name.as_deref() == Some(name)
+            && inventory
+                .captured_family(&declaration.id)
+                .is_some_and(|f| f.implementations.is_empty())
+            && let Some(signature) = family_header(inventory, declaration, budget)?
+            && let DeclarationShape::Function {
+                parameters,
+                result: actual,
+            } = &signature.shape
+            && signature.binders.is_empty()
+            && let [parameter] = parameters.as_slice()
+            && input_type(&parameter.ty, PrimitiveRole::Show).and_then(primitive_name)
+                == Some("string")
+            && primitive_name(actual) == Some(result)
         {
             return Ok(Some(declaration));
         }

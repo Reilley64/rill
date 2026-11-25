@@ -170,6 +170,7 @@ impl InstalledProfile {
                 "channel.rill",
                 "collection.rill",
                 "iter.rill",
+                "output.rill",
             ],
         }
     }

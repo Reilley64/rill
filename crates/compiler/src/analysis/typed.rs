@@ -383,8 +383,9 @@ pub fn analyze_typed(graph: &Graph, limits: AnalysisLimits) -> TypedReport<'_> {
         _ => Ok(None),
     };
     let routine = routine_role.unwrap_or_default();
-    let ordinary_scope = matches!(roles_complete, Ok(true))
-        .then(|| core::InstalledOrdinaryScope::from_closed_roles(graph, routine));
+    let ordinary_scope = matches!(roles_complete, Ok(true)).then(|| {
+        core::InstalledOrdinaryScope::from_closed_roles(graph, routine, &core.primitives.output)
+    });
     let mut bodies = analyze_integrated_bodies(
         &inventory,
         budget,

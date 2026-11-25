@@ -986,6 +986,17 @@ impl Engine {
                 }
             }
         } else {
+            if import.path[0] == "std" {
+                // RFC 0002: an ungrouped import also collects the facade's exported items.
+                let candidate = self.roots[&origin].join("std.rill");
+                if let Some(probe) = self.host.probe(&candidate, Some(&self.roots[&origin]))?
+                    && probe.kind == Kind::File
+                {
+                    import
+                        .starts
+                        .push((self.add_module(origin, probe.path)?, 0));
+                }
+            }
             for (index, segment) in segments.iter().enumerate() {
                 self.host.charge(1)?;
                 directory.push(segment);

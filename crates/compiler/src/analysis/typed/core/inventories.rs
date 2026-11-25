@@ -17,16 +17,19 @@ pub(in crate::analysis::typed) struct InventoryCompleteness {
 pub(in crate::analysis) struct InstalledOrdinaryScope<'g> {
     context: GraphId,
     routine: Option<super::routine::RoutineRole<'g>>,
+    output: Vec<&'g DeclarationId>,
 }
 
 impl<'g> InstalledOrdinaryScope<'g> {
     pub(in crate::analysis::typed) fn from_closed_roles(
         graph: &Graph,
         routine: Option<super::routine::RoutineRole<'g>>,
+        output: &[&'g DeclarationId],
     ) -> Self {
         Self {
             context: graph.id(),
             routine,
+            output: output.to_vec(),
         }
     }
 
@@ -34,7 +37,8 @@ impl<'g> InstalledOrdinaryScope<'g> {
         family.context == self.context
             && family.kind == DeclarationKind::Family
             && (family.module.origin == Origin::Application
-                || self.routine.is_some_and(|role| &role.family.id == family))
+                || self.routine.is_some_and(|role| &role.family.id == family)
+                || self.output.contains(&family))
     }
 
     pub(in crate::analysis) fn routine(&self) -> Option<super::routine::RoutineRole<'g>> {

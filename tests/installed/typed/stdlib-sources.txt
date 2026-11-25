@@ -15,3 +15,4 @@ string.rill
 shared.rill
 mutex.rill
 channel.rill
+output.rill
