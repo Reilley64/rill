@@ -145,14 +145,17 @@ pub(super) fn assert_limits(
         entries,
         max_depth,
     };
-    assert_eq!(report.statistics(), stats);
+    crate::limit::assert_stats(report.statistics(), stats, "");
+    if crate::limit::reporting() {
+        return;
+    }
     let limits = AnalysisLimits {
         max_work: work,
         max_entries: entries,
         max_depth,
     };
     let exact = lower_root(receipt, module, owner, limits).unwrap();
-    assert_eq!(exact.statistics(), stats);
+    crate::limit::assert_stats(exact.statistics(), stats, "");
     assert_eq!(exact.completion(), report.completion());
     assert_eq!(exact.mir().is_some(), report.mir().is_some());
     assert_eq!(exact.findings().len(), report.findings().len());

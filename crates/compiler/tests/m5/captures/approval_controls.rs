@@ -33,7 +33,7 @@ fn assert_pinned(test: &str, pin: &Pin) {
     probe_report(test, pin.source, |request, module, typed| {
         assert_eq!(typed.completion(), pin.completion, "{}", pin.source);
         assert_ne!(typed.completion(), TypedCompletion::SourceRejected);
-        assert_eq!(typed.statistics(), pin.used, "{}", pin.source);
+        crate::limit::assert_stats(typed.statistics(), pin.used, &format!("{}", pin.source));
         assert_eq!(
             typed.receipt().is_some(),
             pin.completion == TypedCompletion::Checked
@@ -71,9 +71,15 @@ fn assert_pinned(test: &str, pin: &Pin) {
             max_entries: pin.used.entries,
             max_depth: pin.used.max_depth,
         };
-        let bounded = analyze_typed(&graph, exact);
+        let bounded = crate::limit::measured(
+            "analyze_typed",
+            pin.source,
+            exact,
+            |limits| analyze_typed(&graph, limits),
+            |report| report.statistics(),
+        );
         assert_eq!(bounded.completion(), pin.completion);
-        assert_eq!(bounded.statistics(), pin.used);
+        crate::limit::assert_stats(bounded.statistics(), pin.used, pin.source);
         for short in short_capture_limits(exact) {
             let limited = analyze_typed(&graph, short);
             crate::limit::assert_typed_limit(&limited);

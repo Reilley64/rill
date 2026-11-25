@@ -520,9 +520,15 @@ function writeThrough(input: Option<&mut bool>): Option<bool> {
         |request, _, _| {
             let graph = loader::load_installed(request.clone()).unwrap();
             let (stats, exact, short) = pinned((327_886, 49_000, 12));
-            let typed = analyze_typed(&graph, exact);
+            let typed = crate::limit::measured(
+                "analyze_typed",
+                "typed",
+                exact,
+                |l| analyze_typed(&graph, l),
+                |r| r.statistics(),
+            );
             assert_eq!(typed.completion(), TypedCompletion::Incomplete);
-            assert_eq!(typed.statistics(), stats);
+            crate::limit::assert_stats(typed.statistics(), stats, "");
             assert!(typed.receipt().is_none());
             let pending: Vec<_> = typed
                 .result_use()

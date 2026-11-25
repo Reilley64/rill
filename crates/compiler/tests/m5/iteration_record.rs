@@ -121,10 +121,16 @@ fn record_yield_cleans_the_partial_item_then_the_suffix() {
         |request, module, receipt, typed| {
             let capture = loader::load_installed(request.clone()).unwrap();
             let receipt_stats = stats(384_101, 56_096, 12);
-            assert_eq!(receipt.statistics(), receipt_stats);
+            crate::limit::assert_stats(receipt.statistics(), receipt_stats, "");
             let (exact, short) = limits(receipt_stats);
-            let at = analyze_typed(&capture, exact);
-            assert_eq!(at.receipt().unwrap().statistics(), receipt_stats);
+            let at = crate::limit::measured(
+                "analyze_typed",
+                "receipt",
+                exact,
+                |limits| analyze_typed(&capture, limits),
+                |report| report.statistics(),
+            );
+            crate::limit::assert_stats(at.receipt().unwrap().statistics(), receipt_stats, "");
             for cap in short {
                 let limited = analyze_typed(&capture, cap);
                 crate::limit::assert_typed_limit(&limited);
@@ -134,7 +140,7 @@ fn record_yield_cleans_the_partial_item_then_the_suffix() {
             let graph_stats = stats(235_220, 13_228, 9);
             let (exact, short) = limits(graph_stats);
             let graph = analyze_ownership(receipt, exact);
-            assert_eq!(graph.statistics(), graph_stats);
+            crate::limit::assert_stats(graph.statistics(), graph_stats, "");
             assert_eq!(graph.completion(), GraphCompletion::SourceRejected);
             assert!(graph.inventory_complete());
             assert_eq!(graph.test_mode(), request.test_mode);
@@ -180,7 +186,7 @@ fn record_yield_cleans_the_partial_item_then_the_suffix() {
                     .unwrap();
                 let (exact, short) = limits(cap);
                 let body = run(exact);
-                assert_eq!(body.statistics(), cap, "{name}");
+                crate::limit::assert_stats(body.statistics(), cap, &format!("{name}"));
                 assert_eq!(body.completion(), expected, "{name}");
                 assert_eq!(root.ordinary_completion(), expected, "{name}");
                 for cap in short {
@@ -659,7 +665,7 @@ fn string_on_break_keeps_its_cap() {
             let cap = stats(2_837, 457, 6);
             let (exact, short) = limits(cap);
             let body = lower_body(receipt, module, &function.id, exact).unwrap();
-            assert_eq!(body.statistics(), cap);
+            crate::limit::assert_stats(body.statistics(), cap, "");
             assert_eq!(body.completion(), Completion::Checked);
             for cap in short {
                 let limited = lower_body(receipt, module, &function.id, cap).unwrap();

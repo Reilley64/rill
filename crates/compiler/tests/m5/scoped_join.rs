@@ -203,9 +203,10 @@ fn grouped_ordinary_call_keeps_its_cap_with_the_join_group_loaded() {
             let local = lower_body(&receipt, module, &d.id, cap).unwrap();
             assert!(local.mir().is_some());
             let s = local.statistics();
-            assert_eq!(
+            crate::limit::assert_triple(
                 (s.work, s.entries, s.max_depth),
-                (cap.max_work, cap.max_entries, cap.max_depth)
+                (cap.max_work, cap.max_entries, cap.max_depth),
+                "",
             );
         },
     );
@@ -1534,13 +1535,14 @@ function joined(numbers: List<i32>, otherInput: List<i32>): [i32, i32] {{
                     let observed =
                         |s: compiler::analysis::Statistics| (s.work, s.entries, s.max_depth);
                     let typed_stats = typed.statistics();
-                    assert_eq!(
+                    crate::limit::assert_triple(
                         observed(typed_stats),
                         if live {
                             (493406, 57528, 12)
                         } else {
                             (493407, 57530, 12)
-                        }
+                        },
+                        "",
                     );
                     let (exact, short) = budget_caps(typed_stats);
                     let replay = analyze_typed(&graph, exact);
@@ -1987,13 +1989,16 @@ fn unsupported_reference_children_preserve_prior_typed_caps() {
                         ..request.clone()
                     })
                     .unwrap();
-                    let old = analyze_typed(
-                        &graph,
+                    let old = crate::limit::measured(
+                        "analyze_typed",
+                        "old",
                         AnalysisLimits {
                             max_work,
                             max_entries,
                             max_depth,
                         },
+                        |l| analyze_typed(&graph, l),
+                        |r| r.statistics(),
                     );
                     assert_eq!(old.completion(), TypedCompletion::Incomplete);
                     assert!(old.receipt().is_none());
@@ -3060,7 +3065,7 @@ fn installed_join_fresh_results_keep_the_written_occurrence() {
             };
             let (exact, graph_short) = budget_caps(graph_cost);
             let graph = analyze_ownership(receipt, exact);
-            assert_eq!(graph.statistics(), graph_cost);
+            crate::limit::assert_stats(graph.statistics(), graph_cost, "");
             assert_eq!(graph.completion(), GraphCompletion::Incomplete);
             assert!(
                 graph
@@ -3164,7 +3169,7 @@ fn installed_join_fresh_results_keep_the_written_occurrence() {
                 };
                 let (exact, short) = budget_caps(body_cost);
                 let local = lower_body(receipt, module, &d.id, exact).unwrap();
-                assert_eq!(local.statistics(), body_cost);
+                crate::limit::assert_stats(local.statistics(), body_cost, "");
                 let root = graph
                     .roots()
                     .iter()
@@ -3205,9 +3210,15 @@ fn installed_join_fresh_results_keep_the_written_occurrence() {
                 max_depth: 12,
             };
             let (exact, short) = budget_caps(typed_cost);
-            let checked = analyze_typed(&loaded, exact);
+            let checked = crate::limit::measured(
+                "analyze_typed",
+                "checked",
+                exact,
+                |limits| analyze_typed(&loaded, limits),
+                |report| report.statistics(),
+            );
             assert!(checked.receipt().is_some());
-            assert_eq!(checked.statistics(), typed_cost);
+            crate::limit::assert_stats(checked.statistics(), typed_cost, "");
             for cap in short {
                 let limited = analyze_typed(&loaded, cap);
                 crate::limit::assert_typed_limit(&limited);
@@ -3577,8 +3588,14 @@ fn an_unproved_join_does_not_invent_a_discard() {
                 max_depth: 12,
             };
             let (exact, short) = budget_caps(cost);
-            let typed = analyze_typed(&loaded, exact);
-            assert_eq!(typed.statistics(), cost);
+            let typed = crate::limit::measured(
+                "analyze_typed",
+                "typed",
+                exact,
+                |l| analyze_typed(&loaded, l),
+                |r| r.statistics(),
+            );
+            crate::limit::assert_stats(typed.statistics(), cost, "");
             assert_eq!(typed.completion(), TypedCompletion::Incomplete);
             assert!(typed.receipt().is_none());
             let uses = typed.result_use().unwrap();
@@ -3704,9 +3721,15 @@ fn reference_pair_reserves_before_it_builds_each_slot() {
                 max_depth: 12,
             };
             let (exact, short) = budget_caps(pinned);
-            let typed = analyze_typed(&graph, exact);
+            let typed = crate::limit::measured(
+                "analyze_typed",
+                "typed",
+                exact,
+                |l| analyze_typed(&graph, l),
+                |r| r.statistics(),
+            );
             assert_eq!(typed.completion(), TypedCompletion::Checked);
-            assert_eq!(typed.statistics(), pinned);
+            crate::limit::assert_stats(typed.statistics(), pinned, "");
             let module = app(&graph);
             let call = call_node(module, "join([");
             assert!(
@@ -3739,14 +3762,14 @@ fn reference_pair_reserves_before_it_builds_each_slot() {
                     },
                 );
                 crate::limit::assert_typed_limit(&limited);
-                assert_eq!(
+                crate::limit::assert_stats(
                     limited.statistics(),
                     compiler::analysis::Statistics {
                         work: stopped.0,
                         entries: stopped.1,
                         max_depth: stopped.2,
                     },
-                    "entries cap {max_entries}"
+                    &format!("entries cap {max_entries}"),
                 );
             }
         },

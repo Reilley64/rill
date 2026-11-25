@@ -98,15 +98,26 @@ function textBind(): void { let view = &named(); }
                         },
                     )
                 };
-                let exact = at(work, entries);
+                let exact = crate::limit::measured(
+                    "analyze_typed",
+                    "exact",
+                    AnalysisLimits {
+                        max_work: work,
+                        max_entries: entries,
+                        max_depth,
+                    },
+                    |limits| analyze_typed(&graph, limits),
+                    |report| report.statistics(),
+                );
                 assert_eq!(exact.completion(), TypedCompletion::Checked);
-                assert_eq!(
+                crate::limit::assert_stats(
                     exact.statistics(),
                     Statistics {
                         work,
                         entries,
-                        max_depth
-                    }
+                        max_depth,
+                    },
+                    "",
                 );
                 let count = graph.declaration_count();
                 for limited in [

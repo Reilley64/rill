@@ -630,7 +630,7 @@ function probe(flag: bool, gate: bool): void { let debt = Err<bool,i32>(61i32); 
         installed(&probe, name, source, None, |report| {
             check(report);
             let stats = report.statistics();
-            assert_eq!((stats.work, stats.entries, stats.max_depth), exact, "{name}");
+            crate::limit::assert_triple((stats.work, stats.entries, stats.max_depth), exact, &format!("{name}"));
         });
     }
 
@@ -678,10 +678,10 @@ function probe(flag: bool, gate: bool): void { let debt = Err<bool,i32>(61i32); 
         installed(&probe, name, &source, None, |report| {
             checked(report);
             let stats = report.statistics();
-            assert_eq!(
+            crate::limit::assert_triple(
                 (stats.work, stats.entries, stats.max_depth),
                 exact,
-                "{name}"
+                &format!("{name}"),
             );
         });
     }
@@ -706,10 +706,10 @@ function probe(flag: bool, gate: bool): void { let debt = Err<bool,i32>(61i32); 
                     Outcome::Storage => pending_storage(report, name),
                 }
                 let stats = report.statistics();
-                assert_eq!(
+                crate::limit::assert_triple(
                     (stats.work, stats.entries, stats.max_depth),
                     exact,
-                    "{name}"
+                    &format!("{name}"),
                 );
             },
         );
@@ -1055,26 +1055,34 @@ fn installed_over_parent(
         eprintln!("{name}, test={test_mode}: {:?}", report.statistics());
         check(&report);
         if let Some((max_work, max_entries, max_depth)) = fixed {
-            let fixed = analyze_typed(
-                &graph,
+            let fixed = crate::limit::measured(
+                "analyze_typed",
+                name,
                 AnalysisLimits {
                     max_work,
                     max_entries,
                     max_depth,
                 },
+                |limits| analyze_typed(&graph, limits),
+                |report| report.statistics(),
             );
             check(&fixed);
         }
         if let Some((max_work, max_entries, max_depth)) = over_parent {
-            let parent = analyze_typed(
-                &graph,
+            let parent = crate::limit::measured(
+                "analyze_typed",
+                name,
                 AnalysisLimits {
                     max_work,
                     max_entries,
                     max_depth,
                 },
+                |limits| analyze_typed(&graph, limits),
+                |report| report.statistics(),
             );
-            crate::limit::assert_typed_limit(&parent);
+            if !crate::limit::reporting() {
+                crate::limit::assert_typed_limit(&parent);
+            }
         }
         exact_and_one_short(&graph, &report, name, &check);
     }
@@ -1119,7 +1127,7 @@ fn replay_exact(
         max_depth: stats.max_depth,
     };
     let replay = analyze_typed(graph, exact);
-    assert_eq!(replay.statistics(), stats, "{name}");
+    crate::limit::assert_stats(replay.statistics(), stats, &format!("{name}"));
     check(&replay);
     exact
 }
@@ -1164,10 +1172,10 @@ fn installed_read_only(
             assert_eq!(report.completion(), TypedCompletion::Incomplete, "{name}");
             assert!(report.receipt().is_none(), "{name}");
             let stats = report.statistics();
-            assert_eq!(
+            crate::limit::assert_triple(
                 (stats.work, stats.entries, stats.max_depth),
                 exact,
-                "{name}"
+                &format!("{name}"),
             );
         };
         check(&report);

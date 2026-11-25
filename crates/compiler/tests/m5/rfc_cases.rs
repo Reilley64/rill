@@ -139,7 +139,11 @@ fn run_with(test: &str, sources: &[Source], extra: impl Fn(usize, &loader::Graph
                         roots,
                     } => {
                         assert_eq!(typed.completion(), TypedCompletion::Checked, "{context}");
-                        assert_eq!(statistics(*typed_stats), typed.statistics(), "{context}");
+                        crate::limit::assert_stats(
+                            typed.statistics(),
+                            statistics(*typed_stats),
+                            &format!("{context}"),
+                        );
                         check_receipt(&context, &typed, module, *whole, roots);
                         let receipt = typed.receipt().unwrap();
                         if let Some(pre_equality_graph) = pre_equality_graph {
@@ -269,7 +273,7 @@ fn check_typed(
     assert_eq!(typed.completion(), completion, "{context}");
     assert!(typed.receipt().is_none(), "{context}");
     assert_eq!(signals(typed, module), expected, "{context}");
-    assert_eq!(typed.statistics(), statistics(stats), "{context}");
+    crate::limit::assert_stats(typed.statistics(), statistics(stats), &format!("{context}"));
     let (exact, short) = limits(typed.statistics());
     let replay = analyze_typed(graph, exact);
     assert_eq!(replay.completion(), completion, "{context}");

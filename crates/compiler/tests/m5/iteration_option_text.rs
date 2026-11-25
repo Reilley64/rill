@@ -299,9 +299,9 @@ fn unrelated_and_unadmitted_option_lists_keep_the_first_blocker() {
                 entries: 49_620,
                 max_depth: 12,
             };
-            assert_eq!(typed.statistics(), pinned);
+            crate::limit::assert_stats(typed.statistics(), pinned, "");
             let (exact, short) = limits(pinned);
-            assert_eq!(analyze_typed(&capture, exact).statistics(), pinned);
+            crate::limit::assert_stats(analyze_typed(&capture, exact).statistics(), pinned, "");
             for cap in short {
                 crate::limit::assert_typed_limit(&analyze_typed(&capture, cap));
             }
@@ -314,7 +314,7 @@ fn unrelated_and_unadmitted_option_lists_keep_the_first_blocker() {
             let (exact, short) = limits(stats);
             let graph = analyze_ownership(receipt, exact);
             assert_eq!(graph.completion(), GraphCompletion::Incomplete);
-            assert_eq!(graph.statistics(), stats);
+            crate::limit::assert_stats(graph.statistics(), stats, "");
             assert!(graph.findings().is_empty());
             for cap in short {
                 let limited = analyze_ownership(receipt, cap);
@@ -340,7 +340,7 @@ fn unrelated_and_unadmitted_option_lists_keep_the_first_blocker() {
                 let run = |cap| lower_body(receipt, module, &function.id, cap).unwrap();
                 let report = run(exact);
                 assert_eq!(report.completion(), Completion::Incomplete, "{name}");
-                assert_eq!(report.statistics(), stats);
+                crate::limit::assert_stats(report.statistics(), stats, "");
                 assert!(report.mir().is_none() && report.findings().is_empty());
                 let blocker = report.blocked_at().unwrap();
                 assert_eq!(blocker.span.bytes(), b"xs: List<Option<string>>");
@@ -379,9 +379,9 @@ function dead(xs: List<Option<string>>): Option<bool> {
                 entries: 48_323,
                 max_depth: 12,
             };
-            assert_eq!(typed.statistics(), pinned);
+            crate::limit::assert_stats(typed.statistics(), pinned, "");
             let (exact, short) = limits(pinned);
-            assert_eq!(analyze_typed(&capture, exact).statistics(), pinned);
+            crate::limit::assert_stats(analyze_typed(&capture, exact).statistics(), pinned, "");
             for cap in short {
                 crate::limit::assert_typed_limit(&analyze_typed(&capture, cap));
             }
@@ -515,7 +515,7 @@ fn review_counterexamples_keep_their_outcomes_at_exact_caps() {
                 let run = |cap| lower_body(receipt, module, &f.id, cap).unwrap();
                 let target = run(exact);
                 assert_eq!(target.completion(), expected, "{source}");
-                assert_eq!(target.statistics(), targeted, "{source}");
+                crate::limit::assert_stats(target.statistics(), targeted, &format!("{source}"));
                 assert!(target.mir().is_none());
                 for cap in short {
                     let limited = run(cap);
@@ -524,7 +524,7 @@ fn review_counterexamples_keep_their_outcomes_at_exact_caps() {
                 assert_pre_equality_graph_cap(receipt, pre_equality);
                 let (exact, short) = limits(whole);
                 let graph = analyze_ownership(receipt, exact);
-                assert_eq!(graph.statistics(), whole, "{source}");
+                crate::limit::assert_stats(graph.statistics(), whole, &format!("{source}"));
                 let root = graph
                     .roots()
                     .iter()

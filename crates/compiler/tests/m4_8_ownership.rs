@@ -1793,18 +1793,18 @@ fn installed_pair_invocation(request: &InstalledRequest) {
         pins.sort_unstable();
         assert_eq!(captured, pins);
         // Baseline before two-child Result-use: no pair candidate to discover.
-        assert!(
-            analyze_typed(
-                &graph,
-                AnalysisLimits {
-                    max_work: 371984,
-                    max_entries: 54755,
-                    max_depth: 12
-                }
-            )
-            .receipt()
-            .is_some()
+        let baseline = crate::limit::measured(
+            "analyze_typed",
+            "baseline",
+            AnalysisLimits {
+                max_work: 371984,
+                max_entries: 54755,
+                max_depth: 12,
+            },
+            |limits| analyze_typed(&graph, limits),
+            |report| report.statistics(),
         );
+        assert!(baseline.receipt().is_some());
     }
     fs::write(
         request.entry.with_file_name("checks.rill"),

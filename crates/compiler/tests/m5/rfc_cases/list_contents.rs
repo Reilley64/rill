@@ -2375,7 +2375,7 @@ fn r1_caller_provided_exclusive_source_stops_typed() {
                     let graph = loader::load_installed(request).unwrap();
                     let typed = analyze_typed(&graph, AnalysisLimits::default());
                     assert_eq!(typed.completion(), TypedCompletion::Incomplete);
-                    assert_eq!(typed.statistics(), statistics(stats));
+                    crate::limit::assert_stats(typed.statistics(), statistics(stats), "");
                     assert!(typed.receipt().is_none());
                     let blockers: Vec<_> = typed
                         .result_use()
@@ -2397,7 +2397,13 @@ fn r1_caller_provided_exclusive_source_stops_typed() {
                         findings.iter().map(|(c, s)| (*c, s.to_string())).collect();
                     assert_eq!(body_findings, findings);
                     let (exact, short) = limits(statistics(stats));
-                    let replay = analyze_typed(&graph, exact);
+                    let replay = crate::limit::measured(
+                        "analyze_typed",
+                        "replay",
+                        exact,
+                        |limits| analyze_typed(&graph, limits),
+                        |report| report.statistics(),
+                    );
                     assert_eq!(replay.completion(), TypedCompletion::Incomplete);
                     assert_eq!(replay.statistics(), typed.statistics());
                     for short in short {

@@ -344,10 +344,10 @@ fn check_sources(entry: &Path) {
                 );
             }
             if let Some(fixed) = fixed {
-                assert_eq!(
+                crate::limit::assert_triple(
                     (stats.work, stats.entries, stats.max_depth),
                     fixed,
-                    "{name} {test_mode}"
+                    &format!("{name} {test_mode}"),
                 );
             }
             let exact = AnalysisLimits {
@@ -357,7 +357,7 @@ fn check_sources(entry: &Path) {
             };
             let replay = analyze_typed(&graph, exact);
             assert_eq!(replay.completion(), completion, "{name} {test_mode}");
-            assert_eq!(replay.statistics(), stats);
+            crate::limit::assert_stats(replay.statistics(), stats, "");
             for short in [
                 AnalysisLimits {
                     max_work: exact.max_work - 1,

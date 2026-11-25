@@ -205,7 +205,16 @@ fn unsupported_result_joins_keep_parent_caps_and_blockers() {
         for test_mode in [false, true] {
             let graph = load(test_mode);
             for (limits, report) in [
-                (parent, analyze_typed(&graph, parent)),
+                (
+                    parent,
+                    crate::limit::measured(
+                        "analyze_typed",
+                        source,
+                        parent,
+                        |limits| analyze_typed(&graph, limits),
+                        |report| report.statistics(),
+                    ),
+                ),
                 exact_replay(&graph),
             ] {
                 if report.completion() == TypedCompletion::Incomplete
@@ -420,7 +429,7 @@ fn exact_replay(graph: &loader::Graph) -> (AnalysisLimits, TypedReport<'_>) {
     };
     let replay = analyze_typed(graph, exact);
     assert_eq!(replay.completion(), report.completion());
-    assert_eq!(replay.statistics(), stats);
+    crate::limit::assert_stats(replay.statistics(), stats, "");
     for short in [
         AnalysisLimits {
             max_work: exact.max_work - 1,

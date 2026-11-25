@@ -312,7 +312,14 @@ fn borrowed_once_and_unproved_bodies_do_not_issue_receipts() {
                     );
                 }
                 let graph = loader::load_installed(request.clone()).unwrap();
-                assert_eq!(analyze_typed(&graph, limit).completion(), expected);
+                let at_limit = crate::limit::measured(
+                    "analyze_typed",
+                    "limit",
+                    limit,
+                    |limits| analyze_typed(&graph, limits),
+                    |report| report.statistics(),
+                );
+                assert_eq!(at_limit.completion(), expected);
                 for short in short_capture_limits(exact(typed.statistics())) {
                     let limited = analyze_typed(&graph, short);
                     crate::limit::assert_typed_limit(&limited);
