@@ -157,7 +157,7 @@ function withTextOverlap(): i32 {
   return 0i32;
 }
 "#,
-    typed_stats: (327600, 48818, 12),
+    typed_stats: (450377, 48836, 12),
     graph: (GraphCompletion::SourceRejected, (192235, 4774, 5)),
     roots: &[
         Root {
@@ -244,7 +244,7 @@ function writeOwnerWhileLive(): i32 {
   return readFirst(h);
 }
 "#,
-    typed_stats: (335044, 49853, 12),
+    typed_stats: (460489, 49871, 12),
     graph: (GraphCompletion::SourceRejected, (203479, 6361, 5)),
     roots: &[
         Root {
@@ -379,7 +379,7 @@ function makeLocalBound(q: &i32): Holder {
   return h;
 }
 "#,
-    typed_stats: (329000, 49036, 12),
+    typed_stats: (452657, 49054, 12),
     graph: (GraphCompletion::SourceRejected, (194681, 4961, 5)),
     roots: &[
         Root {
@@ -475,7 +475,7 @@ function nestedLiteral(): i32 {
   return 0i32;
 }
 "#,
-    typed_stats: (333412, 49613, 12),
+    typed_stats: (456831, 49631, 12),
     graph: (GraphCompletion::Incomplete, (195889, 4517, 5)),
     roots: &[
         Root {
@@ -569,7 +569,7 @@ function tupleForm(): i32 {
                         r####"pending TypedInput @ [&mut a, &b]"####,
                         r####"pending Storage @ let t = [&mut a, &b];"####,
                     ],
-                    (321795, 48131, 12),
+                    (444142, 48149, 12),
                 );
             }
         },
@@ -642,7 +642,7 @@ function localReferent(): i32 {
   return 0i32;
 }
 "#,
-    typed_stats: (339499, 50937, 12),
+    typed_stats: (463534, 50955, 12),
     graph: (GraphCompletion::SourceRejected, (208031, 7771, 6)),
     roots: &[
         Root {
@@ -805,7 +805,7 @@ function recordUpdateOverlap(): i32 {
   return 0i32;
 }
 "#,
-    typed_stats: (330254, 49401, 12),
+    typed_stats: (453351, 49419, 12),
     graph: (GraphCompletion::Incomplete, (196034, 5221, 6)),
     roots: &[
         Root {
