@@ -2228,7 +2228,7 @@ fn r1_caller_provided_exclusive_source_stops_typed() {
                 ),
                 (
                     EXCLUSIVE_PASSED,
-                    (449173, 48568, 12),
+                    (449013, 48568, 12),
                     &[
                         (ResultUseBlocker::TypedInput, "retain(dst, source)"),
                         (ResultUseBlocker::Storage, "source.id = 2;"),

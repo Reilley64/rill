@@ -126,7 +126,7 @@ function probe(seed: bool): void {
     let _ = packed;
 }
 "#,
-            stats(449_579, 48_454, 12),
+            stats(449_418, 48_454, 12),
         ),
     ] {
         assert_pinned(
@@ -186,7 +186,7 @@ fn guard_job_does_not_enter_the_join() {
         &Pin {
             source: &guarded,
             completion: TypedCompletion::Incomplete,
-            used: stats(458_551, 50_036, 13),
+            used: stats(458_391, 50_036, 13),
             obligations: &[
                 (
                     FamilySelection,
@@ -205,7 +205,7 @@ fn guard_job_does_not_enter_the_join() {
         &Pin {
             source: &format!("{JOIN}\n{direct}\n"),
             completion: TypedCompletion::Incomplete,
-            used: stats(455_430, 49_461, 12),
+            used: stats(455_271, 49_461, 12),
             obligations: &[(
                 FamilySelection,
                 "join([() => true, () => { let _ = lease; return true; }])",
@@ -222,7 +222,7 @@ fn guard_capture_requirements_are_incomplete_at_the_call() {
         "captures::approval_controls::guard_capture_requirements_are_incomplete_at_the_call";
     for (predicate, used) in [
         ("sendable", stats(446_355, 48_263, 12)),
-        ("shareable", stats(446_516, 48_263, 12)),
+        ("shareable", stats(446_356, 48_263, 12)),
     ] {
         let source = format!(
             "function need<T>(value: T): bool where {predicate}(T) {{ let _ = value; return true; }}
