@@ -218,7 +218,7 @@ fn installed_boolean_matches() {
         &probe,
         "equivalent arm-local copy classes",
         &source,
-        Some((AnalysisLimits::default().max_work, 54669, 12)),
+        Some((AnalysisLimits::default().max_work, 59410, 12)),
         checked,
     );
 

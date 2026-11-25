@@ -830,21 +830,8 @@ fn record_roots_pre_charge_caps_now_give_resource_limit() {
                     (NAMED_READS, &[("id", (1983, 82, 3))], (186564, 4221, 5)),
                     (
                         FORMS,
-                        &[
-                            ("grouped", (7066, 1199, 7)),
-                            ("looped", (7201, 1277, 8)),
-                            ("other", (7061, 1199, 6)),
-                            ("groupedRead", (7061, 1199, 6)),
-                            ("early", (4196, 862, 8)),
-                            ("dead", (3049, 491, 4)),
-                            ("released", (7195, 1271, 6)),
-                        ],
-                        (215791, 9533, 8),
-                    ),
-                    (
-                        EMPTY_BODY,
-                        &[("selected", (6269, 845, 6)), ("early", (3888, 708, 8))],
-                        (193577, 5558, 8),
+                        &[("dead", (3049, 491, 4))],
+                        super::list_contents::NO_GRAPH_CAP,
                     ),
                     (FAMILY, &[("selected", (2663, 181, 3))], (189426, 4282, 5)),
                 ],

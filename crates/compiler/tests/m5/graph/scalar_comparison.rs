@@ -158,7 +158,7 @@ fn other_compare_bodies_keep_their_pre_equality_caps() {
             let [old, ..] = caps(before);
             crate::limit::assert_graph_limit(&analyze_ownership(receipt, old));
             let after = Statistics {
-                work: before.work + 2848,
+                work: before.work + 328,
                 entries: before.entries + 134,
                 max_depth: 5,
             };

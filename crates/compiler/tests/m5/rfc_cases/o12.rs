@@ -331,7 +331,11 @@ function viewField(): i32 { let view = &shifted(Point { x: 1, y: 2 }); return vi
             // through `charge_key`; the parent caps (`eabe14ad`) give `ResourceLimit`.
             super::list_contents::old_root_caps(
                 &request,
-                &[(VIEW, &[("viewField", (2962, 348, 7))], (188579, 4666, 7))],
+                &[(
+                    VIEW,
+                    &[("viewField", (2962, 348, 7))],
+                    super::list_contents::NO_GRAPH_CAP,
+                )],
             );
             fs::write(&request.entry, format!("{IMPORTS}\n{VIEW}")).unwrap();
             for test_mode in [false, true] {

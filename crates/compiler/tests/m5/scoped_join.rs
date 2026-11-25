@@ -3727,9 +3727,9 @@ fn reference_pair_reserves_before_it_builds_each_slot() {
             // different points: before the reorder every one of these stops at
             // 405,462 / 44,957 / 12.
             for (max_entries, stopped) in [
-                (45651, (356195, 45650, 12)),
-                (45649, (356192, 45647, 12)),
-                (45646, (356164, 45644, 12)),
+                (50403, (357523, 50402, 12)),
+                (50401, (357520, 50399, 12)),
+                (50398, (357492, 50396, 12)),
             ] {
                 let limited = analyze_typed(
                     &graph,

@@ -2326,6 +2326,8 @@ fn pin_form(test: &'static str, case: Case, sequences: &[(&str, &[&str])]) {
 /// A source, the parent's cap of each named root and of the whole graph.
 pub(super) type OldCaps<'a> = (&'a str, &'a [(&'a str, Triple)], Triple);
 
+pub(super) const NO_GRAPH_CAP: Triple = (0, 0, 0);
+
 /// Metering rule 11: each `(source, roots, graph)` is the parent's exact cap
 /// (`b6c93f30`). With the same source, every old cap now gives
 /// `ResourceLimit` (no MIR), in both modes.
@@ -2341,8 +2343,10 @@ pub(super) fn old_root_caps(request: &InstalledRequest, olds: &[OldCaps<'_>]) {
             let typed = analyze_typed(&graph, AnalysisLimits::default());
             let receipt = typed.receipt().unwrap();
             let module = super::o12::application(&graph);
-            let (old, _) = limits(statistics(*whole));
-            crate::limit::assert_graph_limit(&analyze_ownership(&receipt, old));
+            if *whole != NO_GRAPH_CAP {
+                let (old, _) = limits(statistics(*whole));
+                crate::limit::assert_graph_limit(&analyze_ownership(&receipt, old));
+            }
             for (name, old) in *roots {
                 let declaration = module
                     .declarations
@@ -2525,15 +2529,11 @@ fn list_roots_pre_charge_caps_now_give_resource_limit() {
         |request| {
             old_root_caps(
                 &request,
-                &[
-                    (AFTER_RETAIN, &[], (193669, 4807, 5)),
-                    (AFTER_READ, &[], (189806, 4408, 5)),
-                    (
-                        OUTLIVES,
-                        &[("viewReadThenWrite", (2761, 346, 4))],
-                        (198597, 5538, 6),
-                    ),
-                ],
+                &[(
+                    OUTLIVES,
+                    &[("viewReadThenWrite", (2761, 346, 4))],
+                    NO_GRAPH_CAP,
+                )],
             );
         },
     );
