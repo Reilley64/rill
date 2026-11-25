@@ -248,6 +248,11 @@ impl Budget {
         Ok(())
     }
 }
+impl crate::loader::keyed::Meter for Budget {
+    fn step(&mut self, n: usize) -> Work<()> {
+        Budget::step(self, n)
+    }
+}
 #[derive(Clone, Copy)]
 struct Stored<'r, 'g> {
     origin: &'g DeclarationId,
