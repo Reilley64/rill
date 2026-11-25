@@ -71,7 +71,6 @@
 //! (declarations, headers, family facts: pinned M4 behaviour).
 #![allow(dead_code)]
 
-use compiler::analysis::AnalysisLimits;
 use compiler::analysis::conversions::{
     ConversionReport, ErrorAgreement, PairBlocker, PairOutcome, PairReport,
 };
@@ -84,7 +83,101 @@ use compiler::analysis::scalars::ScalarFailureKind;
 use compiler::analysis::typed::{
     OwnershipCoverage, PrimitiveCoverage, TypedCompletion, TypedReport, analyze_typed,
 };
+use compiler::analysis::{AnalysisLimits, Statistics};
 use compiler::loader::{DeclarationKind, Graph};
+use std::cell::Cell;
+use std::fs::{File, OpenOptions};
+use std::io::Write;
+use std::panic::Location;
+use std::sync::{Mutex, OnceLock};
+
+pub(crate) type Triple = (usize, usize, usize);
+
+fn report_file() -> Option<&'static Mutex<File>> {
+    static FILE: OnceLock<Option<Mutex<File>>> = OnceLock::new();
+    FILE.get_or_init(|| {
+        let path = std::env::var_os("RILL_REPIN_REPORT")?;
+        let file = OpenOptions::new().create(true).append(true).open(path);
+        Some(Mutex::new(file.expect("RILL_REPIN_REPORT is not writable")))
+    })
+    .as_ref()
+}
+
+pub(crate) fn reporting() -> bool {
+    report_file().is_some()
+}
+
+#[track_caller]
+pub(crate) fn record(
+    kind: &str,
+    context: &str,
+    pinned: Option<Triple>,
+    measured: Triple,
+    outcome: &str,
+) {
+    thread_local! {
+        static ORDINAL: Cell<usize> = const { Cell::new(0) };
+    }
+    let Some(file) = report_file() else {
+        return;
+    };
+    let ordinal = ORDINAL.with(|cell| cell.replace(cell.get() + 1));
+    let at = Location::caller();
+    let pinned = pinned.map_or_else(|| "-".to_owned(), |(w, e, d)| format!("{w},{e},{d}"));
+    let line = format!(
+        "{}\t{ordinal}\t{}:{}\t{kind}\t{}\t{pinned}\t{},{},{}\t{outcome}\n",
+        std::thread::current().name().unwrap_or("?"),
+        at.file(),
+        at.line(),
+        context.replace(['\t', '\n'], " "),
+        measured.0,
+        measured.1,
+        measured.2,
+    );
+    file.lock()
+        .unwrap()
+        .write_all(line.as_bytes())
+        .expect("RILL_REPIN_REPORT is not writable");
+}
+
+fn triple(statistics: Statistics) -> Triple {
+    (statistics.work, statistics.entries, statistics.max_depth)
+}
+
+#[track_caller]
+pub(crate) fn assert_stats(measured: Statistics, pinned: Statistics, context: &str) {
+    if reporting() {
+        record("stats", context, Some(triple(pinned)), triple(measured), "");
+        return;
+    }
+    assert_eq!(measured, pinned, "{context}");
+}
+
+#[track_caller]
+pub(crate) fn assert_triple(measured: Triple, pinned: Triple, context: &str) {
+    if reporting() {
+        record("triple", context, Some(pinned), measured, "");
+        return;
+    }
+    assert_eq!(measured, pinned, "{context}");
+}
+
+#[track_caller]
+pub(crate) fn measured<R>(
+    kind: &str,
+    context: &str,
+    limits: AnalysisLimits,
+    call: impl Fn(AnalysisLimits) -> R,
+    spent: impl Fn(&R) -> Statistics,
+) -> R {
+    if !reporting() {
+        return call(limits);
+    }
+    let full = call(AnalysisLimits::default());
+    let pinned = (limits.max_work, limits.max_entries, limits.max_depth);
+    record(kind, context, Some(pinned), triple(spent(&full)), "");
+    full
+}
 
 /// What a limit helper reports when its accessor list names nothing wrong but the
 /// report's `publishes_nothing_at_limit` says it publishes a finding, a verdict
@@ -534,48 +627,104 @@ pub(crate) fn assert_typed_limit_uses(graph: &Graph, report: &TypedReport<'_>) {
 
 #[track_caller]
 pub(crate) fn assert_graph_limit(report: &GraphReport<'_>) {
+    record(
+        "graph-limit",
+        "",
+        None,
+        triple(report.statistics()),
+        "ResourceLimit",
+    );
     let flaws = graph_limit_flaws(report);
     assert!(flaws.is_empty(), "{flaws:?} at {:?}", report.statistics());
 }
 
 #[track_caller]
 pub(crate) fn assert_body_limit(report: &Report<'_>) {
+    record(
+        "body-limit",
+        "",
+        None,
+        triple(report.statistics()),
+        "ResourceLimit",
+    );
     let flaws = body_limit_flaws(report);
     assert!(flaws.is_empty(), "{flaws:?} at {:?}", report.statistics());
 }
 
 #[track_caller]
 pub(crate) fn assert_typed_limit(report: &TypedReport<'_>) {
+    record(
+        "typed-limit",
+        "",
+        None,
+        triple(report.statistics()),
+        "ResourceLimit",
+    );
     let flaws = typed_limit_flaws(report);
     assert!(flaws.is_empty(), "{flaws:?} at {:?}", report.statistics());
 }
 
 #[track_caller]
 pub(crate) fn assert_ordinary_limit(graph: &Graph, report: &OrdinaryAnalysis<'_>) {
+    record(
+        "ordinary-limit",
+        "",
+        None,
+        triple(report.statistics()),
+        "ResourceLimit",
+    );
     let flaws = ordinary_limit_flaws(graph, report);
     assert!(flaws.is_empty(), "{flaws:?} at {:?}", report.statistics());
 }
 
 #[track_caller]
 pub(crate) fn assert_conversion_limit(graph: &Graph, report: &ConversionReport<'_, '_>) {
+    record(
+        "conversion-limit",
+        "",
+        None,
+        triple(report.statistics()),
+        "ResourceLimit",
+    );
     let flaws = conversion_limit_flaws(graph, report);
     assert!(flaws.is_empty(), "{flaws:?} at {:?}", report.statistics());
 }
 
 #[track_caller]
 pub(crate) fn assert_pair_limit(report: &PairReport<'_>) {
+    record(
+        "pair-limit",
+        "",
+        None,
+        triple(report.statistics),
+        "ResourceLimit",
+    );
     let flaws = pair_limit_flaws(report);
     assert!(flaws.is_empty(), "{flaws:?} at {:?}", report.statistics);
 }
 
 #[track_caller]
 pub(crate) fn assert_selection_limit(report: &SelectionReport<'_>) {
+    record(
+        "selection-limit",
+        "",
+        None,
+        triple(report.statistics),
+        "ResourceLimit",
+    );
     let flaws = selection_limit_flaws(report);
     assert!(flaws.is_empty(), "{flaws:?} at {:?}", report.statistics);
 }
 
 #[track_caller]
 pub(crate) fn assert_generics_limit(report: &GenericReport<'_>) {
+    record(
+        "generics-limit",
+        "",
+        None,
+        triple(report.statistics()),
+        "ResourceLimit",
+    );
     let flaws = generics_limit_flaws(report);
     assert!(flaws.is_empty(), "{flaws:?} at {:?}", report.statistics());
 }
