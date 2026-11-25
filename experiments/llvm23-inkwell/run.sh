@@ -23,9 +23,13 @@ proto=$CARGO_TARGET_DIR/release/llvm23-inkwell
 "$proto" "$out/hello.o" | tee "$out/hello.ll"
 cc "$out/hello.o" -o "$out/hello"
 
+# With one argument: Hello Ada\n. With none: Hello\n. Both exit 0.
 status=0
-"$out/hello" > "$out/stdout.bin" || status=$?
-printf 'hello world\n' > "$out/expected.bin"
+"$out/hello" Ada > "$out/stdout-ada.bin" || status=$?
+bare_status=0
+"$out/hello" > "$out/stdout-bare.bin" || bare_status=$?
+printf 'Hello Ada\n' > "$out/expected-ada.bin"
+printf 'Hello\n' > "$out/expected-bare.bin"
 
 {
   echo "--- needed by the prototype binary"
@@ -35,7 +39,9 @@ printf 'hello world\n' > "$out/expected.bin"
   esac
 } | tee "$out/deps.txt"
 
-test "$status" -eq 0 || { echo "FAIL: exit status $status" >&2; exit 1; }
-cmp "$out/stdout.bin" "$out/expected.bin" || { echo "FAIL: stdout differs" >&2; exit 1; }
+test "$status" -eq 0 || { echo "FAIL: exit status $status with an argument" >&2; exit 1; }
+test "$bare_status" -eq 0 || { echo "FAIL: exit status $bare_status with no argument" >&2; exit 1; }
+cmp "$out/stdout-ada.bin" "$out/expected-ada.bin" || { echo "FAIL: stdout differs with Ada" >&2; exit 1; }
+cmp "$out/stdout-bare.bin" "$out/expected-bare.bin" || { echo "FAIL: stdout differs with no argument" >&2; exit 1; }
 ! grep -qi "libLLVM" "$out/deps.txt" || { echo "FAIL: shared LLVM in the loader dependencies" >&2; exit 1; }
-echo "PASS: stdout is exactly hello world plus a newline, exit status 0"
+echo "PASS: Ada gives exactly Hello Ada plus a newline, no argument gives Hello plus a newline, both exit 0"

@@ -112,7 +112,7 @@ jobs:
       - name: "Setup: Install the locked tools"
         run: mise install --locked
 
-      - name: "Build and test: Emit, link and run hello world"
+      - name: "Build and test: Emit, link and run Hello Ada"
         run: mise exec -- experiments/llvm23-inkwell/run.sh "$RUNNER_TEMP/llvm-prefix"
 
       - name: "Publish: Upload the run outputs"
