@@ -212,6 +212,21 @@ impl<'g> TypedReport<'g> {
             })
     }
 
+    /// The operation of a private `captureInputs` or `decodeArguments` binding in the pinned env module.
+    pub fn env_bridge(&self, bridge: &crate::loader::DeclarationId) -> Option<PrimitiveOperation> {
+        self.core
+            .primitives
+            .bridges
+            .get(bridge)
+            .copied()
+            .filter(|operation| {
+                matches!(
+                    operation,
+                    PrimitiveOperation::CaptureInputs | PrimitiveOperation::DecodeArguments
+                )
+            })
+    }
+
     pub fn primitive_protection(&self) -> &[PrimitiveProtection<'g>] {
         &self.core.primitives.protection
     }
