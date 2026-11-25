@@ -279,11 +279,18 @@ fn startup_report<'g>(
     (module, report)
 }
 
-const SIBLINGS: [(&str, &str, &str, (usize, usize, usize)); 7] = [
+const SIBLINGS: [(
+    &str,
+    &str,
+    &str,
+    (usize, usize, usize),
+    (usize, usize, usize),
+); 7] = [
     (
         "piped",
         "import std::log;\n\"x\" |> log();\n",
         "\"x\" |> log()",
+        (1898, 7, 3),
         (1898, 7, 3),
     ),
     (
@@ -291,11 +298,13 @@ const SIBLINGS: [(&str, &str, &str, (usize, usize, usize)); 7] = [
         "import std::log;\n(\"x\") |> log();\n",
         "(\"x\") |> log()",
         (1901, 8, 3),
+        (1901, 8, 3),
     ),
     (
         "piped scope",
         "import std::log;\n{ \"x\" |> log(); }\n",
         "\"x\" |> log()",
+        (1902, 8, 4),
         (1902, 8, 4),
     ),
     (
@@ -303,24 +312,28 @@ const SIBLINGS: [(&str, &str, &str, (usize, usize, usize)); 7] = [
         "import std::panic;\npanic(\"boom\");\n",
         "panic(\"boom\")",
         (1892, 5, 3),
+        (1896, 7, 3),
     ),
     (
         "panic group",
         "import std::panic;\npanic((\"boom\"));\n",
         "panic((\"boom\"))",
         (1895, 6, 3),
+        (1899, 8, 3),
     ),
     (
         "panic scope",
         "import std::panic;\n{ panic(\"boom\"); }\n",
         "panic(\"boom\")",
         (1896, 6, 4),
+        (1900, 8, 4),
     ),
     (
         "panic borrow",
         "import std::panic;\nlet s = \"x\";\npanic(&s);\n",
         "panic(&s)",
         (1907, 15, 3),
+        (1911, 17, 3),
     ),
 ];
 
@@ -335,7 +348,7 @@ fn unsupported_output_siblings_stay_incomplete_at_their_call_and_pay_nothing_mor
         "output::unsupported_output_siblings_stay_incomplete_at_their_call_and_pay_nothing_more",
         &sources,
         |index, graph, receipt| {
-            let (name, _, blocker, triple) = SIBLINGS[index];
+            let (name, _, blocker, triple, parent) = SIBLINGS[index];
             let (module, report) = startup_report(graph, receipt);
             assert_eq!(report.completion(), Completion::Incomplete, "{name}");
             assert_eq!(
@@ -344,6 +357,19 @@ fn unsupported_output_siblings_stay_incomplete_at_their_call_and_pay_nothing_mor
                 "{name}"
             );
             assert_limits(receipt, module, BodyOwner::Startup, &report, triple);
+            let at_parent = AnalysisLimits {
+                max_work: parent.0,
+                max_entries: parent.1,
+                max_depth: parent.2,
+            };
+            let parent_report = lower_root(receipt, module, BodyOwner::Startup, at_parent).unwrap();
+            assert_eq!(parent_report.completion(), Completion::Incomplete, "{name}");
+            assert_eq!(
+                parent_report.blocked_at().unwrap().span.bytes(),
+                blocker.as_bytes(),
+                "{name}"
+            );
+            assert!(parent_report.mir().is_none(), "{name}");
         },
     );
 }
