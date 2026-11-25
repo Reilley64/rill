@@ -9,6 +9,7 @@ use std::sync::Arc;
 mod collect;
 mod filesystem;
 mod installed;
+pub(crate) mod keyed;
 mod resolve;
 use filesystem::Host;
 use installed::InstalledProfile;

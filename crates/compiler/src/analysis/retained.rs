@@ -1,6 +1,6 @@
 use super::declarations::{Budget, FieldClass};
 use super::{DeclarationShape, Type, TypeTerm, ordinary};
-use crate::loader::DeclarationId;
+use crate::loader::{DeclarationId, keyed};
 
 pub(super) struct EligibleRecord<'a, 'g> {
     contents: &'a Type<'g>,
@@ -39,12 +39,7 @@ pub(super) fn prove_i32_record<'a, 'g>(
         declaration,
     } = eligible;
     let declarations = &inventory.type_facts().declarations;
-    let probes = (usize::BITS - declarations.len().leading_zeros() + 1) as usize;
-    budget.step(
-        (declaration.module.path.len() + 1)
-            .checked_mul(probes)
-            .ok_or(())?,
-    )?;
+    keyed::charge(&declaration.module, declarations.len(), budget)?;
     let Some(facts) = declarations.get(declaration) else {
         return Ok(None);
     };
