@@ -64,6 +64,7 @@ fn installed_conversions() {
         "iter.rill",
         "mutex.rill",
         "shared.rill",
+        "output.rill",
     ] {
         fs::copy(source.join(file), root.join("lib/rill/std").join(file)).unwrap();
     }
