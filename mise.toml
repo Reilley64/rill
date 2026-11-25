@@ -123,9 +123,13 @@ description = "Show the optional pinned LLVM installation plan without downloadi
 run = "python tools/llvm/setup.py --plan"
 
 [tasks."setup:llvm"]
-description = "Explicitly install the pinned LLVM prefix; may download large archives or build source"
-tools = { "aqua:Kitware/CMake" = "4.4.5", "aqua:ninja-build/ninja" = "1.13.2" }
+description = "Explicitly install the pinned trimmed LLVM prefix from the Reilley64/rill release archive"
 run = "python tools/llvm/setup.py"
+
+[tasks."build:llvm"]
+description = "Build this host's trimmed LLVM release archive from pinned source; takes 30 to 55 minutes, run by the release workflow"
+tools = { "aqua:Kitware/CMake" = "4.4.5", "aqua:ninja-build/ninja" = "1.13.2" }
+run = "python tools/llvm/release.py"
 
 [tasks."test:llvm"]
 description = "Verify the optional LLVM prefix and run a C-API static-link smoke test, not Rill acceptance"

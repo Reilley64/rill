@@ -2,6 +2,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
+mod support;
+
 const TARGET: &str = env!("RILL_HOST_TARGET");
 
 struct Installation {
@@ -18,7 +20,11 @@ impl Installation {
         for directory in [&root.join("bin"), &root.join("app"), &std, &runtime] {
             fs::create_dir_all(directory).unwrap();
         }
-        fs::copy(env!("CARGO_BIN_EXE_rill"), root.join("bin/rill")).unwrap();
+        support::copy_executable(
+            Path::new(env!("CARGO_BIN_EXE_rill")),
+            &root.join("bin/rill"),
+        )
+        .unwrap();
         for name in include_str!("../../../tests/installed/typed/stdlib-sources.txt")
             .lines()
             .chain(include_str!("../../../tests/installed/typed/routine-sources.txt").lines())
@@ -45,11 +51,12 @@ impl Installation {
     }
 
     fn rill(&self, args: &[&str]) -> Output {
-        Command::new(self.root.join("bin/rill"))
-            .args(args)
-            .current_dir(self.root.join("app"))
-            .output()
-            .expect("run the staged rill executable")
+        support::run(
+            Command::new(self.root.join("bin/rill"))
+                .args(args)
+                .current_dir(self.root.join("app")),
+        )
+        .expect("run the staged rill executable")
     }
 }
 
@@ -168,10 +175,8 @@ fn a_bad_option_exits_two_before_anything_is_read() {
 #[test]
 fn a_binary_outside_an_installation_fails_without_a_pass() {
     let manifest = concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml");
-    let output = Command::new(env!("CARGO_BIN_EXE_rill"))
-        .args(["check", manifest])
-        .output()
-        .unwrap();
+    let output =
+        support::run(Command::new(env!("CARGO_BIN_EXE_rill")).args(["check", manifest])).unwrap();
     assert_eq!(output.status.code(), Some(1), "{}", stderr(&output));
     assert!(output.stdout.is_empty(), "{output:?}");
     assert!(

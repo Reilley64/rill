@@ -8,20 +8,16 @@ import struct
 import subprocess
 
 VERSION = "23.1.5"
+RELEASE = "llvm-23.1.5-1"
 ROOT = Path(__file__).resolve().parents[2]
-BASE = f"https://github.com/llvm/llvm-project/releases/download/llvmorg-{VERSION}/"
-# Published compressed sizes and SHA-256 values: docs/research/0046-*.md.
+BASE = f"https://github.com/Reilley64/rill/releases/download/{RELEASE}/"
+# Pins for the trimmed archives that the "Release: Trimmed LLVM" workflow builds. The release
+# does not exist yet: None marks a size or SHA-256 not yet pinned, and setup refuses it.
 ARTIFACTS = {
-    "linux-x64": ("LLVM-23.1.5-Linux-X64.tar.xz", 2014093084,
-                  "f72edb0b36580ece7f52e23858f00c18fad4e87395ea7ad05d7e55c39f8fc78a"),
-    "linux-arm64": ("LLVM-23.1.5-Linux-ARM64.tar.xz", 1828141344,
-                    "44f1e4b7a125b2763d56386a199928dd57ec32e151cc6042dce2f7b0da7bb651"),
-    "macos-arm64": ("LLVM-23.1.5-macOS-ARM64.tar.xz", 1569733272,
-                    "aba592b4a15e8f90c634c5367b51ec8418b8bcd2829865db331a17dc9418dcff"),
-    "macos-x64": ("llvm-project-23.1.5.src.tar.xz", None,
-                  "fb50b1eac93ddeb3aa8dab4cfe324dff74f4a9c2bdee6160c9e36188f8d06a6e"),
+    host: (f"llvm-{VERSION}-1-{host}.tar.xz", None, None)
+    for host in ["linux-x64", "linux-arm64", "macos-arm64", "macos-x64"]
 }
-TARGETS = "AArch64 AMDGPU ARM AVR BPF Hexagon Lanai LoongArch Mips MSP430 NVPTX PowerPC RISCV Sparc SPIRV SystemZ VE WebAssembly X86 XCore".split()
+BACKENDS = {"x64": "X86", "arm64": "AArch64"}
 RECEIPT = ".rill-llvm.json"
 
 
@@ -41,7 +37,7 @@ def host(system=None, machine=None):
 def native_host():
     result = host()
     if result.startswith("linux"):
-        require(platform.libc_ver()[0] == "glibc", "upstream Linux archives require glibc; no musl fallback")
+        require(platform.libc_ver()[0] == "glibc", "the Linux archives are built on glibc; no musl fallback")
     if result == "macos-x64":
         translated = subprocess.run(["/usr/sbin/sysctl", "-in", "sysctl.proc_translated"],
                                     capture_output=True, text=True, check=False).stdout.strip()
@@ -55,10 +51,19 @@ def prefix_for(name):
     return prefix
 
 
+def backend_for(name):
+    return BACKENDS[name.split("-")[1]]
+
+
 def pin(name):
     asset, _, digest = ARTIFACTS[name]
-    return {"version": VERSION, "host": name, "asset": asset, "sha256": digest,
-            "route": "source" if name == "macos-x64" else "upstream-archive"}
+    return {"version": VERSION, "host": name, "asset": asset, "sha256": digest, "route": "release-archive"}
+
+
+def require_pinned(name):
+    asset, _, digest = ARTIFACTS[name]
+    require(digest, f"checksum pin for {name} ({asset}) is unset in tools/llvm/common.py ARTIFACTS; "
+                    f"release {RELEASE} is not published yet")
 
 
 def evidence(status, **facts):
