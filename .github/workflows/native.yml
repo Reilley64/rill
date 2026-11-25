@@ -9,6 +9,7 @@ on:
       - 'runtime/**'
       - 'tests/**'
       - 'tools/unavailable.py'
+      - 'tools/stage_typed_installation.py'
       - 'tools/llvm/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
@@ -71,20 +72,17 @@ jobs:
           LLVM_SYS_231_STRICT_VERSIONING: "1"
         run: mise exec -- cargo test --locked -p codegen-llvm
 
-      # This gate is unavailable, not successful, until native acceptance exists.
-      # Do not substitute a C-API installation smoke for Rill runtime acceptance.
-      # The task keeps its nonzero exit. The job asserts that exit and the stub
-      # message, so a red job means the stub changed or the task broke. Replace
-      # this step with `mise run test:runtime` when native acceptance exists.
-      - name: "Test: Verify native runtime acceptance is unavailable"
-        run: |
-          status=0
-          output=$(mise run test:runtime 2>&1) || status=$?
-          printf '%s\n' "$output"
-          if [ "$status" -ne 2 ] || ! printf '%s\n' "$output" | grep -qF 'test:runtime is not implemented in this scaffold'; then
-            echo "::error::test:runtime no longer reports the scaffold stub (exit $status). Replace this assertion with the real acceptance run."
-            exit 1
-          fi
+      - name: "Build: Stage the prototypes installation"
+        env:
+          LLVM_SYS_231_PREFIX: ${{ github.workspace }}/target/toolchains/llvm-23.1.5/${{ matrix.llvm }}
+          LLVM_SYS_231_STRICT_VERSIONING: "1"
+        run: mise run build:prototypes
+
+      - name: "Test: Run the prototype acceptance through the staged rill"
+        env:
+          LLVM_SYS_231_PREFIX: ${{ github.workspace }}/target/toolchains/llvm-23.1.5/${{ matrix.llvm }}
+          LLVM_SYS_231_STRICT_VERSIONING: "1"
+        run: mise run test:prototypes
 
       # The release task runs the repository checks and then the product build,
       # which is a stub that exits 2. The stub message appears only after the

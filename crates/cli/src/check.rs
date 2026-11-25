@@ -1,7 +1,9 @@
-use compiler::analysis::compilable::{Blocker, Compilability, ProgramAnalysis, UNSUPPORTED_SHAPE};
+use compiler::analysis::compilable::{
+    Blocker, Compilability, CompilableProgram, ProgramAnalysis, UNSUPPORTED_SHAPE,
+};
 use compiler::analysis::typed::analyze_typed;
 use compiler::analysis::{AnalysisLimits, Statistics};
-use compiler::loader::{self, FailureKind, InstalledRequest, Limits};
+use compiler::loader::{self, FailureKind, Graph, InstalledRequest, Limits};
 use compiler::source::Span;
 use std::fmt::Write as _;
 use std::path::Path;
@@ -9,9 +11,9 @@ use std::process::ExitCode;
 
 const HOST_TARGET: &str = env!("RILL_HOST_TARGET");
 const PRIMARY_REPORT_LIMIT: usize = 20;
-const SOURCE_FAILURE: u8 = 1;
-const INVOCATION_ERROR: u8 = 2;
-const ANALYSIS_INCOMPLETE: u8 = 3;
+pub const SOURCE_FAILURE: u8 = 1;
+pub const INVOCATION_ERROR: u8 = 2;
+pub const ANALYSIS_INCOMPLETE: u8 = 3;
 
 struct Diagnostic {
     code: Option<&'static str>,
@@ -20,6 +22,17 @@ struct Diagnostic {
 }
 
 pub fn run(entry: &str) -> ExitCode {
+    with_program(entry, |_, _| ExitCode::SUCCESS)
+}
+
+/// Run the front end on `entry` and call `compilable` with the graph and the
+/// program when it is compilable. Every other outcome is reported on standard
+/// error and returned as its driver status; `check`, `build` and `run` all
+/// decide this here and nowhere else.
+pub fn with_program(
+    entry: &str,
+    compilable: impl FnOnce(&Graph, &CompilableProgram<'_, '_>) -> ExitCode,
+) -> ExitCode {
     if !Path::new(entry).is_file() {
         return invocation(&format!("entry '{}' is not a readable file", escape(entry)));
     }
@@ -38,7 +51,7 @@ pub fn run(entry: &str) -> ExitCode {
     let typed = analyze_typed(&graph, limits);
     let analysis = ProgramAnalysis::new(&graph, &typed, limits);
     match analysis.compilability() {
-        Compilability::Compilable(_) => ExitCode::SUCCESS,
+        Compilability::Compilable(program) => compilable(&graph, &program),
         Compilability::Blocked(Blocker::Incomplete { site }) => reject(vec![Diagnostic {
             code: Some(UNSUPPORTED_SHAPE),
             message: "valid source whose shape the compiler cannot compile yet".into(),
@@ -200,7 +213,7 @@ fn render(report: &mut String, diagnostic: &Diagnostic) {
     );
 }
 
-fn escape(text: &str) -> String {
+pub fn escape(text: &str) -> String {
     text.chars()
         .flat_map(|c| {
             if c.is_control() {
@@ -227,7 +240,7 @@ fn incomplete(reason: &str) -> ExitCode {
     )
 }
 
-fn report_failure(message: &str, status: u8) -> ExitCode {
+pub fn report_failure(message: &str, status: u8) -> ExitCode {
     eprintln!("rill: {}", escape(message));
     ExitCode::from(status)
 }

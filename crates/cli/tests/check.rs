@@ -1,49 +1,11 @@
 use std::fs;
-use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 
 mod support;
 
-const TARGET: &str = env!("RILL_HOST_TARGET");
-
-struct Installation {
-    root: PathBuf,
-}
+use support::Installation;
 
 impl Installation {
-    fn stage(test: &str) -> Self {
-        let root = std::env::temp_dir().join(format!("rill-cli-{test}-{}", std::process::id()));
-        let _ = fs::remove_dir_all(&root);
-        let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
-        let std = root.join("lib/rill/std");
-        let runtime = root.join("lib/rill/runtime").join(TARGET);
-        for directory in [&root.join("bin"), &root.join("app"), &std, &runtime] {
-            fs::create_dir_all(directory).unwrap();
-        }
-        support::copy_executable(
-            Path::new(env!("CARGO_BIN_EXE_rill")),
-            &root.join("bin/rill"),
-        )
-        .unwrap();
-        for name in include_str!("../../../tests/installed/typed/stdlib-sources.txt")
-            .lines()
-            .chain(include_str!("../../../tests/installed/typed/routine-sources.txt").lines())
-        {
-            fs::copy(repo.join("stdlib").join(name), std.join(name)).unwrap();
-        }
-        fs::copy(
-            repo.join("runtime/error/src/lib.rs"),
-            runtime.join("error.rs"),
-        )
-        .unwrap();
-        fs::write(
-            runtime.join("librill_ownership.rlib"),
-            compiler::loader::pinned_ownership_archive(),
-        )
-        .unwrap();
-        Self { root }
-    }
-
     fn check(&self, source: &str) -> Output {
         let entry = self.root.join("app/main.rill");
         fs::write(&entry, source).unwrap();
@@ -57,12 +19,6 @@ impl Installation {
                 .current_dir(self.root.join("app")),
         )
         .expect("run the staged rill executable")
-    }
-}
-
-impl Drop for Installation {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.root);
     }
 }
 

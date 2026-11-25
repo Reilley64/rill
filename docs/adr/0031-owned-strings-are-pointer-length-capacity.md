@@ -27,12 +27,18 @@ The ri-qlh record gives no rejected alternatives for Q32. These are the layouts 
 - **Copying every literal to the heap at its first use, or at program start.** Q32 limits the copy to the point where the literal becomes owned.
 - **Small-string storage inside the three words.** It would change the layout of an owned value by length, and Q32 describes one layout.
 
+## Settled by the backend
+
+The first backend (ri-qlh.22.8, part A) fixed these. They are implementation details, not owner decisions.
+
+- An owned string is the words pointer, length, capacity, in that order. A view is pointer, length. Each is a pointer-sized word on every target.
+- An empty string holds the dangling address 1 and capacity 0. Generated code never allocates it, and releasing a string whose capacity is 0 does nothing. A view of the empty literal holds the same address.
+- An owned string's capacity is the size of its allocation, so it is zero only for the empty string.
+- A literal's bytes are one read-only, one-byte-aligned constant, shared by every literal with the same bytes.
+- A string crosses a call as its separate words, three for an owned string and two for a view ([ADR 0034](0034-llvm-default-c-calling-convention-for-slice-1.md)).
+
 ## Open
 
 The owner did not decide these. Nothing above decides them.
 
-- The order of the three fields, and whether the pointer, length and capacity are `u64` words on every target. The wording says "pointer, byte length, capacity" and nothing about order or width.
-- The pointer an empty string holds: null, a dangling aligned address or a pointer into read-only data. The same question applies to a view of an empty string.
-- Whether an owned string's capacity can be zero while it owns an allocation, and how `append` grows capacity.
-- How a string crosses a function call, as one aggregate or as separate words ([ADR 0034](0034-llvm-default-c-calling-convention-for-slice-1.md) leaves aggregates open).
-- Whether literal bytes are shared across duplicates or kept apart, and whether they are aligned.
+- How `append` grows capacity.
