@@ -23,9 +23,12 @@ The ri-qlh record names no rejected alternative for Q34. These are what the word
 - **A Rill-specific convention that passes owned values in registers or by a private layout.** ADR 0006 and ADR 0014 call this a later ABI, "not a finished private typed/owned-value ABI".
 - **`fastcc`.** Q34 names the default C convention.
 
+## Settled by the backend
+
+The first backend (ri-qlh.22.8, part A) fixed how a string crosses a call: as separate words, the three of an owned string or the two of a view ([ADR 0031](0031-owned-strings-are-pointer-length-capacity.md)), and never as one aggregate. Slice 1 has no result other than `void` and `never`, so a result type has no convention yet. This is an implementation detail, not an owner decision.
+
 ## Open
 
 The owner did not decide these. Nothing above decides them.
 
-- How an aggregate crosses a call: an owned string is three words and a view is two ([ADR 0031](0031-owned-strings-are-pointer-length-capacity.md)). "LLVM default C convention" says how LLVM passes what the generated IR contains, not whether the IR passes a string as a first-class aggregate, as separate words or by pointer.
 - Whether the runtime's functions are called with the same convention. The runtime is a C-ABI static library, so they would be, but Q34 speaks only of calls inside generated code.
