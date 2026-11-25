@@ -3,6 +3,10 @@
 program	mode	load	typed	checked	incomplete	source_rejected	resource_limit
 hello-world	run	ok	Checked	1	0	0	0
 hello-world	test	ok	Checked	1	0	0	0
+string-append	run	ok	Checked	1	0	0	0
+string-append	test	ok	Checked	1	0	0	0
+string-append-growth	run	ok	Checked	1	0	0	0
+string-append-growth	test	ok	Checked	1	0	0	0
 prototypes/01-basics.rill	run	ok	Checked	4	5	0	0
 prototypes/01-basics.rill	test	ok	Checked	4	5	0	0
 prototypes/02-caused-by-errors.rill	run	ok	Incomplete	-	-	-	-
@@ -35,8 +39,8 @@ prototypes/15-secure-random.rill	run	SourceRejected:R0400:import has no public t
 prototypes/15-secure-random.rill	test	SourceRejected:R0400:import has no public target:randomBytes	-	-	-	-	-
 prototypes/16-sql-codecs/main.rill	run	SourceRejected:R0400:import has no public target:import std::sql::Parameter;	-	-	-	-	-
 prototypes/16-sql-codecs/main.rill	test	SourceRejected:R0400:import has no public target:import std::sql::Parameter;	-	-	-	-	-
-prototypes/17-json.rill	run	SourceRejected:R0400:import has no public target:import std::string::append;	-	-	-	-	-
-prototypes/17-json.rill	test	SourceRejected:R0400:import has no public target:import std::string::append;	-	-	-	-	-
+prototypes/17-json.rill	run	SourceRejected:R0400:import has no public target:Value	-	-	-	-	-
+prototypes/17-json.rill	test	SourceRejected:R0400:import has no public target:Value	-	-	-	-	-
 prototypes/18-time-values.rill	run	SourceRejected:R0400:import has no public target:TimeError	-	-	-	-	-
 prototypes/18-time-values.rill	test	SourceRejected:R0400:import has no public target:TimeError	-	-	-	-	-
 prototypes/19-clocks-cancellation.rill	run	SourceRejected:R0400:import has no public target:SignedDuration	-	-	-	-	-

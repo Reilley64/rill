@@ -366,7 +366,7 @@ impl<'g> PrimitiveCore<'g> {
                 self.output.push((&family.id, operation));
             }
         }
-        if let Some(module) = pinned_module(graph, "string/append.rill", budget)?
+        if let Some(module) = pinned_module(graph, crate::loader::APPEND_MODULE, budget)?
             && let Some(bridge) = check_append_binding(inventory, module, budget)?
         {
             budget.reserve(1)?;

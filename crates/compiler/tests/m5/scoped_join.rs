@@ -1538,9 +1538,9 @@ function joined(numbers: List<i32>, otherInput: List<i32>): [i32, i32] {{
                     crate::limit::assert_triple(
                         observed(typed_stats),
                         if live {
-                            (526272, 57548, 12)
+                            (526079, 57548, 12)
                         } else {
-                            (526273, 57550, 12)
+                            (526080, 57550, 12)
                         },
                         "",
                     );
@@ -3205,7 +3205,7 @@ fn installed_join_fresh_results_keep_the_written_occurrence() {
             let loaded = loader::load_installed(request.clone()).unwrap();
             captured_keys(&loaded, true);
             let typed_cost = Statistics {
-                work: 472_950,
+                work: 472_787,
                 entries: 52_116,
                 max_depth: 12,
             };
@@ -3583,7 +3583,7 @@ fn an_unproved_join_does_not_invent_a_discard() {
             let loaded = loader::load_installed(request.clone()).unwrap();
             captured_keys(&loaded, true);
             let cost = Statistics {
-                work: 456_735,
+                work: 456_572,
                 entries: 49_701,
                 max_depth: 12,
             };
@@ -3716,7 +3716,7 @@ fn reference_pair_reserves_before_it_builds_each_slot() {
         |request, _, _| {
             let graph = loader::load_installed(request.clone()).unwrap();
             let pinned = compiler::analysis::Statistics {
-                work: 456_878,
+                work: 456_719,
                 entries: 49_838,
                 max_depth: 12,
             };

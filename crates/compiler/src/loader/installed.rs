@@ -7,6 +7,9 @@ mod collection;
 pub use collection::CollectionArtifact;
 pub(super) use collection::CollectionLinks;
 
+// ri-qlh.26
+pub const APPEND_MODULE: &str = "string/append.rill";
+
 const TARGET: &str = env!("RILL_ANALYSIS_TARGET");
 
 pub(super) const OWNERSHIP_ARCHIVE: Option<&[u8]> =
@@ -174,7 +177,7 @@ impl InstalledProfile {
         if path == "output.rill" {
             return Some(include_bytes!("../../../../stdlib/output.rill"));
         }
-        if path == "string/append.rill" {
+        if path == APPEND_MODULE {
             return Some(include_bytes!("../../../../stdlib/string/append.rill"));
         }
         self.sources()

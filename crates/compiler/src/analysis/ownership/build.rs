@@ -8388,7 +8388,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         }
         if checked_carrier.is_none()
             && call.callee.module.origin == Origin::Standard
-            && call.callee.module.path == "string/append.rill"
+            && call.callee.module.path == crate::loader::APPEND_MODULE
         {
             return self.call_append(node, facts, call, into, next, depth);
         }

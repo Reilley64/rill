@@ -87,7 +87,7 @@ function textBind(): void { let view = &named(); }
                     ..request.clone()
                 })
                 .unwrap();
-                let (work, entries, max_depth) = (449847, 48501, 12);
+                let (work, entries, max_depth) = (449687, 48501, 12);
                 let at = |max_work, max_entries| {
                     analyze_typed(
                         &graph,

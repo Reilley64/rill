@@ -37,8 +37,12 @@ The first backend (ri-qlh.22.8, part A) fixed these. They are implementation det
 - A literal's bytes are one read-only, one-byte-aligned constant, shared by every literal with the same bytes.
 - A string crosses a call as its separate words, three for an owned string and two for a view ([ADR 0034](0034-llvm-default-c-calling-convention-for-slice-1.md)).
 
+The second backend increment (ri-qlh.22.12) fixed these. They are implementation details, not owner decisions.
+
+- `append` grows capacity to the larger of twice the current capacity and the length the result needs, and does so only when the result does not fit. The new size comes from `rill_rt_grow` ([ADR 0032](0032-generated-code-allocates-through-three-runtime-functions.md)); an empty string has capacity 0, so its first growth allocates. A literal's read-only bytes are never passed to `rill_rt_grow` or `rill_rt_release`: a literal is copied to the heap when it becomes owned, so every owned string with a nonzero capacity is an allocation.
+- `append` copies the bytes of the appended view after the existing bytes and checks nothing about UTF-8. The result is valid UTF-8 because both operands are valid strings and a concatenation of two valid UTF-8 byte sequences is valid UTF-8.
+- An exclusive borrow of an owned string, `&mut string`, crosses a call as one word: the address of a cell holding the string's three words. Generated code gives an owned string that is borrowed exclusively a cell in memory and reads its words from the cell afterwards, so a call that grows the string changes the owner's pointer, length and capacity ([ADR 0034](0034-llvm-default-c-calling-convention-for-slice-1.md)).
+
 ## Open
 
-The owner did not decide these. Nothing above decides them.
-
-- How `append` grows capacity.
+Nothing is open.

@@ -110,7 +110,7 @@ function probe(seed: bool): void {
     let _ = packed;
 }
 "#,
-            stats(449_799, 48_544, 12),
+            stats(449_638, 48_544, 12),
         ),
         (
             r#"
@@ -177,7 +177,7 @@ fn guard_job_does_not_enter_the_join() {
         &Pin {
             source: &control,
             completion: TypedCompletion::Checked,
-            used: stats(458_507, 50_335, 12),
+            used: stats(458_347, 50_335, 12),
             obligations: &[],
         },
     );
@@ -221,7 +221,7 @@ fn guard_capture_requirements_are_incomplete_at_the_call() {
     const TEST: &str =
         "captures::approval_controls::guard_capture_requirements_are_incomplete_at_the_call";
     for (predicate, used) in [
-        ("sendable", stats(446_515, 48_263, 12)),
+        ("sendable", stats(446_355, 48_263, 12)),
         ("shareable", stats(446_516, 48_263, 12)),
     ] {
         let source = format!(

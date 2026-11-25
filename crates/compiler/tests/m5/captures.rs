@@ -4325,7 +4325,7 @@ fn declared_once_formal_invokes_the_actual_pair_in_one_call_frame() {
             let stats = typed.statistics();
             crate::limit::assert_triple(
                 (stats.work, stats.entries, stats.max_depth),
-                (449_483, 48_628, 12),
+                (449_323, 48_628, 12),
                 "",
             );
             let graph = analyze_ownership(receipt, AnalysisLimits::default());
@@ -4422,7 +4422,7 @@ fn declared_once_frame_keeps_capture_provenance_and_rejects_without_mir() {
             let stats = typed.statistics();
             crate::limit::assert_triple(
                 (stats.work, stats.entries, stats.max_depth),
-                (461_343, 49_885, 12),
+                (461_182, 49_885, 12),
                 "",
             );
             let graph = analyze_ownership(receipt, AnalysisLimits::default());
@@ -4530,7 +4530,7 @@ fn declared_once_route_leaves_erased_and_local_descriptor_routes_unchanged() {
             let stats = typed.statistics();
             crate::limit::assert_triple(
                 (stats.work, stats.entries, stats.max_depth),
-                (447_520, 48_350, 12),
+                (447_360, 48_350, 12),
                 "",
             );
             let pending = typed.result_use().unwrap().pending();
@@ -4571,26 +4571,26 @@ fn declared_once_siblings_keep_their_parent_typed_caps() {
             "grouped-actual",
             wrapper.clone() + &caller("return invoke((() => [flag, seed]));"),
             "job()",
-            (448_254, 48_470, 12),
+            (448_094, 48_470, 12),
         ),
         (
             "grouped-call",
             wrapper.clone() + &caller("return (invoke(() => [flag, seed]));"),
             "job()",
-            (448_158, 48_463, 12),
+            (447_998, 48_463, 12),
         ),
         (
             "grouped-receiver",
             wrapper.replace("return job();", "return (job)();")
                 + &caller("return invoke(() => [flag, seed]);"),
             "(job)()",
-            (448_332, 48_460, 12),
+            (448_172, 48_460, 12),
         ),
         (
             "scoped",
             wrapper.clone() + &caller("{ return invoke(() => [flag, seed]); }"),
             "job()",
-            (448_057, 48_455, 12),
+            (447_897, 48_455, 12),
         ),
         (
             "loop",
@@ -4599,13 +4599,13 @@ fn declared_once_siblings_keep_their_parent_typed_caps() {
                     "while (seed) { return invoke(() => [flag, seed]); } return [flag, seed];",
                 ),
             "job()",
-            (448_432, 48_566, 12),
+            (448_272, 48_566, 12),
         ),
         (
             "bound",
             wrapper.clone() + &caller("let out = invoke(() => [flag, seed]); return out;"),
             "job()",
-            (448_006, 48_457, 12),
+            (447_846, 48_457, 12),
         ),
     ] {
         probe_report(
