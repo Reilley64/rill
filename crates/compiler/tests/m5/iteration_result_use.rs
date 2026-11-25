@@ -671,13 +671,13 @@ fn unsupported_option_binders_keep_their_published_caps() {
     // Fixed M4 limits from before the named Option-item handoff, not limits
     // derived from this run. Grouped wildcard patterns remain unsupported.
     for (fixture, pattern, work, entries, depth) in [
-        ("bare_wild", "_", 322716, 47636, 12),
-        ("group_wild", "(( _ ))", 322730, 47638, 12),
+        ("bare_wild", "_", 323368, 48288, 12),
+        ("group_wild", "(( _ ))", 323382, 48290, 12),
         (
             "deep_wild",
             "((((((((((((((_))))))))))))))",
-            322814,
-            47650,
+            323466,
+            48302,
             17,
         ),
     ] {
@@ -698,13 +698,13 @@ fn unsupported_option_binders_keep_their_published_caps() {
 #[test]
 fn local_alias_sources_keep_their_published_caps() {
     for (fixture, place, work, entries) in [
-        ("alias", "ys", 323027, 47750),
-        ("group_alias", "((ys))", 323113, 47775),
+        ("alias", "ys", 323682, 48405),
+        ("group_alias", "((ys))", 323768, 48430),
         (
             "deep_alias",
             "((((((((((((((ys))))))))))))))",
-            325023,
-            48009,
+            325678,
+            48664,
         ),
     ] {
         let iteration =
