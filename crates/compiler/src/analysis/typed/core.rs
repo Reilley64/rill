@@ -360,7 +360,7 @@ mod tests {
                 copy: selector("copy"),
                 dispose: selector("dispose"),
             },
-            target: "aarch64-apple-darwin".into(),
+            target: env!("RILL_ANALYSIS_TARGET").into(),
             options: BTreeMap::new(),
             test_mode: false,
             limits: Limits::default(),

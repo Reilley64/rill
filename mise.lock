@@ -172,4 +172,3 @@ specifiers = ["1.98.0"]
 [tools.rust.options]
 components = "clippy,rustfmt"
 profile = "minimal"
-targets = "aarch64-apple-darwin"

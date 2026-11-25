@@ -1,5 +1,4 @@
 //! Exercise the same native archive used by installed capture, without Rill lowering.
-#![cfg(all(target_arch = "aarch64", target_os = "macos"))]
 
 use std::path::Path;
 use std::{fs, process::Command};

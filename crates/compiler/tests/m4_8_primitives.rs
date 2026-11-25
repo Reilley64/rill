@@ -72,7 +72,7 @@ fn installed(prefix: &Path, test_mode: bool, source: &str) -> Graph {
     load_installed(InstalledRequest {
         entry,
         test_mode,
-        target: "aarch64-apple-darwin".into(),
+        target: env!("RILL_ANALYSIS_TARGET").into(),
         options: Default::default(),
         limits: Limits::default(),
     })
@@ -204,7 +204,7 @@ fn source_only_catalogue_is_not_authority(prefix: &Path, test_mode: bool) {
             copy: selector("copy"),
             dispose: selector("dispose"),
         },
-        target: "aarch64-apple-darwin".into(),
+        target: env!("RILL_ANALYSIS_TARGET").into(),
         options: Default::default(),
         test_mode,
         limits: Limits::default(),
