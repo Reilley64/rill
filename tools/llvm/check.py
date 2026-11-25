@@ -8,7 +8,7 @@ import shlex
 import subprocess
 import tempfile
 
-from common import (TARGETS, VERSION, evidence, inside, native_host, no_fallback,
+from common import (VERSION, backend_for, evidence, inside, native_host, no_fallback,
                     pin, prefix_for, read_receipt, require, run)
 
 
@@ -41,20 +41,11 @@ def inspect(prefix, name, receipt=True):
     for key, number in zip(["MAJOR", "MINOR", "PATCH"], VERSION.split(".")):
         require(re.search(rf"^#define LLVM_VERSION_{key}\s+{number}\s*$", header, re.M), "generated header version mismatch")
     targets = query("--targets-built").split()
-    require(set(TARGETS) <= set(targets), "missing LLVM backend targets")
+    require(targets == [backend_for(name)], f"LLVM backends must be exactly the native {backend_for(name)}")
     triple = query("--host-target")
     arch = "x86_64" if name.endswith("x64") else "aarch64"
     require(triple.split("-")[0] in ({"aarch64", "arm64"} if arch == "aarch64" else {arch})
             and ("linux" in triple if name.startswith("linux") else "darwin" in triple), "incompatible LLVM host target")
-    versions = {}
-    for tool in ["clang", "clang++", "ld.lld", "wasm-ld", "llc", "opt"]:
-        path = file("bin/" + tool)
-        require(os.access(path, os.X_OK), f"tool is not executable: {tool}")
-        output = run([path, "--version"])
-        no_fallback(output)
-        require(re.search(r"(?<![\d.])23\.1\.5(?![\w.])", output), f"{tool} version mismatch")
-        versions[tool] = output
-    file("bin/lld")  # Generic lld intentionally refuses invocation; use its drivers above.
     require(query("--link-static", "--shared-mode", "all") == "static", "LLVM static linkage unavailable")
     libraries = query("--link-static", "--libnames", "all").split()
     require(libraries and "libLLVMCore.a" in libraries, "missing static LLVM libraries")
@@ -76,9 +67,12 @@ def inspect(prefix, name, receipt=True):
                 require(len(flag) > 2 and inside(Path(flag[2:]), prefix), f"mixed prefix compiler/linker flag: {flag}")
     return evidence("prefix-inspected", prefix=str(prefix), version=VERSION, host=name,
                     targets=targets, host_target=triple, libraries=libraries,
-                    system_libraries=system, tool_versions=versions, flags=flags,
+                    system_libraries=system, flags=flags,
                     c_api_smoke="not-run", provisioning_pin=pin(name), provenance_signatures="unverified")
 
+
+# The trimmed prefix ships no compiler; the smoke uses the host's.
+HOST_CC, HOST_CXX = Path("/usr/bin/cc"), Path("/usr/bin/c++")
 
 # Exercise real C API codegen, not merely a program that prints llvm-config's version.
 SMOKE_C = r'''#include <llvm-c/Core.h>
@@ -148,12 +142,12 @@ def smoke(prefix, name, facts, sdk=None):
         out = Path(temp)
         (out / "smoke.c").write_text(SMOKE_C)
         (out / "main.c").write_text("extern int answer(void); int main(void) { return answer() == 42 ? 0 : 1; }\n")
-        clang = [prefix / "bin/clang", "--no-default-config", *sdk_flags]
+        clang = [HOST_CC, *sdk_flags]
         headers = run([*clang, "-H", "-I" + str(prefix / "include"), "-c", out / "smoke.c", "-o", out / "smoke.o"], timeout=120, combined=True)
         no_fallback(headers)
         # Absolute LLVM archives plus linker input tracing also catch static Homebrew
         # system libraries that would be invisible in the executable's loader dependencies.
-        linked = run([prefix / "bin/clang++", "--no-default-config", *sdk_flags, out / "smoke.o",
+        linked = run([HOST_CXX, *sdk_flags, out / "smoke.o",
                       *[prefix / "lib" / lib for lib in facts["libraries"]],
                       *shlex.split(facts["system_libraries"]), "-Wl,-t", "-o", out / "smoke"], timeout=180, combined=True)
         no_fallback(linked)
