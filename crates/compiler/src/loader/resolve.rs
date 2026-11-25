@@ -216,18 +216,16 @@ impl Engine {
                     &mut self.next_ordinal,
                 )?;
                 for import in &mut imports {
-                    demanded |= self
-                        .installed
-                        .is_some_and(|profile| profile.demands(import));
+                    demanded |= installed::demands(import);
                     self.discover(import)?;
                 }
                 self.imports.extend(imports);
             }
-            let Some(profile) = self.installed.filter(|_| demanded) else {
+            if !demanded {
                 break;
-            };
+            }
             demanded = false;
-            for &(facade, module, names) in profile.on_demand() {
+            for &(facade, module, names) in installed::ON_DEMAND {
                 self.host.charge(1 + names.len())?;
                 self.discover_on_demand(facade, module, names)?;
             }
@@ -992,7 +990,9 @@ impl Engine {
             starts: Vec::new(),
         };
         self.discover(&mut import)?;
-        self.imports.push(import);
+        if !import.starts.is_empty() {
+            self.imports.push(import);
+        }
         Ok(())
     }
 
