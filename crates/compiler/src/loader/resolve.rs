@@ -23,6 +23,7 @@ struct Engine {
     outcomes: Vec<ImportOutcome>,
     findings: Vec<Finding>,
     pending: VecDeque<ModuleKey>,
+    next_ordinal: usize,
     installed: Option<InstalledProfile>,
     error_storage: Option<(PathBuf, Vec<u8>)>,
 }
@@ -42,6 +43,7 @@ pub(super) fn load(
         outcomes: Vec::new(),
         findings: Vec::new(),
         pending: VecDeque::new(),
+        next_ordinal: 0,
         installed,
         error_storage: None,
     };
@@ -73,6 +75,7 @@ pub(super) fn load(
                 })
                 .collect(),
             routine_index,
+            declaration_count: engine.next_ordinal,
             bindings,
             imports: engine.outcomes,
             implementations,
@@ -198,8 +201,11 @@ impl Engine {
         }
         while let Some(key) = self.pending.pop_front() {
             self.host.charge(1)?;
-            let mut imports =
-                collect::collect(self.modules.get_mut(&key).unwrap(), &mut self.host)?;
+            let mut imports = collect::collect(
+                self.modules.get_mut(&key).unwrap(),
+                &mut self.host,
+                &mut self.next_ordinal,
+            )?;
             for import in &mut imports {
                 self.discover(import)?;
             }
@@ -773,7 +779,7 @@ impl Engine {
             let pending = self.pending.pop_front();
             debug_assert_eq!(pending.as_ref(), Some(&loaded));
             let module = self.modules.get_mut(&loaded).unwrap();
-            let mut imports = collect::collect(module, &mut self.host)?;
+            let mut imports = collect::collect(module, &mut self.host, &mut self.next_ordinal)?;
             for declaration in &module.declarations {
                 self.host.charge(1)?;
                 if matches!(

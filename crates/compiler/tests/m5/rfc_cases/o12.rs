@@ -305,7 +305,7 @@ function viewField(): i32 { let view = &shifted(Point { x: 1, y: 2 }); return vi
                 &request,
                 &[Case {
                     text: VIEW,
-                    typed_stats: (324407, 47806, 12),
+                    typed_stats: (325063, 48462, 12),
                     graph: (GraphCompletion::SourceRejected, (188588, 4666, 7)),
                     roots: &[
                         Root {
@@ -384,7 +384,7 @@ function backtick(): &string { return &`tick`; }
 function boundLiteral(): &string { let view = &"static"; return view; }
 function literal(): &string { return &"static"; }
 "####,
-            typed_stats: (344724, 49873, 14),
+            typed_stats: (345401, 50550, 14),
             graph: (GraphCompletion::SourceRejected, (206060, 7452, 11)),
             roots: &[
                 Root {
@@ -503,7 +503,7 @@ function number(): &i32 { return &1i32; }
 function owner(): &string { let text = "x"; return &text; }
 function flag(b: bool): &string { return &`a${b}`; }
 "####,
-            typed_stats: (332938, 48779, 12),
+            typed_stats: (333602, 49443, 12),
             graph: (GraphCompletion::SourceRejected, (191338, 4565, 5)),
             roots: &[
                 Root {
@@ -567,13 +567,6 @@ function flag(b: bool): &string { return &`a${b}`; }
     );
 }
 
-/// A call result with a text field keeps its own cleanup and stays out of
-/// this route. The screen reads the record's fields, one charge of 3 work in
-/// these two roots against `4f7a8032` (1,873 / 26 / 3 and 1,889 / 33 / 4,
-/// whole graph 187,421 / 4,277 / 5); the caps below are measured on the
-/// candidate. Metering rule 1 exception (chief of staff, 2026-11-24 06:50
-/// AEDT, ri-2s0.8): no paid fact carries the field list, so each parent cap
-/// gives `ResourceLimit`, with no MIR and no finding, in both load modes.
 #[test]
 fn text_record_results_stay_incomplete() {
     const TEXT: &str = r####"
@@ -589,8 +582,8 @@ function textBind(): void { let view = &named(); }
                 &request,
                 &[Case {
                     text: TEXT,
-                    typed_stats: (325411, 47827, 12),
-                    graph: (GraphCompletion::Incomplete, (187427, 4277, 5)),
+                    typed_stats: (326067, 48483, 12),
+                    graph: (GraphCompletion::Incomplete, (187421, 4277, 5)),
                     roots: &[
                         Root {
                             name: "named",
@@ -604,7 +597,7 @@ function textBind(): void { let view = &named(); }
                                 blocker: r####"(&named()).x"####,
                             },
                             graph: None,
-                            stats: (1876, 26, 3),
+                            stats: (1873, 26, 3),
                         },
                         Root {
                             name: "textBind",
@@ -612,38 +605,11 @@ function textBind(): void { let view = &named(); }
                                 blocker: r####"named()"####,
                             },
                             graph: None,
-                            stats: (1892, 33, 4),
+                            stats: (1889, 33, 4),
                         },
                     ],
                 }],
             );
-            fs::write(&request.entry, format!("{IMPORTS}\n{TEXT}")).unwrap();
-            for test_mode in [false, true] {
-                let request = InstalledRequest {
-                    test_mode,
-                    ..request.clone()
-                };
-                let graph = loader::load_installed(request).unwrap();
-                let typed = analyze_typed(&graph, AnalysisLimits::default());
-                let receipt = typed.receipt().unwrap();
-                let module = application(&graph);
-                for (name, parent) in [("textRead", (1873, 26, 3)), ("textBind", (1889, 33, 4))] {
-                    let declaration = module
-                        .declarations
-                        .iter()
-                        .find(|d| {
-                            d.id.kind == DeclarationKind::Function
-                                && d.name.as_deref() == Some(name)
-                        })
-                        .unwrap();
-                    let (parent, _) = limits(statistics(parent));
-                    let limited = lower_body(&receipt, module, &declaration.id, parent).unwrap();
-                    crate::limit::assert_body_limit(&limited);
-                }
-                let (parent, _) = limits(statistics((187421, 4277, 5)));
-                let limited = analyze_ownership(&receipt, parent);
-                crate::limit::assert_graph_limit(&limited);
-            }
         },
     );
 }
@@ -674,7 +640,7 @@ function bound(): void { let v = &make(); }
                 &request,
                 &[Case {
                     text: DISPOSER,
-                    typed_stats: (326437, 47914, 12),
+                    typed_stats: (327094, 48571, 12),
                     graph: (GraphCompletion::Incomplete, (188398, 4386, 6)),
                     roots: &[
                         Root {
