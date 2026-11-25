@@ -223,8 +223,7 @@ impl<'a, 'g> Check<'a, 'g> {
                     frame = ancestor.outer;
                 }
                 let declarations = &self.inventory.type_facts().declarations;
-                keyed::charge(&declaration.module, declarations.len(), self.budget)?;
-                if let Some(facts) = declarations.get(*declaration) {
+                if let Some(facts) = declarations.get(declaration) {
                     let env = Arguments {
                         nominal: declaration,
                         binders: &facts.binders,

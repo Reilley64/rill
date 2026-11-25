@@ -120,7 +120,7 @@ fn record_yield_cleans_the_partial_item_then_the_suffix() {
         SOURCE,
         |request, module, receipt, typed| {
             let capture = loader::load_installed(request.clone()).unwrap();
-            let receipt_stats = stats(514_668, 56_114, 12);
+            let receipt_stats = stats(497_043, 61_387, 12);
             assert_eq!(receipt.statistics(), receipt_stats);
             let (exact, short) = limits(receipt_stats);
             let at = analyze_typed(&capture, exact);
@@ -131,7 +131,7 @@ fn record_yield_cleans_the_partial_item_then_the_suffix() {
             }
 
             assert_pre_equality_graph_cap(receipt, (234_907, 13_094, 9));
-            let graph_stats = stats(240_483, 13_167, 9);
+            let graph_stats = stats(234_883, 13_167, 9);
             let (exact, short) = limits(graph_stats);
             let graph = analyze_ownership(receipt, exact);
             assert_eq!(graph.statistics(), graph_stats);
@@ -148,17 +148,17 @@ fn record_yield_cleans_the_partial_item_then_the_suffix() {
             let loop_head: &[u8] =
                 b"for (let item of [Entry{take: a, keep: b}, Entry{take: c, keep: d}])";
             for (name, expected, cap) in [
-                ("onBreak", Completion::Checked, stats(5_976, 1_356, 7)),
-                ("grouped", Completion::Checked, stats(5_982, 1_356, 8)),
-                ("scoped", Completion::Checked, stats(5_978, 1_356, 8)),
-                ("wrapped", Completion::Checked, stats(6_437, 1_604, 9)),
-                ("whole", Completion::Checked, stats(5_609, 1_209, 5)),
-                ("exhausted", Completion::Checked, stats(5_995, 1_362, 7)),
-                ("reused", Completion::SourceRejected, stats(6_106, 1_409, 7)),
+                ("onBreak", Completion::Checked, stats(5_616, 1_356, 7)),
+                ("grouped", Completion::Checked, stats(5_622, 1_356, 8)),
+                ("scoped", Completion::Checked, stats(5_618, 1_356, 8)),
+                ("wrapped", Completion::Checked, stats(6_077, 1_604, 9)),
+                ("whole", Completion::Checked, stats(5_329, 1_209, 5)),
+                ("exhausted", Completion::Checked, stats(5_635, 1_362, 7)),
+                ("reused", Completion::SourceRejected, stats(5_666, 1_409, 7)),
                 (
                     "movedSource",
                     Completion::SourceRejected,
-                    stats(5_642, 1_224, 5),
+                    stats(5_362, 1_224, 5),
                 ),
                 ("dead", Completion::Checked, stats(2_704, 426, 2)),
                 ("pruned", Completion::Checked, stats(2_752, 456, 4)),

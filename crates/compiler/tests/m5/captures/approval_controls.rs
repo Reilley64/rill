@@ -104,7 +104,7 @@ function probe(seed: bool): void {
     let _ = packed;
 }
 "#,
-            stats(449_602, 48_544, 12),
+            stats(432_230, 53_229, 12),
         ),
         (
             r#"
@@ -120,7 +120,7 @@ function probe(seed: bool): void {
     let _ = packed;
 }
 "#,
-            stats(449_382, 48_454, 12),
+            stats(432_010, 53_132, 12),
         ),
     ] {
         assert_pinned(
@@ -171,7 +171,7 @@ fn guard_job_does_not_enter_the_join() {
         &Pin {
             source: &control,
             completion: TypedCompletion::Checked,
-            used: stats(458_309, 50_335, 12),
+            used: stats(440_989, 55_101, 12),
             obligations: &[],
         },
     );
@@ -180,7 +180,7 @@ fn guard_job_does_not_enter_the_join() {
         &Pin {
             source: &guarded,
             completion: TypedCompletion::Incomplete,
-            used: stats(458_353, 50_036, 13),
+            used: stats(441_006, 54_809, 13),
             obligations: &[
                 (
                     FamilySelection,
@@ -199,7 +199,7 @@ fn guard_job_does_not_enter_the_join() {
         &Pin {
             source: &format!("{JOIN}\n{direct}\n"),
             completion: TypedCompletion::Incomplete,
-            used: stats(455_233, 49_461, 12),
+            used: stats(437_855, 54_206, 12),
             obligations: &[(
                 FamilySelection,
                 "join([() => true, () => { let _ = lease; return true; }])",
@@ -215,8 +215,8 @@ fn guard_capture_requirements_are_incomplete_at_the_call() {
     const TEST: &str =
         "captures::approval_controls::guard_capture_requirements_are_incomplete_at_the_call";
     for (predicate, used) in [
-        ("sendable", stats(446_319, 48_263, 12)),
-        ("shareable", stats(446_320, 48_263, 12)),
+        ("sendable", stats(428_925, 52_913, 12)),
+        ("shareable", stats(428_926, 52_913, 12)),
     ] {
         let source = format!(
             "function need<T>(value: T): bool where {predicate}(T) {{ let _ = value; return true; }}

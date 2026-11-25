@@ -265,7 +265,7 @@ fn unused_canonical_plain_implementation_is_a_root() {
                 helper,
                 owner,
                 &report,
-                [(2189, 134, 3), (2154, 116, 3)][index],
+                [(2093, 134, 3), (2058, 116, 3)][index],
             );
             if index == 1 {
                 assert_reuse(&report, helper, &reuse, "value");
@@ -311,7 +311,7 @@ fn expectation_checks_its_reached_helper_before_publishing_mir() {
                 helper,
                 owner,
                 &report,
-                [(4168, 205, 3), (4137, 189, 3)][index],
+                [(4084, 205, 3), (4053, 189, 3)][index],
             );
             if index == 1 {
                 assert_reuse(&report, helper, &reuse, "value");

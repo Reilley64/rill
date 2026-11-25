@@ -403,7 +403,7 @@ fn grouped_computed_source_keeps_the_pre_literal_budget() {
             let graph = analyze_ownership(
                 receipt,
                 AnalysisLimits {
-                    max_work: 195319,
+                    max_work: 192799,
                     max_entries: 4730,
                     max_depth: 5,
                 },
@@ -432,7 +432,7 @@ fn unproved_list_sources_keep_their_old_caps() {
         |_, module, receipt| {
             assert_pre_equality_graph_cap(receipt, (192_283, 4593, 4));
             let stats = Statistics {
-                work: 195_133,
+                work: 192_613,
                 entries: 4727,
                 max_depth: 5,
             };

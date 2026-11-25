@@ -1,4 +1,5 @@
 //! M4.2 scoped member/signature and source-nominal containment checking.
+use super::ownership::OrdinalMap;
 use super::*;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -153,11 +154,11 @@ enum FindingOrder {
 }
 #[derive(Debug, Default)]
 pub struct CheckFacts<'r, 'g> {
-    declarations: BTreeMap<&'g DeclarationId, CheckedDeclaration<'r, 'g>>,
-    layouts: BTreeMap<&'g DeclarationId, LayoutFacts<'r, 'g>>,
+    declarations: DeclarationTable<'g, CheckedDeclaration<'r, 'g>>,
+    layouts: DeclarationTable<'g, LayoutFacts<'r, 'g>>,
     summaries: DeclarationSummaries,
-    obligations: BTreeMap<(&'g DeclarationId, NodeId), LayoutObligation<'r, 'g>>,
-    findings: BTreeMap<(&'g DeclarationId, usize, FindingOrder), CheckFinding<'r, 'g>>,
+    obligations: PathMap<(&'g DeclarationId, NodeId), LayoutObligation<'r, 'g>>,
+    findings: PathMap<(&'g DeclarationId, usize, FindingOrder), CheckFinding<'r, 'g>>,
 }
 impl<'r, 'g> CheckFacts<'r, 'g> {
     pub(super) fn take_summaries(&mut self) -> DeclarationSummaries {
@@ -248,7 +249,7 @@ impl Budget {
         Ok(())
     }
 }
-impl crate::loader::keyed::Meter for Budget {
+impl Meter for Budget {
     fn step(&mut self, n: usize) -> Work<()> {
         Budget::step(self, n)
     }
@@ -293,7 +294,8 @@ impl<'r, 'g> Checker<'r, 'g> {
                 self.facts.findings.insert(
                     (&scope.id, members[1].span.start(), FindingOrder::Duplicate),
                     CheckFinding::DuplicateMembers { scope, members },
-                );
+                    &mut self.budget,
+                )?;
                 unique = false;
             }
         }
@@ -406,7 +408,8 @@ impl<'r, 'g> Checker<'r, 'g> {
                     schema,
                     actual: facts,
                 },
-            );
+                &mut self.budget,
+            )?;
         }
         Ok(valid)
     }
@@ -427,10 +430,16 @@ impl<'r, 'g> Checker<'r, 'g> {
         ty: &'r Type<'g>,
     ) -> Work<()> {
         let module = self.owner(&member.id.module)?;
-        self.budget
-            .step(self.types.uses.len().checked_ilog2().unwrap_or(0) as usize + 1)?;
-        let annotation =
-            &self.types.uses[&(&module.key, module.syntax.nodes[node].span.start(), node)];
+        let slot = module_slot(self.graph.modules(), module).expect("a module of the graph");
+        let annotation = self
+            .types
+            .uses
+            .get(
+                slot,
+                &(module.syntax.nodes[node].span.start(), node),
+                &mut self.budget,
+            )?
+            .expect("a stored annotation has a written use");
         self.budget.reserve(1)?;
         self.inputs.push(Stored {
             origin,
@@ -553,7 +562,11 @@ impl<'r, 'g> Checker<'r, 'g> {
             self.changed = true;
         }
         let key = (input.origin, input.source.annotation.node);
-        if !self.facts.obligations.contains_key(&key) {
+        if !self
+            .facts
+            .obligations
+            .contains_key(&key, &mut self.budget)?
+        {
             self.budget.reserve(1)?;
             self.facts.obligations.insert(
                 key,
@@ -562,7 +575,8 @@ impl<'r, 'g> Checker<'r, 'g> {
                     source: input.source,
                     unknown_declaration: declaration,
                 },
-            );
+                &mut self.budget,
+            )?;
         }
         Ok(())
     }
@@ -700,12 +714,10 @@ impl<'r, 'g> Checker<'r, 'g> {
         let n = self.facts.layouts.len();
         self.budget.reserve(n.checked_mul(5).ok_or(())?)?;
         let vertices: Vec<_> = self.facts.layouts.keys().copied().collect();
-        let indices: BTreeMap<_, _> = vertices
-            .iter()
-            .copied()
-            .enumerate()
-            .map(|(i, id)| (id, i))
-            .collect();
+        let mut indices = OrdinalMap::new();
+        for (i, &id) in vertices.iter().enumerate() {
+            indices.insert(id, i);
+        }
         let mut forward = vec![Vec::new(); n];
         let mut reverse = vec![Vec::new(); n];
         let mut visited = vec![false; n];
@@ -714,7 +726,7 @@ impl<'r, 'g> Checker<'r, 'g> {
                 self.budget
                     .step(n.checked_ilog2().unwrap_or(0) as usize + 1)?;
                 self.budget.reserve(2)?;
-                let (a, b) = (indices[origin], indices[target]);
+                let (a, b) = (indices[*origin], indices[*target]);
                 forward[a].push(b);
                 reverse[b].push(a);
             }
@@ -821,7 +833,8 @@ impl<'r, 'g> Checker<'r, 'g> {
                     self.facts.findings.insert(
                         (vertices[root], 0, FindingOrder::Cycle),
                         CheckFinding::InlineCycle { steps },
-                    );
+                        &mut self.budget,
+                    )?;
                     break;
                 }
             }
@@ -829,6 +842,10 @@ impl<'r, 'g> Checker<'r, 'g> {
         Ok(())
     }
     fn run(&mut self, contracts: PreludeContracts<'g>) -> Work<()> {
+        let count = self.graph.declaration_count();
+        self.budget.reserve(count.checked_mul(2).ok_or(())?)?;
+        self.facts.declarations.size_for(self.graph.id(), count);
+        self.facts.layouts.size_for(self.graph.id(), count);
         for facts in self.types.declarations() {
             self.budget.step(1)?;
             let members_unique = match &facts.shape {

@@ -6,7 +6,7 @@ use crate::analysis::conversions::{
 };
 use ordinary::patterns;
 
-type Families<'g> = BTreeMap<&'g DeclarationId, ConversionFamily<'g>>;
+type Families<'g> = DeclarationTable<'g, ConversionFamily<'g>>;
 
 pub(in crate::analysis) fn check_pair_candidates<'g>(
     input: &OrdinaryAnalysis<'g>,

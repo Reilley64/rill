@@ -376,7 +376,7 @@ pub(in crate::analysis) fn find_matches<'g>(
 
 fn compare_pair<'g>(
     input: &OrdinaryAnalysis<'g>,
-    families: &BTreeMap<&'g DeclarationId, ConversionFamily<'g>>,
+    families: &DeclarationTable<'g, ConversionFamily<'g>>,
     family: &ConversionFamily<'g>,
     pair: &patterns::PairDomain<'g>,
     output: &mut PairReport<'g>,

@@ -196,7 +196,7 @@ fn grouped_ordinary_call_keeps_its_cap_with_the_join_group_loaded() {
             let d = &module.declarations[named(module, "untouched")];
             // Measured with the extension in the capture before the exit-scope correction.
             let cap = AnalysisLimits {
-                max_work: 4622,
+                max_work: 4314,
                 max_entries: 179,
                 max_depth: 7,
             };
@@ -1537,9 +1537,9 @@ function joined(numbers: List<i32>, otherInput: List<i32>): [i32, i32] {{
                     assert_eq!(
                         observed(typed_stats),
                         if live {
-                            (526039, 57548, 12)
+                            (505328, 62668, 12)
                         } else {
-                            (526040, 57550, 12)
+                            (505329, 62670, 12)
                         }
                     );
                     let (exact, short) = budget_caps(typed_stats);
@@ -1968,15 +1968,15 @@ fn unsupported_reference_children_preserve_prior_typed_caps() {
                 (
                     "input: &i32, work: () => &i32",
                     "() => input, work",
-                    520557,
-                    56092,
+                    499786,
+                    61177,
                     12,
                 ),
                 (
                     "input: &i32",
                     "() => input, () => { let local = 2i32; return &(local + 1i32); }",
-                    522238,
-                    56402,
+                    501481,
+                    61487,
                     14,
                 ),
             ] {
@@ -2380,10 +2380,10 @@ fn unsupported_comparison_operands_keep_their_old_typed_budgets() {
             // Exact a1f4db7 caps on the original result-order capture, changing
             // only the Boolean child's displayed expression.
             for (expr, max_work, max_entries, max_depth) in [
-                ("29i32 == (&numbers)[1u64]", 524221, 56916, 12),
-                ("((29i32)) == (((&numbers)[1u64]))", 524934, 57008, 14),
-                ("(&numbers)[1u64] == (2i32+27i32)", 524626, 56982, 12),
-                ("((&numbers)[1u64]+0i32) == 29i32", 524631, 56982, 14),
+                ("29i32 == (&numbers)[1u64]", 503479, 62015, 12),
+                ("((29i32)) == (((&numbers)[1u64]))", 504192, 62107, 14),
+                ("(&numbers)[1u64] == (2i32+27i32)", 503884, 62081, 12),
+                ("((&numbers)[1u64]+0i32) == 29i32", 503889, 62081, 14),
             ] {
                 fs::write(
                     &request.entry,
@@ -3054,7 +3054,7 @@ fn installed_join_fresh_results_keep_the_written_occurrence() {
         |request, module, receipt, typed| {
             assert_pre_equality_graph_cap(receipt, (282_035, 49_331, 8));
             let graph_cost = Statistics {
-                work: 284_870,
+                work: 282_350,
                 entries: 49_465,
                 max_depth: 8,
             };
@@ -3200,8 +3200,8 @@ fn installed_join_fresh_results_keep_the_written_occurrence() {
             let loaded = loader::load_installed(request.clone()).unwrap();
             captured_keys(&loaded, true);
             let typed_cost = Statistics {
-                work: 472_749,
-                entries: 52_116,
+                work: 455_279,
+                entries: 56_889,
                 max_depth: 12,
             };
             let (exact, short) = budget_caps(typed_cost);
@@ -3572,8 +3572,8 @@ fn an_unproved_join_does_not_invent_a_discard() {
             let loaded = loader::load_installed(request.clone()).unwrap();
             captured_keys(&loaded, true);
             let cost = Statistics {
-                work: 456_534,
-                entries: 49_701,
+                work: 439_203,
+                entries: 54_439,
                 max_depth: 12,
             };
             let (exact, short) = budget_caps(cost);
@@ -3699,8 +3699,8 @@ fn reference_pair_reserves_before_it_builds_each_slot() {
         |request, _, _| {
             let graph = loader::load_installed(request.clone()).unwrap();
             let pinned = compiler::analysis::Statistics {
-                work: 456_681,
-                entries: 49_838,
+                work: 439_354,
+                entries: 54_590,
                 max_depth: 12,
             };
             let (exact, short) = budget_caps(pinned);
@@ -3727,9 +3727,9 @@ fn reference_pair_reserves_before_it_builds_each_slot() {
             // different points: before the reorder every one of these stops at
             // 405,462 / 44,957 / 12.
             for (max_entries, stopped) in [
-                (45651, (356195, 45650, 12)),
-                (45649, (356192, 45647, 12)),
-                (45646, (356164, 45644, 12)),
+                (50403, (357523, 50402, 12)),
+                (50401, (357520, 50399, 12)),
+                (50398, (357492, 50396, 12)),
             ] {
                 let limited = analyze_typed(
                     &graph,

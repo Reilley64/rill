@@ -66,140 +66,140 @@ const SIBLINGS: &[Sibling] = &[
         source: r####"function f(): bool { let input: List<i32> = [13i32, 29i32]; let pair = joined(input); return pair[0] == 13i32 || pair[1] == 29i32; }"####,
         blocker: r####"pair[0] == 13i32 || pair[1] == 29i32"####,
         targeted: (2400, 137, 3),
-        graph: (227773, 25149, 10),
+        graph: (225253, 25149, 10),
     },
     Sibling {
         label: "and-true",
         source: r####"function f(): bool { let input: List<i32> = [13i32, 29i32]; let pair = joined(input); return pair[0] == 13i32 && true; }"####,
         blocker: r####"pair[0] == 13i32 && true"####,
         targeted: (2394, 134, 3),
-        graph: (227587, 25146, 10),
+        graph: (225067, 25146, 10),
     },
     Sibling {
         label: "not-equal",
         source: r####"function f(): bool { let input: List<i32> = [13i32, 29i32]; let pair = joined(input); return pair[0] != 13i32; }"####,
         blocker: r####"pair[0] != 13i32"####,
         targeted: (2390, 132, 3),
-        graph: (227463, 25144, 10),
+        graph: (224943, 25144, 10),
     },
     Sibling {
         label: "chain",
         source: r####"function f(): bool { let input: List<i32> = [13i32, 29i32]; let pair = joined(input); return pair[0] == 13i32 && pair[1] == 29i32 && pair[0] == 1i32; }"####,
         blocker: r####"pair[0] == 13i32 && pair[1] == 29i32 && pair[0] == 1i32"####,
         targeted: (2410, 142, 3),
-        graph: (228083, 25154, 10),
+        graph: (225563, 25154, 10),
     },
     Sibling {
         label: "list-index",
         source: r####"function f(input: List<i32>): bool { return (&input)[0u64] == 13i32; }"####,
         blocker: r####"(&input)[0u64] == 13i32"####,
         targeted: (2004, 55, 3),
-        graph: (226776, 25067, 10),
+        graph: (224256, 25067, 10),
     },
     Sibling {
         label: "list-index-and",
         source: r####"function f(input: List<i32>): bool { return (&input)[0u64] == 13i32 && (&input)[1u64] == 29i32; }"####,
         blocker: r####"(&input)[0u64] == 13i32 && (&input)[1u64] == 29i32"####,
         targeted: (2020, 63, 3),
-        graph: (227272, 25075, 10),
+        graph: (224752, 25075, 10),
     },
     Sibling {
         label: "while",
         source: r####"function f(pair: [i32, i32]): bool { while (pair[0] == 13i32 && pair[1] == 29i32) { } return true; }"####,
         blocker: r####"pair[0] == 13i32 && pair[1] == 29i32"####,
         targeted: (2372, 128, 4),
-        graph: (227504, 25140, 10),
+        graph: (224984, 25140, 10),
     },
     Sibling {
         label: "if",
         source: r####"function f(pair: [i32, i32]): bool { if (pair[0] == 13i32 && pair[1] == 29i32) { return true; } return false; }"####,
         blocker: r####"pair[0] == 13i32 && pair[1] == 29i32"####,
         targeted: (2383, 132, 5),
-        graph: (227635, 25144, 10),
+        graph: (225115, 25144, 10),
     },
     Sibling {
         label: "ref-pair",
         source: r####"function f(pair: &[i32, i32]): bool { return pair[0] == 13i32; }"####,
         blocker: r####"pair[0] == 13i32"####,
         targeted: (1983, 54, 3),
-        graph: (226695, 25066, 10),
+        graph: (224175, 25066, 10),
     },
     Sibling {
         label: "nested",
         source: r####"function f(pair: [[i32, i32], i32]): bool { return pair[0][1] == 13i32; }"####,
         blocker: r####"pair[0][1] == 13i32"####,
         targeted: (2737, 189, 3),
-        graph: (227569, 25201, 10),
+        graph: (225049, 25201, 10),
     },
     Sibling {
         label: "lit-empty",
         source: r####"function f(): bool { let input: List<i32> = []; dispose(input); return true; }"####,
         blocker: r####"[]"####,
         targeted: (2053, 63, 5),
-        graph: (226825, 25075, 10),
+        graph: (224305, 25075, 10),
     },
     Sibling {
         label: "lit-local",
         source: r####"function f(a: i32): bool { let input: List<i32> = [13i32, a]; dispose(input); return true; }"####,
         blocker: r####"[13i32, a]"####,
         targeted: (2066, 72, 5),
-        graph: (227019, 25084, 10),
+        graph: (224499, 25084, 10),
     },
     Sibling {
         label: "lit-sum",
         source: r####"function f(a: i32): bool { let input: List<i32> = [13i32, a + 1i32]; dispose(input); return true; }"####,
         blocker: r####"[13i32, a + 1i32]"####,
         targeted: (2070, 74, 5),
-        graph: (227143, 25086, 10),
+        graph: (224623, 25086, 10),
     },
     Sibling {
         label: "lit-grouped",
         source: r####"function f(): bool { let input: List<i32> = [(13i32), 29i32]; dispose(input); return true; }"####,
         blocker: r####"[(13i32), 29i32]"####,
         targeted: (2059, 66, 5),
-        graph: (227011, 25078, 10),
+        graph: (224491, 25078, 10),
     },
     Sibling {
         label: "lit-neg",
         source: r####"function f(): bool { let input: List<i32> = [-13i32, 29i32]; dispose(input); return true; }"####,
         blocker: r####"[-13i32, 29i32]"####,
         targeted: (2059, 66, 5),
-        graph: (227011, 25078, 10),
+        graph: (224491, 25078, 10),
     },
     Sibling {
         label: "lit-i64",
         source: r####"function f(): bool { let input: List<i64> = [13i64, 29i64]; dispose(input); return true; }"####,
         blocker: r####"input"####,
         targeted: (1976, 49, 1),
-        graph: (226868, 25061, 10),
+        graph: (224348, 25061, 10),
     },
     Sibling {
         label: "lit-bool",
         source: r####"function f(): bool { let input: List<bool> = [true, false]; dispose(input); return true; }"####,
         blocker: r####"input"####,
         targeted: (1976, 49, 1),
-        graph: (226868, 25061, 10),
+        graph: (224348, 25061, 10),
     },
     Sibling {
         label: "lit-text",
         source: r####"function f(): bool { let input: List<string> = ["a", "b"]; dispose(input); return true; }"####,
         blocker: r####"input"####,
         targeted: (1976, 49, 1),
-        graph: (226868, 25061, 10),
+        graph: (224348, 25061, 10),
     },
     Sibling {
         label: "lit-return",
         source: r####"function f(): List<i32> { return [13i32, 29i32]; }"####,
         blocker: r####"[13i32, 29i32]"####,
         targeted: (1963, 42, 2),
-        graph: (226434, 25054, 10),
+        graph: (223914, 25054, 10),
     },
     Sibling {
         label: "lit-unannotated",
         source: r####"function f(): bool { let input = [13i32, 29i32]; return true; }"####,
         blocker: r####"[13i32, 29i32]"####,
         targeted: (2010, 55, 3),
-        graph: (226542, 25067, 10),
+        graph: (224022, 25067, 10),
     },
 ];
 
@@ -209,7 +209,7 @@ const ADMITTED: &[Admitted] = &[
         source: r####"function f(pair: [i32, i32]): bool { { let ok = pair[0] == 13i32 && pair[1] == 29i32; } return true; }"####,
         completion: "Checked",
         targeted: (3217, 594, 6),
-        graph: (228350, 25606, 10),
+        graph: (225830, 25606, 10),
         sequence: &[
             ("Copy goto 1", "pair[0]"),
             ("Initialize goto 2", "13i32"),
@@ -242,7 +242,7 @@ const ADMITTED: &[Admitted] = &[
         source: r####"function f(pair: [i32, i32]): bool { let ok = pair[0] == 13i32 && pair[1] == 29i32; return ok; }"####,
         completion: "Checked",
         targeted: (3230, 596, 5),
-        graph: (228303, 25608, 10),
+        graph: (225783, 25608, 10),
         sequence: &[
             ("Copy goto 1", "pair[0]"),
             ("Initialize goto 2", "13i32"),
@@ -275,7 +275,7 @@ const ADMITTED: &[Admitted] = &[
         source: r####"function f(pair: [i32, i32]): bool { return pair[0] == 13i32 && pair[1] == 29i32; }"####,
         completion: "Checked",
         targeted: (3042, 495, 5),
-        graph: (227994, 25507, 10),
+        graph: (225474, 25507, 10),
         sequence: &[
             ("Copy goto 1", "pair[0]"),
             ("Initialize goto 2", "13i32"),
@@ -306,7 +306,7 @@ const ADMITTED: &[Admitted] = &[
         source: r####"function f(pair: [i32, i32]): bool { return pair[0] == 13i32; }"####,
         completion: "Checked",
         targeted: (2600, 248, 4),
-        graph: (227252, 25260, 10),
+        graph: (224732, 25260, 10),
         sequence: &[
             ("Copy goto 1", "pair[0]"),
             ("Initialize goto 2", "13i32"),
@@ -321,7 +321,7 @@ const ADMITTED: &[Admitted] = &[
         source: r####"function f(pair: [i32, i32]): bool { return 13i32 == pair[0] && 29i32 == pair[1]; }"####,
         completion: "Checked",
         targeted: (3050, 497, 5),
-        graph: (228002, 25509, 10),
+        graph: (225482, 25509, 10),
         sequence: &[
             ("Initialize goto 1", "13i32"),
             ("Copy goto 2", "pair[0]"),
@@ -352,7 +352,7 @@ const ADMITTED: &[Admitted] = &[
         source: r####"function f(pair: [i32, i32]): bool { return ((pair[0] == 13i32)) && ((pair[1] == 29i32)); }"####,
         completion: "Checked",
         targeted: (3058, 499, 7),
-        graph: (228250, 25511, 10),
+        graph: (225730, 25511, 10),
         sequence: &[
             ("Copy goto 1", "pair[0]"),
             ("Initialize goto 2", "13i32"),
@@ -392,7 +392,7 @@ const ADMITTED: &[Admitted] = &[
         source: r####"function f(pair: [i32, i32]): bool { return (pair[0]) == (13i32) && (pair[1]) == (29i32); }"####,
         completion: "Checked",
         targeted: (3058, 499, 6),
-        graph: (228250, 25511, 10),
+        graph: (225730, 25511, 10),
         sequence: &[
             ("Copy goto 1", "pair[0]"),
             ("Initialize goto 2", "13i32"),
@@ -432,7 +432,7 @@ const ADMITTED: &[Admitted] = &[
         source: r####"function f(): bool { let mut pair: [i32, i32] = [1i32, 2i32]; pair[0] = 5i32; return pair[0] == 13i32; }"####,
         completion: "Checked",
         targeted: (2889, 408, 4),
-        graph: (228021, 25420, 10),
+        graph: (225501, 25420, 10),
         sequence: &[
             ("Initialize goto 1", "1i32"),
             ("Initialize goto 2", "2i32"),
@@ -459,7 +459,7 @@ const ADMITTED: &[Admitted] = &[
         source: r####"function f(a: i32, b: i32): bool { return a + b == 13i32 && a * 2i32 == b; }"####,
         completion: "Checked",
         targeted: (2676, 415, 6),
-        graph: (227689, 25427, 10),
+        graph: (225169, 25427, 10),
         sequence: &[
             ("CheckedI32Add goto 1", "a + b"),
             ("Initialize goto 2", "13i32"),
@@ -483,8 +483,8 @@ const ADMITTED: &[Admitted] = &[
         label: "calls-and",
         source: r####"function seven(): i32 { return 7i32; } function f(): bool { return seven() == 7i32 && seven() == 8i32; }"####,
         completion: "Checked",
-        targeted: (4606, 392, 5),
-        graph: (227787, 25366, 10),
+        targeted: (4536, 392, 5),
+        graph: (225267, 25366, 10),
         sequence: &[
             ("Call goto 1", "seven()"),
             ("Initialize goto 2", "7i32"),
@@ -511,7 +511,7 @@ const ADMITTED: &[Admitted] = &[
         source: r####"function f(): bool { let input: List<i32> = [13i32]; dispose(input); return true; }"####,
         completion: "Checked",
         targeted: (2318, 212, 5),
-        graph: (227151, 25225, 10),
+        graph: (224631, 25225, 10),
         sequence: &[
             ("Initialize goto 1", "13i32"),
             ("CommitListI32 goto 2", "[13i32]"),
@@ -535,7 +535,7 @@ const ADMITTED: &[Admitted] = &[
         source: r####"function f(): bool { let input: List<i32> = [13i32, 29i32]; dispose(input); return true; }"####,
         completion: "Checked",
         targeted: (2395, 255, 5),
-        graph: (227288, 25268, 10),
+        graph: (224768, 25268, 10),
         sequence: &[
             ("Initialize goto 1", "13i32"),
             ("Initialize goto 2", "29i32"),
@@ -560,7 +560,7 @@ const ADMITTED: &[Admitted] = &[
         source: r####"function f(): bool { let input: List<i32> = [13i32, 29i32]; return true; }"####,
         completion: "Checked",
         targeted: (2236, 181, 4),
-        graph: (226889, 25194, 10),
+        graph: (224369, 25194, 10),
         sequence: &[
             ("Initialize goto 1", "13i32"),
             ("Initialize goto 2", "29i32"),
@@ -582,7 +582,7 @@ const ADMITTED: &[Admitted] = &[
         source: r####"function f(): bool { let mut input: List<i32> = [13i32, 29i32]; dispose(input); return true; }"####,
         completion: "Checked",
         targeted: (2395, 255, 5),
-        graph: (227288, 25268, 10),
+        graph: (224768, 25268, 10),
         sequence: &[
             ("Initialize goto 1", "13i32"),
             ("Initialize goto 2", "29i32"),
@@ -607,7 +607,7 @@ const ADMITTED: &[Admitted] = &[
         source: r####"function f(): bool { { let input: List<i32> = [13i32, 29i32]; dispose(input); } return true; }"####,
         completion: "Checked",
         targeted: (2399, 256, 6),
-        graph: (227352, 25269, 10),
+        graph: (224832, 25269, 10),
         sequence: &[
             ("Initialize goto 1", "13i32"),
             ("Initialize goto 2", "29i32"),
@@ -632,7 +632,7 @@ const ADMITTED: &[Admitted] = &[
         source: r####"function f(again: bool): bool { while (again) { let input: List<i32> = [13i32, 29i32]; dispose(input); } return true; }"####,
         completion: "Checked",
         targeted: (2673, 407, 7),
-        graph: (227807, 25420, 10),
+        graph: (225287, 25420, 10),
         sequence: &[
             ("Copy goto 1", "again"),
             ("None branch 2 3", "again"),
@@ -666,8 +666,8 @@ const ADMITTED: &[Admitted] = &[
         label: "lit-arg",
         source: r####"function g(input: List<i32>): void { dispose(input); } function f(): void { g([13i32, 29i32]); }"####,
         completion: "Checked",
-        targeted: (4447, 278, 6),
-        graph: (227585, 25247, 10),
+        targeted: (4377, 278, 6),
+        graph: (225065, 25247, 10),
         sequence: &[
             ("Initialize goto 1", "13i32"),
             ("Initialize goto 2", "29i32"),
@@ -682,7 +682,7 @@ const ADMITTED: &[Admitted] = &[
         source: r####"function f(): bool { let input: List<i32> = [13i32, 29i32]; dispose(input); dispose(input); return true; }"####,
         completion: "SourceRejected",
         targeted: (2421, 258, 5),
-        graph: (227555, 25271, 10),
+        graph: (225035, 25271, 10),
         sequence: &[],
     },
 ];
@@ -974,7 +974,7 @@ fn joined_order_and_its_expectation_check_with_ordered_mir() {
             // Graph attribution (rule 11, D2 (b)): `joinedOrder` adds 1,313 work and
             // 678 entries to every graph that holds it; the expectation adds none.
             // Depth 10 stays with `joined`.
-            assert_eq!(whole.statistics(), stats((229398, 25858, 10)), "{context}");
+            assert_eq!(whole.statistics(), stats((226878, 25858, 10)), "{context}");
             assert_eq!(whole.completion(), GraphCompletion::Incomplete);
         },
     );
@@ -1017,9 +1017,9 @@ fn old_fixture_graph_caps_give_resource_limit() {
             let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/m5/legacy-caps");
             let app = request.entry.parent().unwrap();
             for (fixture, (max_work, max_entries, max_depth), new) in [
-                ("shared", (243522, 26094, 10), (247658, 26772, 10)),
-                ("alias", (243522, 26094, 10), (247658, 26772, 10)),
-                ("competing", (214539, 5705, 10), (218675, 6383, 10)),
+                ("shared", (243522, 26094, 10), (244858, 26772, 10)),
+                ("alias", (243522, 26094, 10), (244858, 26772, 10)),
+                ("competing", (214539, 5705, 10), (215875, 6383, 10)),
             ] {
                 for stale in fs::read_dir(app).unwrap() {
                     fs::remove_file(stale.unwrap().path()).unwrap();
@@ -1203,9 +1203,9 @@ fn grouped_operands_add_depth_not_operations() {
                 "{context}"
             );
             let (targeted, graph) = if depth == 5 {
-                ((3042, 495, 5), (227994, 25507, 10))
+                ((3042, 495, 5), (225474, 25507, 10))
             } else {
-                ((3058, 499, 7), (228250, 25511, 10))
+                ((3058, 499, 7), (225730, 25511, 10))
             };
             replay_caps(context, receipt, module, "f", targeted, graph);
         },

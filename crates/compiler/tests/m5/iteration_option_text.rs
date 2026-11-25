@@ -295,8 +295,8 @@ fn unrelated_and_unadmitted_option_lists_keep_the_first_blocker() {
         |request, module, receipt, typed| {
             let capture = loader::load_installed(request.clone()).unwrap();
             let pinned = Statistics {
-                work: 454_754,
-                entries: 49_638,
+                work: 437_163,
+                entries: 54_365,
                 max_depth: 12,
             };
             assert_eq!(typed.statistics(), pinned);
@@ -307,7 +307,7 @@ fn unrelated_and_unadmitted_option_lists_keep_the_first_blocker() {
             }
             assert_pre_equality_graph_cap(receipt, (189_508, 4_050, 3));
             let stats = Statistics {
-                work: 192_349,
+                work: 189_829,
                 entries: 4_184,
                 max_depth: 5,
             };
@@ -375,8 +375,8 @@ function dead(xs: List<Option<string>>): Option<bool> {
             assert_eq!(typed.completion(), TypedCompletion::Incomplete);
             let capture = loader::load_installed(request.clone()).unwrap();
             let pinned = Statistics {
-                work: 444_898,
-                entries: 48_341,
+                work: 427_517,
+                entries: 52_984,
                 max_depth: 12,
             };
             assert_eq!(typed.statistics(), pinned);
@@ -422,7 +422,7 @@ const REVIEW_COUNTEREXAMPLES: [(
             max_depth: 0,
         },
         Statistics {
-            work: 188_810,
+            work: 186_290,
             entries: 4_114,
             max_depth: 5,
         },
@@ -439,7 +439,7 @@ const REVIEW_COUNTEREXAMPLES: [(
             max_depth: 0,
         },
         Statistics {
-            work: 189_001,
+            work: 186_481,
             entries: 4_118,
             max_depth: 5,
         },
@@ -455,7 +455,7 @@ const REVIEW_COUNTEREXAMPLES: [(
             max_depth: 0,
         },
         Statistics {
-            work: 189_063,
+            work: 186_543,
             entries: 4_119,
             max_depth: 5,
         },
@@ -471,7 +471,7 @@ const REVIEW_COUNTEREXAMPLES: [(
             max_depth: 5,
         },
         Statistics {
-            work: 191_922,
+            work: 189_402,
             entries: 4_817,
             max_depth: 5,
         },
@@ -486,7 +486,7 @@ const REVIEW_COUNTEREXAMPLES: [(
             max_depth: 5,
         },
         Statistics {
-            work: 190_500,
+            work: 187_980,
             entries: 4_570,
             max_depth: 5,
         },

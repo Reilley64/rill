@@ -97,13 +97,14 @@ impl<'g> Interfaces<'_, 'g> {
         node: NodeId,
     ) -> Work<()> {
         let uses = &self.inventory.type_facts().uses;
+        let slot = crate::loader::keyed::module_slot(self.inventory.graph().modules(), module)
+            .expect("a module of the graph");
         self.budget.reserve(1)?;
         let mut pending = vec![node];
         while let Some(node) = pending.pop() {
             let syntax = &module.syntax.nodes[node];
-            self.budget
-                .step(1 + uses.len().checked_ilog2().unwrap_or(0) as usize)?;
-            if let Some(ty) = uses.get(&(&module.key, syntax.span.start(), node)) {
+            self.budget.step(1)?;
+            if let Some(ty) = uses.get(slot, &(syntax.span.start(), node), self.budget)? {
                 Position::new(owner, module, node, PublicInterfaceKind::Payload)
                     .check_type(self, &ty.ty)?;
             } else {

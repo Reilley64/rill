@@ -4325,7 +4325,7 @@ fn declared_once_formal_invokes_the_actual_pair_in_one_call_frame() {
             let stats = typed.statistics();
             assert_eq!(
                 (stats.work, stats.entries, stats.max_depth),
-                (449_287, 48_628, 12)
+                (431_790, 53_285, 12)
             );
             let graph = analyze_ownership(receipt, AnalysisLimits::default());
             let target = check_local_capture_root(module, receipt, &graph, "caller", None);
@@ -4360,7 +4360,7 @@ fn declared_once_formal_invokes_the_actual_pair_in_one_call_frame() {
             assert!(open_root.mir().is_none() && open_root.ordinary_mir().is_none());
 
             let used = target.statistics();
-            assert_eq!((used.work, used.entries, used.max_depth), (2_853, 299, 6));
+            assert_eq!((used.work, used.entries, used.max_depth), (2_693, 299, 6));
             let exact = AnalysisLimits {
                 max_work: used.work,
                 max_entries: used.entries,
@@ -4376,7 +4376,7 @@ fn declared_once_formal_invokes_the_actual_pair_in_one_call_frame() {
             let used = graph.statistics();
             assert_eq!(
                 (used.work, used.entries, used.max_depth),
-                (190_721, 4_400, 6)
+                (188_041, 4_400, 6)
             );
             let exact = AnalysisLimits {
                 max_work: used.work,
@@ -4416,27 +4416,27 @@ fn declared_once_frame_keeps_capture_provenance_and_rejects_without_mir() {
             let stats = typed.statistics();
             assert_eq!(
                 (stats.work, stats.entries, stats.max_depth),
-                (461_146, 49_885, 12)
+                (443_058, 54_633, 12)
             );
             let graph = analyze_ownership(receipt, AnalysisLimits::default());
             for (name, rejection, caps) in [
                 (
                     "escape",
                     Some(("R0202", "return invoke(() => [flag, seed]);", "local")),
-                    (3_074, 408, 6),
+                    (2_914, 408, 6),
                 ),
                 (
                     "write",
                     Some(("R0203", "local = seed;", "&local")),
-                    (3_050, 396, 6),
+                    (2_890, 396, 6),
                 ),
                 (
                     "reuse",
                     Some(("R0200", "seed", "dispose(seed)")),
-                    (3_146, 356, 6),
+                    (2_906, 356, 6),
                 ),
                 // A finished sibling use of the captured descriptor is not live.
-                ("sibling", None, (3_305, 525, 6)),
+                ("sibling", None, (3_145, 525, 6)),
             ] {
                 let target = check_local_capture_root(module, receipt, &graph, name, rejection);
                 let decl = capture_declaration(module, name);
@@ -4490,7 +4490,7 @@ fn declared_once_frame_keeps_capture_provenance_and_rejects_without_mir() {
             let used = graph.statistics();
             assert_eq!(
                 (used.work, used.entries, used.max_depth),
-                (198_557, 5_525, 6)
+                (195_317, 5_525, 6)
             );
             let exact = AnalysisLimits {
                 max_work: used.work,
@@ -4522,7 +4522,7 @@ fn declared_once_route_leaves_erased_and_local_descriptor_routes_unchanged() {
             let stats = typed.statistics();
             assert_eq!(
                 (stats.work, stats.entries, stats.max_depth),
-                (447_324, 48_350, 12)
+                (429_913, 53_000, 12)
             );
             let pending = typed.result_use().unwrap().pending();
             assert!(
@@ -4558,26 +4558,26 @@ fn declared_once_siblings_keep_their_parent_typed_caps() {
             "grouped-actual",
             wrapper.clone() + &caller("return invoke((() => [flag, seed]));"),
             "job()",
-            (448_058, 48_470, 12),
+            (430_721, 53_127, 12),
         ),
         (
             "grouped-call",
             wrapper.clone() + &caller("return (invoke(() => [flag, seed]));"),
             "job()",
-            (447_962, 48_463, 12),
+            (430_625, 53_120, 12),
         ),
         (
             "grouped-receiver",
             wrapper.replace("return job();", "return (job)();")
                 + &caller("return invoke(() => [flag, seed]);"),
             "(job)()",
-            (448_136, 48_460, 12),
+            (430_639, 53_117, 12),
         ),
         (
             "scoped",
             wrapper.clone() + &caller("{ return invoke(() => [flag, seed]); }"),
             "job()",
-            (447_861, 48_455, 12),
+            (430_524, 53_112, 12),
         ),
         (
             "loop",
@@ -4586,13 +4586,13 @@ fn declared_once_siblings_keep_their_parent_typed_caps() {
                     "while (seed) { return invoke(() => [flag, seed]); } return [flag, seed];",
                 ),
             "job()",
-            (448_236, 48_566, 12),
+            (430_899, 53_223, 12),
         ),
         (
             "bound",
             wrapper.clone() + &caller("let out = invoke(() => [flag, seed]); return out;"),
             "job()",
-            (447_810, 48_457, 12),
+            (430_473, 53_121, 12),
         ),
     ] {
         probe_report(

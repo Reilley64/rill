@@ -29,18 +29,18 @@ fn ordinary_only_list_loops_keep_the_pre_delivery_caps() {
             // Metering rule 11 (ri-785.9): the whole-graph cap was
             // 191,781/4,867/6 until the i32 equality source root (+316/+134).
             crate::limit::assert_graph_limit(&analyze_ownership(receipt, limits(191781, 4867, 6)));
-            let graph = analyze_ownership(receipt, limits(194634, 5001, 6));
+            let graph = analyze_ownership(receipt, limits(192114, 5001, 6));
             assert_eq!(
                 graph.statistics(),
                 compiler::analysis::Statistics {
-                    work: 194634,
+                    work: 192114,
                     entries: 5001,
                     max_depth: 6
                 }
             );
             for (name, work, entries, depth) in [
                 ("entryOnly", 2208, 175, 6),
-                ("across", 4505, 344, 5),
+                ("across", 4435, 344, 5),
                 ("veto", 2413, 276, 5),
                 ("impossible", 2207, 180, 6),
                 ("nested", 2378, 254, 5),
@@ -464,7 +464,7 @@ fn installed_guard_release_on_budget_delivery() {
                     crate::limit::assert_body_limit(&short);
                 }
             }
-            let (work, entries, depth) = (191343, 4635, 5);
+            let (work, entries, depth) = (188823, 4635, 5);
             assert_eq!(stats(graph.statistics()), (work, entries, depth));
             let exact = limits(work, entries, depth);
             let exact_graph = analyze_ownership(receipt, exact);
@@ -523,7 +523,7 @@ fn guard_loops_without_a_proof_keep_their_parent_caps() {
                     },
                 ]
             };
-            let graph_exact = limits(193032, 4613, 6);
+            let graph_exact = limits(190512, 4613, 6);
             let graph = analyze_ownership(receipt, graph_exact);
             assert_eq!(graph.completion(), GraphCompletion::Incomplete);
             for cap in shorts(graph_exact) {
@@ -531,7 +531,7 @@ fn guard_loops_without_a_proof_keep_their_parent_caps() {
             }
             for (name, work, entries, depth, completion) in [
                 ("entryOnly", 2003, 83, 1, Completion::Checked),
-                ("across", 4283, 245, 4, Completion::Checked),
+                ("across", 4213, 245, 4, Completion::Checked),
                 ("veto", 2222, 192, 4, Completion::Checked),
                 ("impossible", 2174, 166, 6, Completion::Checked),
                 ("nested", 2026, 86, 5, Completion::Incomplete),
@@ -602,7 +602,7 @@ fn guard_returned_after_a_loop_keeps_its_parent_caps() {
                 ]
             };
             let graph_exact = AnalysisLimits {
-                max_work: 188_545,
+                max_work: 186_025,
                 max_entries: 4_120,
                 max_depth: 5,
             };
@@ -1368,7 +1368,7 @@ function outsideSubset(value: bool): void {
                 if !covered {
                     // Exact ordinary stats from 0fbf765 for this unchanged capture.
                     let exact = AnalysisLimits {
-                        max_work: 4144,
+                        max_work: 4074,
                         max_entries: 197,
                         ..AnalysisLimits::default()
                     };

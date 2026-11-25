@@ -199,8 +199,8 @@ fn mixed_wrapper_exports_the_view_then_cleans_the_owned_wrapper() {
             // The grouped return copies once into the group, as deep as its
             // layers: depth 5 against 3, and one short of 5 is a limit.
             for (name, pinned, value) in [
-                ("mixedWrapper", stats(2_849, 266, 3), "view"),
-                ("mixedGrouped", stats(2_855, 266, 5), "((view))"),
+                ("mixedWrapper", stats(2_639, 266, 3), "view"),
+                ("mixedGrouped", stats(2_645, 266, 5), "((view))"),
             ] {
                 let target = query(name)(AnalysisLimits::default());
                 assert_eq!(target.completion(), Completion::Checked, "{name}");
@@ -223,7 +223,7 @@ fn mixed_wrapper_exports_the_view_then_cleans_the_owned_wrapper() {
 
             // A written release of the moved guard field is a verified edge:
             // target and ordinary graph root both check with the same MIR.
-            let pinned = stats(3_179, 425, 3);
+            let pinned = stats(2_969, 425, 3);
             let target = query("mixedExplicit")(AnalysisLimits::default());
             assert_eq!(target.completion(), Completion::Checked);
             assert!(target.findings().is_empty());
@@ -247,7 +247,7 @@ fn mixed_wrapper_exports_the_view_then_cleans_the_owned_wrapper() {
             assert!(release(root));
 
             // An owned bare guard beside the same view.
-            let pinned = stats(2_277, 174, 3);
+            let pinned = stats(2_207, 174, 3);
             let target = query("guardBesideView")(AnalysisLimits::default());
             assert_eq!(target.completion(), Completion::Checked);
             assert_eq!(target.statistics(), pinned);
@@ -266,7 +266,7 @@ fn mixed_wrapper_exports_the_view_then_cleans_the_owned_wrapper() {
             assert!(release(root));
 
             // A custom-disposed wrapper beside a view of its own type.
-            let pinned = stats(6_895, 639, 3);
+            let pinned = stats(5_855, 639, 3);
             let target = query("disposedWrapperForward")(AnalysisLimits::default());
             assert_eq!(target.completion(), Completion::Checked);
             assert_eq!(target.statistics(), pinned);
@@ -292,7 +292,7 @@ fn mixed_wrapper_exports_the_view_then_cleans_the_owned_wrapper() {
             // mixedWrapper and mixedGrouped and 26 for guardBesideView: +230,
             // entries unchanged, depth still mixedGrouped's 5.
             assert_pre_equality_graph_cap(receipt, (198_204, 5_550, 5));
-            let pinned = stats(203_723, 5_684, 5);
+            let pinned = stats(198_453, 5_684, 5);
             assert_eq!(graph.statistics(), pinned);
             assert_eq!(graph.completion(), GraphCompletion::Incomplete);
             let (exact, short) = caps(pinned);
@@ -323,17 +323,17 @@ fn borrowed_guards_and_exclusive_views_keep_their_parent_caps() {
                 ("wrapperReferenceOnly", stats(2_164, 166, 3), None),
                 (
                     "exclusiveWrapper",
-                    stats(2_651, 169, 1),
+                    stats(2_441, 169, 1),
                     Some("view: &mut Plain"),
                 ),
                 (
                     "guardForward",
-                    stats(2_571, 169, 1),
+                    stats(2_431, 169, 1),
                     Some("view: &LockGuard<i32>"),
                 ),
                 (
                     "disposedGuardForward",
-                    stats(2_775, 170, 1),
+                    stats(2_455, 170, 1),
                     Some("view: &LockGuard<i32>"),
                 ),
             ] {

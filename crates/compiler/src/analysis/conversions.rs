@@ -105,7 +105,7 @@ impl ConversionFamily<'_> {
 pub struct ConversionReport<'r, 'g> {
     input: &'r OrdinaryAnalysis<'g>,
     extended: Option<OrdinaryAnalysis<'g>>,
-    pub(in crate::analysis) families: BTreeMap<&'g DeclarationId, ConversionFamily<'g>>,
+    pub(in crate::analysis) families: DeclarationTable<'g, ConversionFamily<'g>>,
     completion: ordinary::Completion,
     statistics: Statistics,
     /// What `type_facts` publishes at `ResourceLimit` (metering rule 8).
@@ -432,13 +432,13 @@ pub fn analyze_conversions<'r, 'g>(
         statistics: Statistics::default(),
     };
     let extension = ordinary::extend_nominal_types(input, &mut budget);
-    let exhausted = extension.is_err();
+    let exhausted = extension.is_err() || budget.reserve(graph.declaration_count()).is_err();
     let extended = extension.ok().flatten();
     let complete = extended.as_ref().unwrap_or(input);
     let mut report = ConversionReport {
         input,
         extended: None,
-        families: BTreeMap::new(),
+        families: DeclarationTable::new(),
         completion: if exhausted {
             ordinary::Completion::ResourceLimit
         } else {
@@ -447,6 +447,11 @@ pub fn analyze_conversions<'r, 'g>(
         statistics: Statistics::default(),
         withheld: PartialFacts::default(),
     };
+    if !exhausted {
+        report
+            .families
+            .size_for(graph.id(), graph.declaration_count());
+    }
     for &premise in roles {
         let (binding, result) = premise.bindings();
         let id = validate_export(graph, binding, DeclarationKind::Family)?;
@@ -492,6 +497,12 @@ pub fn analyze_conversions<'r, 'g>(
             break;
         }
     }
+    report.families.follow_order(
+        graph
+            .modules()
+            .iter()
+            .flat_map(|module| module.declarations.iter().map(|d| &d.id)),
+    );
     report.statistics = budget.statistics;
     report.extended = extended;
     Ok(report)

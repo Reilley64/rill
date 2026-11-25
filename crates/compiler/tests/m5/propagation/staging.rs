@@ -284,12 +284,12 @@ fn interrupted_tuple_initializer_cleans_only_the_reached_prefix() {
 
             // Each new route at its exact caps and independently one short.
             for (name, completion, pinned) in [
-                ("tuple", Completion::Checked, stats(8803, 2053, 7)),
-                ("grouped", Completion::Checked, stats(8811, 2053, 9)),
-                ("scoped", Completion::Checked, stats(8235, 1778, 8)),
-                ("looped", Completion::Checked, stats(8411, 1883, 9)),
-                ("certainNone", Completion::Checked, stats(7277, 1278, 10)),
-                ("skippedSuffix", Completion::Checked, stats(7399, 1337, 10)),
+                ("tuple", Completion::Checked, stats(8733, 2053, 7)),
+                ("grouped", Completion::Checked, stats(8741, 2053, 9)),
+                ("scoped", Completion::Checked, stats(8165, 1778, 8)),
+                ("looped", Completion::Checked, stats(8341, 1883, 9)),
+                ("certainNone", Completion::Checked, stats(7207, 1278, 10)),
+                ("skippedSuffix", Completion::Checked, stats(7329, 1337, 10)),
                 (
                     "reachedSuffix",
                     Completion::SourceRejected,
@@ -518,7 +518,7 @@ fn interrupted_tuple_initializer_cleans_only_the_reached_prefix() {
 
             // The whole graph at its exact caps and independently one short.
             assert_pre_equality_graph_cap(receipt, (240_330, 13_996, 10));
-            let whole = stats(243_504, 14_130, 10);
+            let whole = stats(240_704, 14_130, 10);
             assert_eq!(graph.statistics(), whole);
             assert_eq!(graph.completion(), GraphCompletion::SourceRejected);
             assert_eq!(analyze_ownership(receipt, exact(whole)).statistics(), whole);
@@ -764,7 +764,7 @@ fn condition_postfix_continues_on_the_ordinary_branch() {
             }
 
             assert_pre_equality_graph_cap(receipt, (221_493, 9_847, 9));
-            let whole = stats(224_717, 9_981, 9);
+            let whole = stats(221_837, 9_981, 9);
             assert_eq!(graph.statistics(), whole);
             assert_eq!(graph.completion(), GraphCompletion::SourceRejected);
             assert_eq!(analyze_ownership(receipt, exact(whole)).statistics(), whole);
@@ -799,7 +799,7 @@ function deadCondition(gate: Option<bool>, retired: string): Option<bool> {
 }
 "#,
         |_, module, receipt, typed| {
-            let graph_stats = stats(196_209, 4_955, 5);
+            let graph_stats = stats(193_529, 4_955, 5);
             let graph = analyze_ownership(receipt, exact(graph_stats));
             assert_eq!(graph.statistics(), graph_stats);
             assert_eq!(graph.completion(), GraphCompletion::Incomplete);

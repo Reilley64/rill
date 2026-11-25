@@ -290,8 +290,8 @@ fn installed_postfix_keeps_unadmitted_loop_shapes_pending() {
         OUTSIDE_SLICE,
         |request, module, receipt| {
             let typed_stats = Statistics {
-                work: 456_384,
-                entries: 50_033,
+                work: 438_689,
+                entries: 54_767,
                 max_depth: 12,
             };
             assert_eq!(receipt.statistics(), typed_stats);
@@ -305,7 +305,7 @@ fn installed_postfix_keeps_unadmitted_loop_shapes_pending() {
 
             assert_pre_equality_graph_cap(receipt, (191_179, 4_263, 4));
             let graph_stats = Statistics {
-                work: 194_022,
+                work: 191_502,
                 entries: 4_397,
                 max_depth: 5,
             };
@@ -380,7 +380,7 @@ function siblingPostfix(xs: List<string>, unrelated: List<string>, gate: Option<
         |_, module, receipt| {
             assert_pre_equality_graph_cap(receipt, (187_799, 4_016, 3));
             let graph_stats = Statistics {
-                work: 190_640,
+                work: 188_120,
                 entries: 4_150,
                 max_depth: 5,
             };

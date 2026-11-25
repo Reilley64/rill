@@ -561,7 +561,7 @@ struct Checker<'r, 'g> {
     ordinary_scope: Option<super::typed::InstalledOrdinaryScope<'g>>,
     data_depth: usize,
     evidence: generics::Evidence<'g>,
-    conversions: Option<&'r BTreeMap<&'g DeclarationId, super::conversions::ConversionFamily<'g>>>,
+    conversions: Option<&'r DeclarationTable<'g, super::conversions::ConversionFamily<'g>>>,
     conversion_work: BTreeMap<usize, generics::ConversionWork<'r, 'g>>,
     arrow_depth: usize,
     arrow_premise: Option<ordinary::InputPremise>,
@@ -3554,12 +3554,37 @@ impl<'r, 'g> Checker<'r, 'g> {
     }
     fn annotation_nodes(&mut self) -> Work<()> {
         self.elab.reserve(self.elab.facts.uses.len())?;
-        let keys: Vec<_> = self.elab.facts.uses.keys().copied().collect();
-        for key in keys {
-            let use_ = &self.elab.facts.uses[&key];
+        let keys: Vec<_> = self
+            .elab
+            .facts
+            .uses
+            .iter()
+            .map(|(slot, key, _)| (slot, *key))
+            .collect();
+        for (slot, key) in keys {
+            let elab = &mut self.elab;
+            let use_ = elab
+                .facts
+                .uses
+                .get(
+                    slot,
+                    &key,
+                    &mut Steps::of(&elab.limits, &mut elab.statistics),
+                )?
+                .expect("a listed annotation use");
             let size = 1 + use_.bindings.len() + use_.substitution.len() + use_.defaults.len();
             self.elab.reserve(size)?;
-            let use_ = self.elab.facts.uses[&key].clone();
+            let elab = &mut self.elab;
+            let use_ = elab
+                .facts
+                .uses
+                .get(
+                    slot,
+                    &key,
+                    &mut Steps::of(&elab.limits, &mut elab.statistics),
+                )?
+                .expect("a listed annotation use")
+                .clone();
             self.facts.nodes.push(NodeFacts {
                 site: Site {
                     module: use_.module,
@@ -3648,13 +3673,20 @@ impl<'r, 'g> Checker<'r, 'g> {
     }
 
     fn run(&mut self) -> Work<()> {
+        self.elab.size_for_modules()?;
         for module in self.input.graph.modules() {
             self.elab.step(1)?;
             for declaration in &module.declarations {
                 self.elab.reserve(1)?;
-                self.elab
-                    .declarations
-                    .insert((&module.key, declaration.node), declaration);
+                let elab = &mut self.elab;
+                let slot =
+                    module_slot(self.input.graph.modules(), module).expect("a module of the graph");
+                elab.declarations.insert(
+                    slot,
+                    declaration.node,
+                    declaration,
+                    &mut Steps::of(&elab.limits, &mut elab.statistics),
+                )?;
             }
         }
         for module in self.input.graph.modules() {

@@ -308,7 +308,7 @@ fn implicit_guard_release_closes_the_ordinary_root() {
             // work and 134 entries and sets depth 5, so 185,246 / 3,993 / 3
             // becomes 185,562 / 4,127 / 5 and gives ResourceLimit below.
             let exact = AnalysisLimits {
-                max_work: 188088,
+                max_work: 185568,
                 max_entries: 4127,
                 max_depth: 5,
             };
@@ -375,7 +375,7 @@ fn two_guard_parameters_release_in_reverse_and_close_the_root() {
             ("release", "a: LockGuard<i32>"),
         ],
         (1_945, 45, 1),
-        (188_330, 4_142, 5),
+        (185_810, 4_142, 5),
     );
 }
 
@@ -391,8 +391,8 @@ fn two_guard_fields_release_in_reverse_and_close_the_root() {
             ("release", "value: Pair.first"),
             ("end", "value: Pair"),
         ],
-        (2_445, 105, 1),
-        (189_180, 4_202, 5),
+        (2_305, 105, 1),
+        (186_240, 4_202, 5),
     );
 }
 
@@ -517,7 +517,7 @@ fn implicit_guard_siblings_keep_their_parent_caps() {
             };
             crate::limit::assert_graph_limit(&analyze_ownership(receipt, old));
             let exact = AnalysisLimits {
-                max_work: 188_530,
+                max_work: 186_010,
                 max_entries: 4_113,
                 max_depth: 5,
             };
@@ -525,7 +525,7 @@ fn implicit_guard_siblings_keep_their_parent_caps() {
             assert_eq!(
                 report.statistics(),
                 Statistics {
-                    work: 188_530,
+                    work: 186_010,
                     entries: 4_113,
                     max_depth: 5
                 }
@@ -617,7 +617,7 @@ fn implicit_guard_binding_release_keeps_its_parent_caps() {
             // ResourceLimit; the i32 equality source root adds 316 work and
             // 134 entries and sets depth 5.
             let exact = AnalysisLimits {
-                max_work: 188284,
+                max_work: 185764,
                 max_entries: 4172,
                 max_depth: 5,
             };
