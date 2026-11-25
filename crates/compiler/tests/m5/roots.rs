@@ -133,7 +133,7 @@ fn assert_reuse(report: &Report<'_>, helper: &loader::Module, source: &str, owne
     );
 }
 
-fn assert_limits(
+pub(super) fn assert_limits(
     receipt: &TypedReceipt<'_, '_>,
     module: &loader::Module,
     owner: BodyOwner<'_>,

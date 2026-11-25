@@ -42,6 +42,8 @@ mod o05_field_arithmetic;
 mod o15_arithmetic;
 #[path = "m5/o16_join_order.rs"]
 mod o16_join_order;
+#[path = "m5/output.rs"]
+mod output;
 #[path = "m5/patterns.rs"]
 mod patterns;
 #[path = "support/pipeline.rs"]
