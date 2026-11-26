@@ -279,10 +279,7 @@ pub(super) fn check<'g>(
     for source in inventory.graph().implementations() {
         budget.reserve(1)?;
         if families.insert(&source.family, budget)?
-            && let Some(family) = {
-                keyed::charge(&source.family.module, inventory.family_probes(), budget)?;
-                inventory.captured_family(&source.family)
-            }
+            && let Some(family) = inventory.captured_family(&source.family)
         {
             for implementation in &family.implementations {
                 budget.step(1)?;
@@ -294,10 +291,7 @@ pub(super) fn check<'g>(
                     implementation_headers.insert(id, &implementation.header, budget)?;
                     if implementation.header.binders.len() == 4
                         && checked.contains(id, budget)?
-                        && let Some(metadata) = {
-                            keyed::charge(&id.module, inventory.headers().len(), budget)?;
-                            inventory.headers().get(id)
-                        }
+                        && let Some(metadata) = inventory.headers().get(id)
                         && metadata.requirements.len() == 6
                         && let Some(slots) = pairs::summary(
                             inventory,
@@ -372,7 +366,6 @@ pub(super) fn check<'g>(
             check.parametric = Some(*entry);
             check.proving_callable = true;
             let declarations = &inventory.type_facts().declarations;
-            keyed::charge(&id.module, declarations.len(), check.budget)?;
             check.function_body(&declarations[id], 1)?;
             if !check.has_pending {
                 check.budget.reserve(1)?;

@@ -358,7 +358,7 @@ fn fresh_join_checks_capture_conflicts_and_parent_cleanup() {
         |_, module, receipt, typed| {
             assert_pre_equality_graph_cap(receipt, (228_462, 18_860, 8));
             let graph_cost = Statistics {
-                work: 232_187,
+                work: 228_747,
                 entries: 18_994,
                 max_depth: 8,
             };
@@ -378,8 +378,8 @@ fn fresh_join_checks_capture_conflicts_and_parent_cleanup() {
             }
 
             for (name, expected, (work, entries, max_depth)) in [
-                ("unproved", Completion::Incomplete, (4_593, 561, 7)),
-                ("conflict", Completion::SourceRejected, (4_813, 693, 7)),
+                ("unproved", Completion::Incomplete, (4_273, 561, 7)),
+                ("conflict", Completion::SourceRejected, (4_493, 693, 7)),
                 ("liveParentError", Completion::Incomplete, (4_175, 638, 7)),
                 (
                     "retiredParentError",
@@ -515,7 +515,7 @@ fn plain_conflict_reports_r0201_at_the_second_capture() {
         "#,
         |_, module, receipt, _| {
             let graph_cost = Statistics {
-                work: 197_055,
+                work: 194_535,
                 entries: 4_692,
                 max_depth: 7,
             };
@@ -593,7 +593,7 @@ fn live_parent_error_reaches_the_join_at_its_repinned_cap() {
 
                 assert_pre_equality_graph_cap(&receipt, (219_596, 17_727, 8));
                 let graph_cost = Statistics {
-                    work: 222_421,
+                    work: 219_901,
                     entries: 17_861,
                     max_depth: 8,
                 };
@@ -733,7 +733,7 @@ fn shared_join_rejects_a_live_fresh_error_without_wrapper_selection() {
                 };
                 crate::limit::assert_graph_limit(&analyze_ownership(&receipt, before_o16));
                 let graph_cost = Statistics {
-                    work: 221_299,
+                    work: 218_499,
                     entries: 6_991,
                     max_depth: 10,
                 };

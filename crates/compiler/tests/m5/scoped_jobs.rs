@@ -36,8 +36,8 @@ fn unsupported_list_arrow_shapes_keep_the_old_caps() {
             let typed = compiler::analysis::typed::analyze_typed(
                 &graph,
                 AnalysisLimits {
-                    max_work: 461202,
-                    max_entries: 50692,
+                    max_work: 443898,
+                    max_entries: 55405,
                     max_depth: 12,
                 },
             );

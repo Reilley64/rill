@@ -323,14 +323,14 @@ fn exclusive_option_relay_callers_check_at_pinned_caps() {
         (
             "callerPostfix",
             "forward(input)",
-            (9130, 1651, 4),
-            [(198322, 6243, 5), (195872, 6109, 4)],
+            (8990, 1651, 4),
+            [(195732, 6243, 5), (195872, 6109, 4)],
         ),
         (
             "callerGroup",
             "((forward(((input)))))",
-            (9150, 1659, 8),
-            [(198574, 6247, 8), (196124, 6113, 8)],
+            (9010, 1659, 8),
+            [(195984, 6247, 8), (196124, 6113, 8)],
         ),
     ] {
         let caller = format!(
@@ -361,35 +361,35 @@ fn unsupported_exclusive_relay_siblings_keep_parent_caps() {
             "forward(((forward(input))))",
             "forward(((forward(input))))?",
             (3083, 275, 4),
-            [(196148, 5415, 5), (193300, 5281, 4)],
+            [(193628, 5415, 5), (193300, 5281, 4)],
         ),
         (
             "callerPipe",
             "input |> forward(_)",
             "input |> forward(_)?",
-            (3142, 270, 4),
-            [(195907, 5410, 5), (192990, 5276, 4)],
+            (3072, 270, 4),
+            [(193317, 5410, 5), (192990, 5276, 4)],
         ),
         (
             "callerGroupPipe",
             "(input |> forward(_))",
             "(input |> forward(_))?",
             (3078, 272, 4),
-            [(195963, 5412, 5), (193115, 5278, 4)],
+            [(193443, 5412, 5), (193115, 5278, 4)],
         ),
         (
             "callerGeneric",
             "generic(input)",
             "generic(input)?",
             (3075, 271, 4),
-            [(195900, 5411, 5), (193052, 5277, 4)],
+            [(193380, 5411, 5), (193052, 5277, 4)],
         ),
         (
             "callerMultiple",
             "choose(input, input)",
             "choose(input, input)?",
             (3077, 272, 4),
-            [(195962, 5412, 5), (193114, 5278, 4)],
+            [(193442, 5412, 5), (193114, 5278, 4)],
         ),
     ] {
         let caller = format!(
@@ -425,8 +425,8 @@ function reuse(input: Option<&mut bool>): Option<&mut bool> {
 }
 "#,
             Expect::Rejected("R0200", "input", "input"),
-            (5151, 960, 4),
-            [(197918, 6101, 5), (195468, 5967, 4)],
+            (5081, 960, 4),
+            [(195328, 6101, 5), (195468, 5967, 4)],
             GraphCompletion::SourceRejected,
         ),
         (
@@ -441,8 +441,8 @@ function conflict(): Option<bool> {
 }
 "#,
             Expect::Rejected("R0201", "&flag", "&mut flag"),
-            (6585, 1336, 5),
-            [(199893, 6477, 5), (197442, 6343, 5)],
+            (6515, 1336, 5),
+            [(197303, 6477, 5), (197442, 6343, 5)],
             GraphCompletion::SourceRejected,
         ),
         (
@@ -456,8 +456,8 @@ function escape(): Option<&mut bool> {
 }
 "#,
             Expect::Rejected("R0202", "return Option.Some(view);", "flag"),
-            (5546, 1182, 5),
-            [(198734, 6323, 5), (196283, 6189, 5)],
+            (5476, 1182, 5),
+            [(196144, 6323, 5), (196283, 6189, 5)],
             GraphCompletion::SourceRejected,
         ),
         (
@@ -472,8 +472,8 @@ function release(): Option<bool> {
 }
 "#,
             Expect::Rejected("R0203", "dispose(flag)", "&mut flag"),
-            (6781, 1345, 5),
-            [(200209, 6486, 5), (197678, 6352, 5)],
+            (6631, 1345, 5),
+            [(197539, 6486, 5), (197678, 6352, 5)],
             GraphCompletion::SourceRejected,
         ),
         (
@@ -489,8 +489,8 @@ function dead(): Option<bool> {
 }
 "#,
             Expect::Checked,
-            (13868, 2461, 5),
-            [(201043, 6789, 5), (198511, 6655, 5)],
+            (13398, 2461, 5),
+            [(198373, 6789, 5), (198511, 6655, 5)],
             GraphCompletion::Incomplete,
         ),
     ] {
@@ -519,7 +519,7 @@ function writeThrough(input: Option<&mut bool>): Option<bool> {
         &source,
         |request, _, _| {
             let graph = loader::load_installed(request.clone()).unwrap();
-            let (stats, exact, short) = pinned((452_433, 49_018, 12));
+            let (stats, exact, short) = pinned((434_263, 53_724, 12));
             let typed = crate::limit::measured(
                 "analyze_typed",
                 "typed",
@@ -570,7 +570,7 @@ function caller(input: Option<&mut bool>): Option<&mut bool> {
 "#,
             "forward(input)",
             (3036, 253, 4),
-            [(195620, 5393, 5), (192773, 5259, 4)],
+            [(193100, 5393, 5), (192773, 5259, 4)],
         ),
         (
             "otherPayload",
@@ -582,7 +582,7 @@ function otherPayload(input: Option<&mut i32>): Option<&mut i32> {
 "#,
             "input: Option<&mut i32>",
             (1929, 51, 0),
-            [(194634, 5191, 5), (191788, 5057, 4)],
+            [(192114, 5191, 5), (191788, 5057, 4)],
         ),
     ] {
         exclusive_relay_caller(

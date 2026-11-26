@@ -52,7 +52,7 @@ impl<'g> HeaderMetadata<'g> {
     }
 }
 
-pub(in crate::analysis) type Headers<'g> = BTreeMap<&'g DeclarationId, HeaderMetadata<'g>>;
+pub(in crate::analysis) type Headers<'g> = DeclarationTable<'g, HeaderMetadata<'g>>;
 
 pub(in crate::analysis) fn capture<'g>(
     headers: &mut Headers<'g>,

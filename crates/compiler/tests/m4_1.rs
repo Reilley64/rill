@@ -104,6 +104,66 @@ fn multiple_type_arguments_and_same_spelled_variants_keep_their_order_and_owner(
 }
 
 #[test]
+fn facts_publish_in_module_then_source_order_whatever_the_ordinal_order() {
+    let f = Fixture::new(
+        "import api; type Late = { value: i32 }; function use(a: api::Early): void {} type Last = { next: i32 }",
+    );
+    f.write(
+        "app/api.rill",
+        "export type Early = { value: i32 }; export function mid(a: Early): void {} type Hidden = { value: bool }",
+    );
+    let graph = f.load();
+    let receipt = analyze_declaration_types(&graph, AnalysisLimits::default()).unwrap();
+    let ordinals: Vec<_> = graph
+        .modules()
+        .iter()
+        .flat_map(|m| &m.declarations)
+        .map(|d| d.id.ordinal.index())
+        .collect();
+    assert!(
+        ordinals.windows(2).any(|pair| pair[0] > pair[1]),
+        "the fixture must load its modules out of ordinal order"
+    );
+    let expected: Vec<_> = graph
+        .modules()
+        .iter()
+        .flat_map(|m| &m.declarations)
+        .filter(|d| receipt.declaration(&d.id).unwrap().is_some())
+        .map(|d| &d.id)
+        .collect();
+    let published: Vec<_> = receipt
+        .declarations()
+        .map(|fact| &fact.declaration.id)
+        .collect();
+    assert!(expected.len() >= 5);
+    assert_eq!(published, expected);
+    let mut order = Vec::new();
+    for (index, m) in graph.modules().iter().enumerate() {
+        let mut starts = Vec::new();
+        for node in 0..m.syntax.nodes.len() {
+            if let Some(usage) = receipt.type_use(m, node).unwrap() {
+                starts.push((usage.span.start(), node));
+            }
+        }
+        starts.sort();
+        order.extend(starts.into_iter().map(|(start, node)| (index, start, node)));
+    }
+    let found: Vec<_> = receipt
+        .type_uses()
+        .map(|usage| {
+            let index = graph
+                .modules()
+                .iter()
+                .position(|m| m.key == *usage.module)
+                .unwrap();
+            (index, usage.span.start(), usage.node)
+        })
+        .collect();
+    assert!(order.len() >= 4);
+    assert_eq!(found, order);
+}
+
+#[test]
 fn private_intermediate_modules_and_unimported_metadata_do_not_supply_type_names() {
     let f = Fixture::new("import api; function bad(value: api::hidden::T, other: T): void {}");
     f.write(

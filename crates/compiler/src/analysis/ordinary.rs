@@ -5,7 +5,6 @@ use super::declarations::{
 };
 use super::*;
 use crate::loader::Implementation;
-use std::collections::BTreeSet;
 
 pub(super) mod metadata;
 pub(super) mod patterns;
@@ -123,14 +122,14 @@ pub struct LayoutStep<'g> {
 pub struct OrdinaryAnalysis<'g> {
     graph: &'g Graph,
     lexical: Option<Arc<Lexical<'g>>>,
-    families: BTreeMap<&'g DeclarationId, FamilyFacts<'g>>,
+    families: DeclarationTable<'g, FamilyFacts<'g>>,
     types: PartialFacts<'g>,
     summaries: DeclarationSummaries,
     declaration_issues: Vec<DeclarationIssue<'g>>,
     /// Issues a `ResourceLimit` report no longer publishes. `analyze_generics`
     /// still meters them, so its statistics on this input do not move.
     withheld_issues: Vec<DeclarationIssue<'g>>,
-    unusable: BTreeSet<&'g DeclarationId>,
+    unusable: DeclarationTable<'g, ()>,
     headers: metadata::Headers<'g>,
     statistics: Statistics,
     completion: Completion,
@@ -198,7 +197,7 @@ impl<'g> OrdinaryAnalysis<'g> {
     }
 
     pub(super) fn declaration_unusable(&self, id: &DeclarationId) -> bool {
-        self.unusable.contains(id)
+        self.unusable.contains_key(id)
     }
 
     pub(super) fn headers(&self) -> &metadata::Headers<'g> {
@@ -211,10 +210,6 @@ impl<'g> OrdinaryAnalysis<'g> {
 
     pub(super) fn custom_dispose(&self, id: &DeclarationId) -> bool {
         self.summaries.custom_dispose(id)
-    }
-
-    pub(super) fn family_probes(&self) -> usize {
-        self.families.len()
     }
 
     pub(super) fn captured_family(&self, id: &DeclarationId) -> Option<&FamilyFacts<'g>> {
@@ -247,12 +242,6 @@ impl<'g> OrdinaryAnalysis<'g> {
         marks.dedup_by(|a, b| std::ptr::eq(a.0, b.0) && a.1 == b.1);
         for group in marks.chunk_by(|a, b| std::ptr::eq(a.0, b.0)) {
             let (owner, first) = group[0];
-            let width = owner.module.path.len().checked_add(4).ok_or(())?;
-            budget.step(
-                width
-                    .checked_mul(self.types.declarations.len() + 1)
-                    .ok_or(())?,
-            )?;
             let header = self
                 .types
                 .declarations
@@ -287,12 +276,6 @@ impl<'g> OrdinaryAnalysis<'g> {
         site: NodeId,
         budget: &mut Budget,
     ) -> Work<()> {
-        let width = function.module.path.len().checked_add(4).ok_or(())?;
-        budget.step(
-            width
-                .checked_mul(self.types.declarations.len() + 1)
-                .ok_or(())?,
-        )?;
         let header = self
             .types
             .declarations
@@ -438,6 +421,7 @@ fn compatibility<'g>(
     family: &DeclarationFacts<'g>,
     header: &DeclarationFacts<'g>,
     module: &'g Module,
+    module_at: usize,
     signature: NodeId,
     budget: &mut Budget,
 ) -> Work<(Compatibility, Option<Vec<Substitution<'g>>>)> {
@@ -471,10 +455,11 @@ fn compatibility<'g>(
         }
         for (&arg, slot) in args.iter().zip(&mut bindings) {
             budget.step(1)?;
-            let Some(use_) =
-                types
-                    .uses
-                    .get(&(&module.key, module.syntax.nodes[arg].span.start(), arg))
+            let Some(use_) = types.uses.get(
+                module_at,
+                &(module.syntax.nodes[arg].span.start(), arg),
+                budget,
+            )?
             else {
                 return Ok((Compatibility::Incomplete, None));
             };
@@ -607,12 +592,17 @@ impl<'g> OrdinaryAnalysis<'g> {
         };
         let (result, mut facts) = check_inventory(self.graph, &self.types, schemas, budget);
         self.summaries = facts.take_summaries();
+        if self.lexical.is_some() {
+            let count = self.graph.declaration_count();
+            budget.reserve(count)?;
+            self.unusable.size_for(self.graph.id(), count);
+        }
         if self.lexical.is_some() && result.is_ok() {
             for checked in facts.declarations() {
                 budget.step(1)?;
                 if !checked.members_unique {
                     budget.reserve(1)?;
-                    self.unusable.insert(&checked.types.declaration.id);
+                    self.unusable.insert(&checked.types.declaration.id, ());
                 }
             }
         }
@@ -629,7 +619,7 @@ impl<'g> OrdinaryAnalysis<'g> {
                 CheckFinding::PreludeSignature { schema, actual } => {
                     if self.lexical.is_some() {
                         budget.reserve(1)?;
-                        self.unusable.insert(&actual.declaration.id);
+                        self.unusable.insert(&actual.declaration.id, ());
                     }
                     DeclarationIssue::PreludeSignature {
                         schema: *schema,
@@ -640,7 +630,9 @@ impl<'g> OrdinaryAnalysis<'g> {
                     budget.reserve(steps.len())?;
                     if self.lexical.is_some() {
                         budget.reserve(steps.len())?;
-                        self.unusable.extend(steps.iter().map(|step| step.origin));
+                        for step in steps {
+                            self.unusable.insert(step.origin, ());
+                        }
                     }
                     DeclarationIssue::InlineCycle {
                         steps: steps
@@ -660,7 +652,7 @@ impl<'g> OrdinaryAnalysis<'g> {
         for obligation in facts.obligations() {
             if self.lexical.is_some() {
                 budget.reserve(1)?;
-                self.unusable.insert(obligation.declaration);
+                self.unusable.insert(obligation.declaration, ());
             }
             budget.reserve(1)?;
             self.declaration_issues
@@ -674,6 +666,9 @@ impl<'g> OrdinaryAnalysis<'g> {
     }
 
     fn collect(&mut self, budget: &mut Budget) -> Work<()> {
+        let count = self.graph.declaration_count();
+        budget.reserve(count)?;
+        self.families.size_for(self.graph.id(), count);
         for module in self.graph.modules() {
             for declaration in &module.declarations {
                 budget.step(1)?;
@@ -727,6 +722,7 @@ impl<'g> OrdinaryAnalysis<'g> {
                 &family.header,
                 header,
                 module,
+                module_slot(self.graph.modules(), module).expect("a module of the graph"),
                 source.signature_node,
                 budget,
             )?;
@@ -821,19 +817,19 @@ fn analyze_ordinary_types(
 ) -> OrdinaryAnalysis<'_> {
     let mut analyzer = Analyzer::new(graph, limits, complete_defaults);
     analyzer.statistics = statistics;
-    let mut headers = BTreeMap::new();
+    let mut headers = metadata::Headers::default();
     let elaborated = analyzer
         .analyze_inventory(Some(&mut headers), integrated)
         .is_ok();
     let mut report = OrdinaryAnalysis {
         graph,
-        families: BTreeMap::new(),
+        families: DeclarationTable::new(),
         lexical: analyzer.lexical,
         types: analyzer.facts,
         summaries: DeclarationSummaries::default(),
         declaration_issues: Vec::new(),
         withheld_issues: Vec::new(),
-        unusable: BTreeSet::new(),
+        unusable: DeclarationTable::new(),
         headers,
         statistics: analyzer.statistics,
         completion: Completion::Incomplete,

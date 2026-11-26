@@ -3,7 +3,6 @@
 use super::*;
 use crate::analysis::typed::{Primitive, PrimitiveOperation, PrimitiveProvider, PrimitiveRole};
 use crate::analysis::{declarations::Budget, ordinary::source};
-use crate::loader::keyed;
 use callables::{ArrowFacts, CaptureFact, CaptureForm};
 
 #[derive(Debug)]
@@ -184,7 +183,6 @@ impl<'r, 'g> Checker<'r, 'g> {
             });
         }
         let ordinary = self.input.ordinary.unwrap();
-        keyed::charge(&family.module, ordinary.family_probes(), &mut self.elab)?;
         let binder = &ordinary.captured_family(family).unwrap().header.binders[0];
         self.elab.reserve(1)?;
         call.fact.substitution = vec![Substitution {

@@ -365,7 +365,7 @@ fn bare_guard_is_released_once_on_each_propagation_exit() {
             }
 
             // The fixture's whole graph.
-            let cap = (208571, 7315, 5);
+            let cap = (205771, 7315, 5);
             assert_eq!(graph.completion(), GraphCompletion::Incomplete);
             assert_eq!(stats(graph.statistics()), cap);
             let exact = limits(cap.0, cap.1, cap.2);

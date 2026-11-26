@@ -608,7 +608,6 @@ impl<'a, 'g> Check<'a, 'g> {
             Constructor::Tuple(_) => ResultComponent::TupleElement(index),
             Constructor::Record(id) => {
                 let declarations = &self.inventory.type_facts().declarations;
-                keyed::charge(&id.module, declarations.len(), self.budget)?;
                 let DeclarationShape::Record { fields } = &declarations[*id].shape else {
                     unreachable!()
                 };

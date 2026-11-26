@@ -1,4 +1,5 @@
 //! M4.1 explicit declaration types. A receipt is not a checked program.
+use crate::loader::keyed::{DeclarationTable, Meter, ModuleTables, PathMap, module_slot};
 use crate::loader::{
     Binding, Declaration, DeclarationId, DeclarationKind, Graph, GraphId, Intrinsic, Module,
     ModuleKey, Namespace, Target,
@@ -294,10 +295,10 @@ pub enum QueryError {
 
 #[derive(Debug, Default)]
 pub struct PartialFacts<'g> {
-    declarations: BTreeMap<&'g DeclarationId, DeclarationFacts<'g>>,
-    uses: BTreeMap<(&'g ModuleKey, usize, NodeId), TypeUse<'g>>,
-    findings: BTreeMap<(&'g ModuleKey, usize, FindingKind), Finding<'g>>,
-    obligations: BTreeMap<(&'g ModuleKey, usize, Unsupported), Obligation<'g>>,
+    declarations: DeclarationTable<'g, DeclarationFacts<'g>>,
+    uses: ModuleTables<(usize, NodeId), TypeUse<'g>>,
+    findings: PathMap<(&'g ModuleKey, usize, FindingKind), Finding<'g>>,
+    obligations: PathMap<(&'g ModuleKey, usize, Unsupported), Obligation<'g>>,
 }
 impl<'g> PartialFacts<'g> {
     /// No finding. Every field is named, so a new one fails to compile until it
@@ -313,7 +314,7 @@ impl<'g> PartialFacts<'g> {
         findings.is_empty()
     }
     pub(crate) fn withhold_findings(&mut self) {
-        self.findings.clear();
+        self.findings = PathMap::default();
     }
     pub fn declarations(&self) -> impl Iterator<Item = &DeclarationFacts<'g>> {
         self.declarations.values()
@@ -378,12 +379,7 @@ impl<'g> Receipt<'g> {
         module: &Module,
         node: NodeId,
     ) -> Result<Option<&TypeUse<'g>>, QueryError> {
-        let Some(module) = self
-            .graph
-            .modules()
-            .iter()
-            .find(|m| std::ptr::eq(*m, module))
-        else {
+        let Some(slot) = module_slot(self.graph.modules(), module) else {
             return Err(QueryError::InvalidRequest);
         };
         let Some(syntax) = module.syntax.nodes.get(node) else {
@@ -392,11 +388,34 @@ impl<'g> Receipt<'g> {
         Ok(self
             .facts
             .uses
-            .get(&(&module.key, syntax.span.start(), node)))
+            .table(slot)
+            .and_then(|table| table.get(&(syntax.span.start(), node))))
     }
 }
 
 type Work<T> = Result<T, ()>;
+fn spend(limits: &AnalysisLimits, statistics: &mut Statistics, amount: usize) -> Work<()> {
+    let next = statistics.work.checked_add(amount).ok_or(())?;
+    if next > limits.max_work {
+        return Err(());
+    }
+    statistics.work = next;
+    Ok(())
+}
+struct Steps<'a> {
+    limits: &'a AnalysisLimits,
+    statistics: &'a mut Statistics,
+}
+impl<'a> Steps<'a> {
+    fn of(limits: &'a AnalysisLimits, statistics: &'a mut Statistics) -> Self {
+        Self { limits, statistics }
+    }
+}
+impl Meter for Steps<'_> {
+    fn step(&mut self, n: usize) -> Work<()> {
+        spend(self.limits, self.statistics, n)
+    }
+}
 enum NameTarget<'g> {
     Parameter(&'g DeclarationId, usize),
     Primitive(&'g Intrinsic),
@@ -416,7 +435,7 @@ struct Analyzer<'g> {
     limits: AnalysisLimits,
     statistics: Statistics,
     facts: PartialFacts<'g>,
-    declarations: BTreeMap<(&'g ModuleKey, NodeId), &'g Declaration>,
+    declarations: ModuleTables<NodeId, &'g Declaration>,
 }
 impl<'g> Analyzer<'g> {
     fn new(graph: &'g Graph, limits: AnalysisLimits, complete_defaults: bool) -> Self {
@@ -428,16 +447,11 @@ impl<'g> Analyzer<'g> {
             lexical: None,
             statistics: Statistics::default(),
             facts: PartialFacts::default(),
-            declarations: BTreeMap::new(),
+            declarations: ModuleTables::default(),
         }
     }
     fn step(&mut self, amount: usize) -> Work<()> {
-        let next = self.statistics.work.checked_add(amount).ok_or(())?;
-        if next > self.limits.max_work {
-            return Err(());
-        }
-        self.statistics.work = next;
-        Ok(())
+        spend(&self.limits, &mut self.statistics, amount)
     }
     fn reserve(&mut self, amount: usize) -> Work<()> {
         let next = self.statistics.entries.checked_add(amount).ok_or(())?;
@@ -448,9 +462,27 @@ impl<'g> Analyzer<'g> {
         self.statistics.entries = next;
         Ok(())
     }
+    fn size_for_modules(&mut self) -> Work<()> {
+        let modules = self.graph.modules().len();
+        if self.declarations.is_sized() || modules == 0 {
+            return Ok(());
+        }
+        self.reserve(modules.checked_mul(2).ok_or(())?)?;
+        self.facts.uses.size_for(modules);
+        self.declarations.size_for(modules);
+        Ok(())
+    }
+    fn slot(&self, module: &Module) -> usize {
+        module_slot(self.graph.modules(), module).expect("a module of the analyzed graph")
+    }
     fn declaration_at(&mut self, module: &'g Module, node: NodeId) -> Work<&'g Declaration> {
-        self.step(self.declarations.len().checked_ilog2().unwrap_or(0) as usize + 1)?;
-        Ok(self.declarations[&(&module.key, node)])
+        let slot = self.slot(module);
+        let mut steps = Steps::of(&self.limits, &mut self.statistics);
+        Ok(self
+            .declarations
+            .get(slot, &node, &mut steps)?
+            .copied()
+            .expect("an analyzed node is a declaration"))
     }
     fn unsupported(&mut self, module: &'g Module, node: NodeId, reason: Unsupported) -> Work<()> {
         self.reserve(1)?;
@@ -463,7 +495,8 @@ impl<'g> Analyzer<'g> {
                 node,
                 span,
             },
-        );
+            &mut Steps::of(&self.limits, &mut self.statistics),
+        )?;
         Ok(())
     }
     fn finding(&mut self, module: &'g Module, node: NodeId, kind: FindingKind) -> Work<()> {
@@ -477,7 +510,8 @@ impl<'g> Analyzer<'g> {
                 candidates: Vec::new(),
                 bindings: Vec::new(),
             },
-        );
+            &mut Steps::of(&self.limits, &mut self.statistics),
+        )?;
         Ok(())
     }
     fn binding_finding(
@@ -503,7 +537,8 @@ impl<'g> Analyzer<'g> {
                 candidates,
                 bindings: vec![binding],
             },
-        );
+            &mut Steps::of(&self.limits, &mut self.statistics),
+        )?;
         Ok(())
     }
     fn declaration_finding(
@@ -524,7 +559,8 @@ impl<'g> Analyzer<'g> {
                 candidates: vec![declaration],
                 bindings,
             },
-        );
+            &mut Steps::of(&self.limits, &mut self.statistics),
+        )?;
         Ok(())
     }
     fn owner(&mut self, key: &ModuleKey) -> Work<&'g Module> {
@@ -597,8 +633,10 @@ impl<'g> Analyzer<'g> {
                     return Ok(Some(ty));
                 }
                 self.reserve(1)?;
+                let slot = self.slot(module);
                 self.facts.uses.insert(
-                    (&module.key, n.span.start(), node),
+                    slot,
+                    (n.span.start(), node),
                     TypeUse {
                         module: &module.key,
                         node,
@@ -608,7 +646,8 @@ impl<'g> Analyzer<'g> {
                         substitution: Vec::new(),
                         defaults: Vec::new(),
                     },
-                );
+                    &mut Steps::of(&self.limits, &mut self.statistics),
+                )?;
                 return Ok(Some(ty));
             }
             NodeKind::TupleType | NodeKind::CallableType { .. } => {
@@ -661,8 +700,10 @@ impl<'g> Analyzer<'g> {
             return Ok(ty);
         }
         let n = &module.syntax.nodes[node];
+        let slot = self.slot(module);
         self.facts.uses.insert(
-            (&module.key, n.span.start(), node),
+            slot,
+            (n.span.start(), node),
             TypeUse {
                 module: &module.key,
                 node,
@@ -672,7 +713,8 @@ impl<'g> Analyzer<'g> {
                 substitution,
                 defaults: Vec::new(),
             },
-        );
+            &mut Steps::of(&self.limits, &mut self.statistics),
+        )?;
         Ok(ty)
     }
     fn binding(&mut self, module: &ModuleKey, name: &str) -> Work<Option<&'g Binding>> {
@@ -992,7 +1034,8 @@ impl<'g> Analyzer<'g> {
                             candidates,
                             bindings,
                         },
-                    );
+                        &mut Steps::of(&self.limits, &mut self.statistics),
+                    )?;
                     return Ok(None);
                 }
             };
@@ -1006,9 +1049,14 @@ impl<'g> Analyzer<'g> {
         };
         let ty = self.retain_type(module, node, term, substitution, bindings)?;
         if !defaults.is_empty() && self.active_defaults.is_empty() {
+            let slot = self.slot(module);
             self.facts
                 .uses
-                .get_mut(&(&module.key, n.span.start(), node))
+                .get_mut(
+                    slot,
+                    &(n.span.start(), node),
+                    &mut Steps::of(&self.limits, &mut self.statistics),
+                )?
                 .unwrap()
                 .defaults = defaults;
         }
@@ -1071,6 +1119,14 @@ impl<'g> Analyzer<'g> {
         mut metadata: Option<&mut ordinary::metadata::Headers<'g>>,
         integrated: bool,
     ) -> Work<()> {
+        let count = self.graph.declaration_count();
+        let tables = 1 + usize::from(metadata.is_some());
+        self.reserve(count.checked_mul(tables).ok_or(())?)?;
+        self.facts.declarations.size_for(self.graph.id(), count);
+        self.size_for_modules()?;
+        if let Some(headers) = metadata.as_deref_mut() {
+            headers.size_for(self.graph.id(), count);
+        }
         if integrated {
             self.index_lexical()?;
         }
@@ -1078,8 +1134,14 @@ impl<'g> Analyzer<'g> {
             self.step(1)?;
             for declaration in &module.declarations {
                 self.reserve(1)?;
-                self.declarations
-                    .insert((&module.key, declaration.node), declaration);
+                let slot = module_slot(self.graph.modules(), module)
+                    .expect("a module of the analyzed graph");
+                self.declarations.insert(
+                    slot,
+                    declaration.node,
+                    declaration,
+                    &mut Steps::of(&self.limits, &mut self.statistics),
+                )?;
             }
         }
         for module in self.graph.modules() {
@@ -1236,7 +1298,7 @@ impl<'g> Analyzer<'g> {
         Ok(())
     }
 }
-impl crate::loader::keyed::Meter for Analyzer<'_> {
+impl Meter for Analyzer<'_> {
     fn step(&mut self, n: usize) -> Work<()> {
         Analyzer::step(self, n)
     }

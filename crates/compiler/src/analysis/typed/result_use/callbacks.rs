@@ -69,7 +69,6 @@ impl<'a, 'g> Check<'a, 'g> {
         id: &DeclarationId,
     ) -> Work<Option<&'a DeclarationFacts<'g>>> {
         let declarations = &self.inventory.type_facts().declarations;
-        keyed::charge(&id.module, declarations.len(), self.budget)?;
         if let Some(facts) = declarations.get(id) {
             return Ok(Some(facts));
         }

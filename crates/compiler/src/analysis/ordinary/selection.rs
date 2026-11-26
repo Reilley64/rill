@@ -106,7 +106,9 @@ pub(in crate::analysis) fn declaration<'g>(
             budget.step(module.declarations.len().checked_ilog2().unwrap_or(0) as usize + 1)?;
             return Ok(module
                 .declarations
-                .binary_search_by(|d| d.id.cmp(id))
+                .binary_search_by_key(&(id.start, id.kind, id.ordinal), |d| {
+                    (d.id.start, d.id.kind, d.id.ordinal)
+                })
                 .ok()
                 .map(|i| (module, &module.declarations[i])));
         }

@@ -548,30 +548,43 @@ fn analyze_bodies<'g>(
         {
             return Err(());
         }
-        for (key, finding) in &types.findings {
+        for (key, finding) in types.findings.iter() {
             checker
                 .elab
                 .reserve(1 + finding.bindings.len() + finding.candidates.len())?;
-            checker.elab.facts.findings.insert(*key, finding.clone());
+            let elab = &mut checker.elab;
+            elab.facts.findings.insert(
+                *key,
+                finding.clone(),
+                &mut Steps::of(&elab.limits, &mut elab.statistics),
+            )?;
         }
-        for (key, obligation) in &types.obligations {
+        for (key, obligation) in types.obligations.iter() {
             if !matches!(
                 obligation.reason,
                 Unsupported::GenericDefault | Unsupported::Requirements
             ) {
                 checker.elab.reserve(1)?;
-                checker
-                    .elab
-                    .facts
-                    .obligations
-                    .insert(*key, obligation.clone());
+                let elab = &mut checker.elab;
+                elab.facts.obligations.insert(
+                    *key,
+                    obligation.clone(),
+                    &mut Steps::of(&elab.limits, &mut elab.statistics),
+                )?;
             }
         }
-        for (key, use_) in &types.uses {
+        checker.elab.size_for_modules()?;
+        for (slot, key, use_) in types.uses.iter() {
             checker
                 .elab
                 .reserve(1 + use_.bindings.len() + use_.substitution.len() + use_.defaults.len())?;
-            checker.elab.facts.uses.insert(*key, use_.clone());
+            let elab = &mut checker.elab;
+            elab.facts.uses.insert(
+                slot,
+                *key,
+                use_.clone(),
+                &mut Steps::of(&elab.limits, &mut elab.statistics),
+            )?;
         }
         if integrated || (input.declaration_issues().is_empty() && body_prerequisites(input)) {
             checker.run()?;
