@@ -1,23 +1,12 @@
 use std::{
-    fs, io,
-    process::{Command, Output, Stdio},
-    sync::Mutex,
+    io,
+    path::Path,
+    process::{Command, Output},
 };
 
 pub(crate) fn run_copied_probe(command: &mut Command) -> io::Result<Output> {
-    static LAUNCH: Mutex<()> = Mutex::new(());
-    let child = {
-        // A concurrent fork can hold the writable copy descriptor until exec,
-        // causing Linux to reject an otherwise finished copy with ETXTBSY.
-        let _launch = LAUNCH.lock().expect("probe launch lock poisoned");
-        fs::copy(std::env::current_exe()?, command.get_program())?;
-        command
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()?
-    };
-    let output = child.wait_with_output()?;
+    rill_test_support::stage_current_exe(Path::new(command.get_program()))?;
+    let output = rill_test_support::run_staged(command)?;
     if std::env::var_os("RILL_M5_PROBE_VERBOSE").is_some() {
         print!("{}", String::from_utf8_lossy(&output.stdout));
         eprint!("{}", String::from_utf8_lossy(&output.stderr));

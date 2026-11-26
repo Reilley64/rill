@@ -81,7 +81,7 @@ impl Workspace {
         if let Some(path) = path {
             command.env("PATH", path);
         }
-        support::run(&mut command).expect("run a staged executable")
+        rill_test_support::run_staged(&mut command).expect("run a staged executable")
     }
 
     fn names(&self, directory: &str) -> BTreeSet<String> {
@@ -287,7 +287,7 @@ fn run_passes_the_entry_as_argument_zero_and_the_rest_untouched_and_in_order() {
         .current_dir(&workspace.work)
         .env("TMPDIR", &workspace.temporary)
         .env("PATH", format!("{}:/usr/bin:/bin", bin.display()));
-    let output = support::run(&mut command).expect("run a staged executable");
+    let output = rill_test_support::run_staged(&mut command).expect("run a staged executable");
     assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
     let hex = |bytes: &[u8]| {
         bytes

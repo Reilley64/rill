@@ -31,6 +31,7 @@ dependencies = [
  "codegen-llvm",
  "compiler",
  "lsp",
+ "rill-test-support",
 ]
 
 [[package]]
@@ -39,6 +40,7 @@ version = "0.1.0-dev"
 dependencies = [
  "compiler",
  "inkwell",
+ "rill-test-support",
 ]
 
 [[package]]
@@ -47,6 +49,7 @@ version = "0.1.0-dev"
 dependencies = [
  "rill-collection",
  "rill-error-storage",
+ "rill-test-support",
 ]
 
 [[package]]
@@ -158,6 +161,10 @@ dependencies = [
  "libc",
  "rill-collection",
 ]
+
+[[package]]
+name = "rill-test-support"
+version = "0.1.0-dev"
 
 [[package]]
 name = "semver"

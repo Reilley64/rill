@@ -6,7 +6,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
 
 pub const TARGET: &str = env!("RILL_HOST_TARGET");
 const PROBE_ROOT: &str = "RILL_PROBE_ROOT";
@@ -149,7 +149,6 @@ pub fn emit(test: &str, source: &str) -> Option<Built> {
 }
 
 fn run_in_installation(test: &str, source: &str) -> (Installation, Output) {
-    static LAUNCH: Mutex<()> = Mutex::new(());
     let root = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(test.replace("::", "-"));
     let _ = fs::remove_dir_all(&root);
     let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
@@ -177,23 +176,15 @@ fn run_in_installation(test: &str, source: &str) -> (Installation, Output) {
     fs::write(root.join("app/main.rill"), source).unwrap();
     let installation = Installation { root };
 
-    let child = {
-        let _launch = LAUNCH
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let probe = installation.root.join("bin/probe");
-        fs::copy(std::env::current_exe().unwrap(), &probe).unwrap();
+    let probe = installation.root.join("bin/probe");
+    rill_test_support::stage_current_exe(&probe).unwrap();
+    let output = rill_test_support::run_staged(
         Command::new(&probe)
             .args(["--exact", test, "--include-ignored", "--nocapture"])
             .env(PROBE_ROOT, &installation.root)
-            .current_dir(installation.root.join("app"))
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap()
-    };
-    let output = child.wait_with_output().unwrap();
+            .current_dir(installation.root.join("app")),
+    )
+    .unwrap();
     (installation, output)
 }
 
