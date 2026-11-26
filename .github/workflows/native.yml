@@ -63,16 +63,21 @@ jobs:
       - name: "Setup: Install the locked tools"
         run: mise install --locked
 
+      # Every run restores. Only main and integration runs save (see the last
+      # step), so ticket-branch runs cannot evict their entries. When no entry
+      # matches the lockfiles, the newest entry for the platform seeds the build.
+      # The "-lock-" separator keeps macos-15 from matching macos-15-intel keys.
       - name: "Setup: Restore the Cargo build cache"
-        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        id: cargo-cache
+        uses: actions/cache/restore@caa296126883cff596d87d8935842f9db880ef25 # v5
         with:
           path: |
             target/debug
             target/*/debug
             target/ci/cargo/registry
-          key: cargo-${{ matrix.os }}-${{ hashFiles('Cargo.lock', 'mise.toml', 'mise.lock') }}-${{ github.sha }}
+          key: cargo-${{ matrix.os }}-lock-${{ hashFiles('Cargo.lock', 'mise.toml', 'mise.lock') }}
           restore-keys: |
-            cargo-${{ matrix.os }}-${{ hashFiles('Cargo.lock', 'mise.toml', 'mise.lock') }}-
+            cargo-${{ matrix.os }}-lock-
 
       - name: "Setup: Install the trimmed LLVM"
         run: mise run setup:llvm
@@ -119,3 +124,18 @@ jobs:
             echo "::error::verify:release no longer stops at the build stub (exit $status). Replace this assertion with the real release run if the build exists or its message changed. Otherwise a check before the build failed."
             exit 1
           fi
+
+      # One entry per platform per lockfile: an exact hit saves nothing. GitHub
+      # scopes caches per branch plus the default branch, so a ticket branch
+      # could not restore this entry anyway.
+      - name: "Setup: Save the Cargo build cache"
+        if: >-
+          steps.cargo-cache.outputs.cache-hit != 'true'
+          && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/integration/'))
+        uses: actions/cache/save@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: |
+            target/debug
+            target/*/debug
+            target/ci/cargo/registry
+          key: cargo-${{ matrix.os }}-lock-${{ hashFiles('Cargo.lock', 'mise.toml', 'mise.lock') }}
