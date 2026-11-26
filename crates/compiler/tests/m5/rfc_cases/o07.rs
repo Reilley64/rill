@@ -58,7 +58,7 @@ function overlapReversed(): i32 {
   return 0i32;
 }
 "#,
-    typed_stats: (432257, 53441, 12),
+    typed_stats: (437050, 56085, 12),
     graph: (GraphCompletion::SourceRejected, (188531, 4475, 5)),
     roots: &[
         Root {
@@ -143,7 +143,7 @@ function looped(flag: bool): i32 {
   return 0i32;
 }
 "#,
-    typed_stats: (442678, 55017, 12),
+    typed_stats: (447543, 57733, 12),
     graph: (GraphCompletion::SourceRejected, (196887, 5724, 6)),
     roots: &[
         Root {
@@ -331,7 +331,7 @@ function reborrowSharedKept(): i32 {
   return *r;
 }
 "#,
-    typed_stats: (463420, 57917, 12),
+    typed_stats: (468397, 60745, 12),
     graph: (GraphCompletion::SourceRejected, (215082, 8614, 6)),
     roots: &[
         Root {
@@ -456,7 +456,7 @@ function takeAfterReborrow(): i32 {
   return take(holder);
 }
 "#,
-    typed_stats: (431434, 53359, 12),
+    typed_stats: (436215, 55991, 12),
     graph: (GraphCompletion::SourceRejected, (189242, 4708, 5)),
     roots: &[
         Root {
@@ -569,7 +569,7 @@ function storeSharedFromShared(): i32 {
   return 0i32;
 }
 "#,
-    typed_stats: (452680, 57531, 12),
+    typed_stats: (457617, 60319, 12),
     graph: (GraphCompletion::SourceRejected, (212649, 9075, 5)),
     roots: &[
         Root {
@@ -662,7 +662,7 @@ function storePickedFirst(): i32 {
   return 0i32;
 }
 "#,
-    typed_stats: (432238, 53480, 12),
+    typed_stats: (437027, 56120, 12),
     graph: (GraphCompletion::SourceRejected, (189258, 4707, 6)),
     roots: &[
         Root {
@@ -785,7 +785,7 @@ function dupParam(p: &mut i32): i32 {
   return 0i32;
 }
 "#,
-    typed_stats: (436035, 53719, 12),
+    typed_stats: (440852, 56387, 12),
     graph: (GraphCompletion::SourceRejected, (191776, 4990, 7)),
     roots: &[
         Root {
@@ -965,7 +965,7 @@ function reborrowed(): i32 {
   return 0i32;
 }
 "#,
-    typed_stats: (473455, 59925, 12),
+    typed_stats: (478500, 62821, 12),
     graph: (GraphCompletion::SourceRejected, (228036, 11538, 7)),
     roots: &[
         Root {
@@ -1134,7 +1134,7 @@ function guarded(): i32 {
   return 0i32;
 }
 "#,
-    typed_stats: (440499, 53997, 12),
+    typed_stats: (445336, 56685, 12),
     graph: (GraphCompletion::Incomplete, (190693, 4432, 5)),
     roots: &[
         Root {

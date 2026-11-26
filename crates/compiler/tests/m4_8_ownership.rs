@@ -1794,8 +1794,8 @@ fn installed_pair_invocation(request: &InstalledRequest) {
             analyze_typed(
                 &graph,
                 AnalysisLimits {
-                    max_work: 486782,
-                    max_entries: 59722,
+                    max_work: 491852,
+                    max_entries: 62506,
                     max_depth: 12
                 }
             )

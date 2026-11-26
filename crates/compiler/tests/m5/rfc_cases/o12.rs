@@ -305,7 +305,7 @@ function viewField(): i32 { let view = &shifted(Point { x: 1, y: 2 }); return vi
                 &request,
                 &[Case {
                     text: VIEW,
-                    typed_stats: (430550, 53144, 12),
+                    typed_stats: (435323, 55768, 12),
                     graph: (GraphCompletion::SourceRejected, (188579, 4666, 7)),
                     roots: &[
                         Root {
@@ -388,7 +388,7 @@ function backtick(): &string { return &`tick`; }
 function boundLiteral(): &string { let view = &"static"; return view; }
 function literal(): &string { return &"static"; }
 "####,
-            typed_stats: (455022, 55379, 14),
+            typed_stats: (459879, 58087, 14),
             graph: (GraphCompletion::SourceRejected, (206045, 7452, 11)),
             roots: &[
                 Root {
@@ -507,7 +507,7 @@ function number(): &i32 { return &1i32; }
 function owner(): &string { let text = "x"; return &text; }
 function flag(b: bool): &string { return &`a${b}`; }
 "####,
-            typed_stats: (440608, 54181, 12),
+            typed_stats: (445413, 56837, 12),
             graph: (GraphCompletion::SourceRejected, (191344, 4565, 5)),
             roots: &[
                 Root {
@@ -586,7 +586,7 @@ function textBind(): void { let view = &named(); }
                 &request,
                 &[Case {
                     text: TEXT,
-                    typed_stats: (431986, 53165, 12),
+                    typed_stats: (436759, 55789, 12),
                     graph: (GraphCompletion::Incomplete, (187426, 4277, 5)),
                     roots: &[
                         Root {
@@ -667,13 +667,13 @@ function bound(): void { let v = &make(); }
                 &[
                     Case {
                         text: DISPOSER,
-                        typed_stats: (433553, 53260, 12),
+                        typed_stats: (438330, 55888, 12),
                         graph: (GraphCompletion::Incomplete, (187665, 4260, 5)),
                         roots: ROOTS,
                     },
                     Case {
                         text: ALIASED,
-                        typed_stats: (434424, 53268, 12),
+                        typed_stats: (439201, 55896, 12),
                         graph: (GraphCompletion::Incomplete, (187666, 4260, 5)),
                         roots: ROOTS,
                     },

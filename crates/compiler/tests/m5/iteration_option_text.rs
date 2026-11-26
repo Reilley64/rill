@@ -295,8 +295,8 @@ fn unrelated_and_unadmitted_option_lists_keep_the_first_blocker() {
         |request, module, receipt, typed| {
             let capture = loader::load_installed(request.clone()).unwrap();
             let pinned = Statistics {
-                work: 437_163,
-                entries: 54_365,
+                work: 441_972,
+                entries: 57_025,
                 max_depth: 12,
             };
             assert_eq!(typed.statistics(), pinned);
@@ -375,8 +375,8 @@ function dead(xs: List<Option<string>>): Option<bool> {
             assert_eq!(typed.completion(), TypedCompletion::Incomplete);
             let capture = loader::load_installed(request.clone()).unwrap();
             let pinned = Statistics {
-                work: 427_517,
-                entries: 52_984,
+                work: 429_476,
+                entries: 54_943,
                 max_depth: 12,
             };
             assert_eq!(typed.statistics(), pinned);

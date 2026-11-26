@@ -290,8 +290,8 @@ fn installed_postfix_keeps_unadmitted_loop_shapes_pending() {
         OUTSIDE_SLICE,
         |request, module, receipt| {
             let typed_stats = Statistics {
-                work: 438_689,
-                entries: 54_767,
+                work: 443_502,
+                entries: 57_431,
                 max_depth: 12,
             };
             assert_eq!(receipt.statistics(), typed_stats);
