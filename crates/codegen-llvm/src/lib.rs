@@ -30,10 +30,11 @@ use std::path::Path;
 /// No optimisation pass runs, and the LLVM verifier checks the module before
 /// anything is written: nothing is written on an error.
 ///
-/// The backend refuses nothing the compilable-program rule admits, but it
-/// lowers only the operations it supports yet. For any other operation it
-/// returns [`BackendError::Unsupported`], which the driver reports as an
-/// internal tool failure (status 3), never as R0605.
+/// The compilable-program rule decides what the backend lowers: it admits
+/// only the shapes `compiler::analysis::compilable::capability::Shape` lists,
+/// and `tests/coverage.rs` lowers every one. A shape the backend refuses
+/// anyway is a backend bug, returned as [`BackendError::Internal`], which the
+/// driver reports as an internal tool failure (status 3), never as R0605.
 pub fn emit_object(
     graph: &Graph,
     program: &CompilableProgram<'_, '_>,

@@ -50,6 +50,10 @@ pub enum PrimitiveOperation {
     WriteLine,
     /// End the program, reporting the borrowed text. It never returns.
     Panic,
+    /// Build the owned startup inputs from the arguments the runtime captured, or an error.
+    CaptureInputs,
+    /// Check each captured argument as UTF-8 and own it as text, or give the first error.
+    DecodeArguments,
 }
 
 impl PrimitiveOperation {

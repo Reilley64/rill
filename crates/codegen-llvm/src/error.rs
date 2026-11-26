@@ -2,21 +2,19 @@ use compiler::analysis::scalars::Site;
 use compiler::source::Span;
 use std::fmt;
 
-/// Why the backend wrote no object.
+/// Why the backend wrote no object. Every variant is a backend bug or a host
+/// failure: whether a program may be compiled is decided by the compiler's
+/// compilable-program rule before the backend runs, so a program that reaches
+/// the backend contains only shapes the backend lowers.
 #[derive(Debug, PartialEq, Eq)]
 pub enum BackendError {
-    /// A reached operation, type or shape the backend cannot lower yet.
-    Unsupported {
-        what: String,
-        module: String,
-        line: usize,
-        column: usize,
-    },
     /// The LLVM verifier rejected the module the backend built.
     Verifier(String),
     /// LLVM could not provide the host target or write the object.
     Target(String),
-    /// The program broke an assumption the backend relies on.
+    /// The program broke an assumption the backend relies on: a shape the
+    /// compilable-program rule admits and the backend does not lower, or a
+    /// MIR invariant that does not hold.
     Internal(String),
 }
 
@@ -29,12 +27,10 @@ impl BackendError {
         let (line, column) = span
             .coordinates()
             .map_or((0, 0), |(start, _)| (start.line + 1, start.scalar + 1));
-        Self::Unsupported {
-            what: what.into(),
-            module: module.to_owned(),
-            line,
-            column,
-        }
+        Self::Internal(format!(
+            "the backend cannot lower {} at {module}:{line}:{column}, which the compilable-program rule admitted",
+            what.into()
+        ))
     }
 
     pub(crate) fn internal(message: impl Into<String>) -> Self {
@@ -45,15 +41,6 @@ impl BackendError {
 impl fmt::Display for BackendError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Unsupported {
-                what,
-                module,
-                line,
-                column,
-            } => write!(
-                formatter,
-                "the backend cannot lower {what} at {module}:{line}:{column}"
-            ),
             Self::Verifier(message) => write!(formatter, "LLVM rejected the module: {message}"),
             Self::Target(message) => write!(formatter, "LLVM target failure: {message}"),
             Self::Internal(message) => write!(formatter, "backend failure: {message}"),
