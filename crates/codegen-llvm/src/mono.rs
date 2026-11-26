@@ -1,4 +1,4 @@
-use crate::syntax::Type;
+use crate::types::Type;
 use std::collections::BTreeSet;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
@@ -20,13 +20,7 @@ pub(crate) fn suffix(substitution: &[Type]) -> String {
     if substitution.is_empty() {
         return String::new();
     }
-    let arguments: Vec<&str> = substitution
-        .iter()
-        .map(|ty| match ty {
-            Type::Owned => "string",
-            Type::View => "&string",
-        })
-        .collect();
+    let arguments: Vec<String> = substitution.iter().map(Type::to_string).collect();
     format!("<{}>", arguments.join(","))
 }
 
@@ -52,6 +46,17 @@ pub(crate) fn collect<B: Ord + Clone, E>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn string() -> Type {
+        Type::Primitive("string")
+    }
+
+    fn view() -> Type {
+        Type::Reference {
+            mutable: false,
+            referent: Box::new(string()),
+        }
+    }
 
     fn call(body: &'static str, substitution: &[Type]) -> Instance<&'static str> {
         Instance {
@@ -85,9 +90,9 @@ mod tests {
             (
                 "main",
                 vec![
-                    call("id", &[Type::Owned]),
-                    call("id", &[Type::View]),
-                    call("id", &[Type::Owned]),
+                    call("id", &[string()]),
+                    call("id", &[view()]),
+                    call("id", &[string()]),
                     call("helper", &[]),
                 ],
             ),
