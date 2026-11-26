@@ -56,6 +56,7 @@ pub(super) fn load(
         .and_then(Path::parent)
         .and_then(Path::parent);
     let mut routine_index = None;
+    let mut env_index = None;
     match engine.run(prefix) {
         Ok((bindings, implementations, prelude, ownership_archive)) => Ok(Graph {
             id: engine.id,
@@ -71,10 +72,17 @@ pub(super) fn load(
                     {
                         routine_index = Some(index);
                     }
+                    if installed.is_some()
+                        && module.key.origin == Origin::Standard
+                        && module.key.path == "env.rill"
+                    {
+                        env_index = Some(index);
+                    }
                     module
                 })
                 .collect(),
             routine_index,
+            env_index,
             declaration_count: engine.next_ordinal,
             implementation_at: {
                 let mut at = vec![None; engine.next_ordinal];
@@ -216,18 +224,16 @@ impl Engine {
                     &mut self.next_ordinal,
                 )?;
                 for import in &mut imports {
-                    demanded |= self
-                        .installed
-                        .is_some_and(|profile| profile.demands(import));
+                    demanded |= installed::demands(import);
                     self.discover(import)?;
                 }
                 self.imports.extend(imports);
             }
-            let Some(profile) = self.installed.filter(|_| demanded) else {
+            if !demanded {
                 break;
-            };
+            }
             demanded = false;
-            for &(facade, module, names) in profile.on_demand() {
+            for &(facade, module, names) in installed::ON_DEMAND {
                 self.host.charge(1 + names.len())?;
                 self.discover_on_demand(facade, module, names)?;
             }
@@ -992,7 +998,9 @@ impl Engine {
             starts: Vec::new(),
         };
         self.discover(&mut import)?;
-        self.imports.push(import);
+        if !import.starts.is_empty() {
+            self.imports.push(import);
+        }
         Ok(())
     }
 

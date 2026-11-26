@@ -52,6 +52,10 @@ pub enum PrimitiveOperation {
     Panic,
     /// Append the borrowed text to the exclusively borrowed owned string.
     AppendText,
+    /// Build the owned startup inputs from the arguments the runtime captured, or an error.
+    CaptureInputs,
+    /// Check each captured argument as UTF-8 and own it as text, or give the first error.
+    DecodeArguments,
 }
 
 impl PrimitiveOperation {

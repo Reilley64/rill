@@ -64,17 +64,18 @@ fn installed_formatting_and_conversions() {
     )
     .unwrap();
     let executable = root.join("bin/provider-probe");
-    fs::copy(std::env::current_exe().unwrap(), &executable).unwrap();
-    let output = Command::new(executable)
-        .args([
-            "--exact",
-            "installed_formatting_and_conversions",
-            "--nocapture",
-        ])
-        .env("RILL_PROVIDER_TEST_ROOT", &root)
-        .current_dir(root.join("app"))
-        .output()
-        .unwrap();
+    rill_test_support::stage_current_exe(&executable).unwrap();
+    let output = rill_test_support::run_staged(
+        Command::new(executable)
+            .args([
+                "--exact",
+                "installed_formatting_and_conversions",
+                "--nocapture",
+            ])
+            .env("RILL_PROVIDER_TEST_ROOT", &root)
+            .current_dir(root.join("app")),
+    )
+    .unwrap();
     assert!(
         output.status.success(),
         "{}\n{}",

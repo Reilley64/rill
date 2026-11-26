@@ -6,7 +6,7 @@ use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
-use std::sync::{Mutex, OnceLock};
+use std::sync::OnceLock;
 
 pub const TARGET: &str = env!("RILL_HOST_TARGET");
 const PROBE_ROOT: &str = "RILL_PROBE_ROOT";
@@ -41,6 +41,10 @@ impl Installation {
     fn error_file(&self) -> PathBuf {
         self.root.join("app/error.txt")
     }
+
+    fn shapes_file(&self) -> PathBuf {
+        self.root.join("app/shapes.txt")
+    }
 }
 
 impl Drop for Installation {
@@ -61,10 +65,14 @@ fn child_request() -> Option<InstalledRequest> {
 }
 
 /// What the backend did with a staged program.
+#[allow(dead_code)]
 pub struct Built {
     installation: Installation,
     /// The backend's error message, when it refused to emit an object.
     pub error: Option<String>,
+    /// The names of the shapes the compilable-program rule found in the
+    /// program, one per line of the child's report.
+    pub shapes: Vec<String>,
 }
 
 impl Built {
@@ -104,9 +112,15 @@ pub fn emit(test: &str, source: &str) -> Option<Built> {
             String::from_utf8_lossy(&output.stderr)
         );
         let error = fs::read_to_string(installation.error_file()).ok();
+        let shapes = fs::read_to_string(installation.shapes_file())
+            .unwrap_or_default()
+            .lines()
+            .map(str::to_owned)
+            .collect();
         return Some(Built {
             installation,
             error,
+            shapes,
         });
     };
     let root = PathBuf::from(std::env::var_os(PROBE_ROOT).expect("a probe child"));
@@ -114,9 +128,18 @@ pub fn emit(test: &str, source: &str) -> Option<Built> {
     let limits = AnalysisLimits::default();
     let typed = analyze_typed(&graph, limits);
     let analysis = ProgramAnalysis::new(&graph, &typed, limits);
-    let Compilability::Compilable(program) = analysis.compilability() else {
-        panic!("the staged program is not compilable");
+    let program = match analysis.compilability() {
+        Compilability::Compilable(program) => program,
+        Compilability::Blocked(blocker) => {
+            panic!("the staged program is not compilable: {blocker:?}")
+        }
     };
+    let shapes: Vec<String> = program
+        .shapes()
+        .iter()
+        .map(|shape| format!("{shape:?}"))
+        .collect();
+    fs::write(root.join("app/shapes.txt"), shapes.join("\n")).unwrap();
     if let Err(error) =
         codegen_llvm::emit_object(&graph, &program, &root.join("app/program.o"), false)
     {
@@ -126,7 +149,6 @@ pub fn emit(test: &str, source: &str) -> Option<Built> {
 }
 
 fn run_in_installation(test: &str, source: &str) -> (Installation, Output) {
-    static LAUNCH: Mutex<()> = Mutex::new(());
     let root = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(test.replace("::", "-"));
     let _ = fs::remove_dir_all(&root);
     let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
@@ -156,23 +178,15 @@ fn run_in_installation(test: &str, source: &str) -> (Installation, Output) {
     fs::write(root.join("app/main.rill"), source).unwrap();
     let installation = Installation { root };
 
-    let child = {
-        let _launch = LAUNCH
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let probe = installation.root.join("bin/probe");
-        fs::copy(std::env::current_exe().unwrap(), &probe).unwrap();
+    let probe = installation.root.join("bin/probe");
+    rill_test_support::stage_current_exe(&probe).unwrap();
+    let output = rill_test_support::run_staged(
         Command::new(&probe)
             .args(["--exact", test, "--include-ignored", "--nocapture"])
             .env(PROBE_ROOT, &installation.root)
-            .current_dir(installation.root.join("app"))
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap()
-    };
-    let output = child.wait_with_output().unwrap();
+            .current_dir(installation.root.join("app")),
+    )
+    .unwrap();
     (installation, output)
 }
 

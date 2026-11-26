@@ -22,6 +22,8 @@ mod compilable;
 mod declaration_ordinal;
 #[path = "m5/disposers.rs"]
 mod disposers;
+#[path = "m5/env.rs"]
+mod env;
 #[path = "m5/field_routes.rs"]
 mod field_routes;
 #[path = "m5/fresh_result_storage.rs"]

@@ -2,6 +2,7 @@
 
 use std::collections::BTreeSet;
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::OnceLock;
@@ -64,6 +65,13 @@ impl Workspace {
         relative
     }
 
+    fn identity(&self, entry: &str) -> String {
+        fs::canonicalize(self.work.join(entry))
+            .unwrap()
+            .display()
+            .to_string()
+    }
+
     fn rill(&self, args: &[&str]) -> Output {
         self.command(&self.rill, args, None)
     }
@@ -77,7 +85,7 @@ impl Workspace {
         if let Some(path) = path {
             command.env("PATH", path);
         }
-        support::run(&mut command).expect("run a staged executable")
+        rill_test_support::run_staged(&mut command).expect("run a staged executable")
     }
 
     fn names(&self, directory: &str) -> BTreeSet<String> {
@@ -153,13 +161,25 @@ fn assert_hello(output: &Output) {
     assert!(output.stderr.is_empty(), "{}", stderr(output));
 }
 
-fn assert_unsupported_shape(output: &Output) {
+fn assert_unsupported_shape(
+    output: &Output,
+    identity: &str,
+    line: usize,
+    column: usize,
+    source_line: &str,
+    marked: &str,
+) {
     assert_eq!(output.status.code(), Some(1), "{}", stderr(output));
     assert!(output.stdout.is_empty(), "{output:?}");
-    let report = stderr(output);
-    assert!(report.contains("R0605"), "{report}");
-    assert!(report.contains("main.rill:2:"), "{report}");
-    assert!(report.contains("a - b"), "{report}");
+    let gutter = " ".repeat(line.to_string().len());
+    assert_eq!(
+        stderr(output),
+        format!(
+            "error[R0605]: valid source whose shape the compiler cannot compile yet\n --> {identity}:{line}:{column}\n{gutter} |\n{line} | {source_line}\n{gutter} | {}{}\n",
+            " ".repeat(column - 1),
+            "^".repeat(marked.len())
+        )
+    );
 }
 
 fn assert_checked_hello(output: &Output) {
@@ -264,6 +284,75 @@ fn run_prints_hello_world_and_leaves_nothing_behind() {
     workspace.assert_no_scratch();
 }
 
+const ECHO_PROGRAM: &str = r#"#include <stdio.h>
+int main(int argc, char **argv) {
+    for (int i = 0; i < argc; i++) {
+        for (const char *p = argv[i]; *p; p++) printf("%02x", (unsigned char)*p);
+        printf("\n");
+    }
+    return 0;
+}
+"#;
+
+const ECHO_CC: &str = "#!/bin/sh\nexec /usr/bin/cc -o \"$2\" \"$(dirname \"$0\")/echo.c\"\n";
+
+#[test]
+fn run_passes_the_entry_as_argument_zero_and_the_rest_untouched_and_in_order() {
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::PermissionsExt;
+    let workspace = Workspace::new("arguments");
+    let entry = workspace.entry("hello-world.rill", HELLO);
+    let bin = workspace.work.join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    let cc = bin.join("cc");
+    fs::write(bin.join("echo.c"), ECHO_PROGRAM).unwrap();
+    fs::write(&cc, ECHO_CC).unwrap();
+    fs::set_permissions(&cc, fs::Permissions::from_mode(0o755)).unwrap();
+    let before = workspace.files();
+    let arguments: [&[u8]; 5] = [
+        b"first",
+        b"\xff\xfe-not-utf-8",
+        b"",
+        b"--check-allocations",
+        b"last",
+    ];
+    let mut command = Command::new(&workspace.rill);
+    command
+        .arg("run")
+        .arg(&entry)
+        .args(
+            arguments
+                .iter()
+                .map(|bytes| std::ffi::OsStr::from_bytes(bytes)),
+        )
+        .current_dir(&workspace.work)
+        .env("TMPDIR", &workspace.temporary)
+        .env("PATH", format!("{}:/usr/bin:/bin", bin.display()));
+    let output = rill_test_support::run_staged(&mut command).expect("run a staged executable");
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    let hex = |bytes: &[u8]| {
+        bytes
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
+    };
+    let mut expected = format!("{}\n", hex(entry.as_bytes()));
+    for bytes in arguments {
+        expected += &format!("{}\n", hex(bytes));
+    }
+    assert_eq!(String::from_utf8_lossy(&output.stdout), expected);
+    assert!(output.stderr.is_empty(), "{}", stderr(&output));
+    workspace.assert_no_scratch();
+    fs::remove_dir_all(&bin).unwrap();
+    assert_eq!(
+        workspace.files(),
+        before
+            .difference(&BTreeSet::from(["bin".to_owned()]))
+            .cloned()
+            .collect()
+    );
+}
+
 #[test]
 fn build_writes_the_entry_stem_and_the_program_prints_hello_world() {
     let workspace = Workspace::new("build");
@@ -305,12 +394,58 @@ fn an_unsupported_shape_exits_one_with_r0605_and_no_executable() {
     let workspace = Workspace::new("unsupported");
     let entry = workspace.entry("main.rill", UNSUPPORTED);
     let before = workspace.files();
-    for command in ["build", "run"] {
-        assert_unsupported_shape(&workspace.rill(&[command, &entry]));
+    let identity = workspace.identity(&entry);
+    let minus = UNSUPPORTED.lines().nth(1).unwrap();
+    let column = minus.find("a - b").unwrap() + 1;
+    for command in ["check", "build", "run"] {
+        assert_unsupported_shape(
+            &workspace.rill(&[command, &entry]),
+            &identity,
+            2,
+            column,
+            minus,
+            "a - b",
+        );
         assert_eq!(workspace.files(), before);
         workspace.assert_no_scratch();
     }
-    assert_unsupported_shape(&workspace.rill(&["build", &entry, "-o", "app/built"]));
+    assert_unsupported_shape(
+        &workspace.rill(&["build", &entry, "-o", "app/built"]),
+        &identity,
+        2,
+        column,
+        minus,
+        "a - b",
+    );
+    assert!(!workspace.work.join("app/built").exists());
+}
+
+#[test]
+fn a_shape_the_backend_does_not_lower_is_r0605_from_check_build_and_run_alike() {
+    let workspace = Workspace::new("backend-shape");
+    let entry = workspace.entry("main.rill", "let flag = true;\n");
+    let identity = workspace.identity(&entry);
+    let before = workspace.files();
+    for command in ["check", "build", "run"] {
+        assert_unsupported_shape(
+            &workspace.rill(&[command, &entry]),
+            &identity,
+            1,
+            12,
+            "let flag = true;",
+            "true",
+        );
+        assert_eq!(workspace.files(), before);
+        workspace.assert_no_scratch();
+    }
+    assert_unsupported_shape(
+        &workspace.rill(&["build", &entry, "-o", "app/built"]),
+        &identity,
+        1,
+        12,
+        "let flag = true;",
+        "true",
+    );
     assert!(!workspace.work.join("app/built").exists());
 }
 
@@ -372,4 +507,41 @@ fn build_refuses_to_overwrite_the_entry() {
         fs::read_to_string(workspace.work.join(&entry)).unwrap(),
         HELLO
     );
+}
+
+fn signal_cc(workspace: &Workspace, signal: &str) -> String {
+    let directory = workspace.work.join("fake-bin");
+    fs::create_dir_all(&directory).unwrap();
+    let cc = directory.join("cc");
+    fs::write(
+        &cc,
+        format!(
+            "#!/bin/sh\nprintf '#!/bin/sh\\nkill -{signal} $$\\n' > \"$2\"\n/bin/chmod +x \"$2\"\n"
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&cc, fs::Permissions::from_mode(0o755)).unwrap();
+    directory.into_os_string().into_string().unwrap()
+}
+
+#[test]
+fn run_returns_128_plus_the_signal_and_prints_nothing_when_the_program_dies_by_one() {
+    let workspace = Workspace::new("signal");
+    let entry = workspace.entry("hello-world.rill", HELLO);
+    let before = workspace.files();
+    for (signal, number) in [("KILL", 9), ("TERM", 15), ("ABRT", 6)] {
+        let path = signal_cc(&workspace, signal);
+        let output = workspace.command(&workspace.rill, &["run", &entry], Some(&path));
+        assert_eq!(
+            output.status.code(),
+            Some(128 + number),
+            "{signal}: {}",
+            stderr(&output)
+        );
+        assert!(output.stdout.is_empty(), "{signal}: {output:?}");
+        assert!(output.stderr.is_empty(), "{signal}: {output:?}");
+        workspace.assert_no_scratch();
+    }
+    fs::remove_dir_all(workspace.work.join("fake-bin")).unwrap();
+    assert_eq!(workspace.files(), before);
 }

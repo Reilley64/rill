@@ -140,20 +140,6 @@ fn the_object_exports_the_startup_symbols_and_the_allocation_flag_and_nothing_el
     );
 }
 
-#[test]
-fn an_admitted_shape_the_backend_cannot_lower_is_an_error_and_no_object() {
-    let Some(built) = support::emit(
-        "an_admitted_shape_the_backend_cannot_lower_is_an_error_and_no_object",
-        "let flag = true;\n",
-    ) else {
-        return;
-    };
-    let error = built.error.clone().expect("a backend error");
-    assert!(error.contains("cannot lower"), "{error}");
-    assert!(error.contains("main.rill"), "{error}");
-    assert!(!built.object().exists());
-}
-
 fn defined_symbols(object: &Path) -> Vec<String> {
     let mut nm = Command::new("nm");
     nm.arg("-g");

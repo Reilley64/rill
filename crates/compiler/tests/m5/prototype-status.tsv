@@ -33,8 +33,8 @@ prototypes/12-streaming-io.rill	run	SourceRejected:R0400:import has no public ta
 prototypes/12-streaming-io.rill	test	SourceRejected:R0400:import has no public target:length	-	-	-	-	-
 prototypes/13-filesystem.rill	run	SourceRejected:R0400:import has no public target:Path	-	-	-	-	-
 prototypes/13-filesystem.rill	test	SourceRejected:R0400:import has no public target:Path	-	-	-	-	-
-prototypes/14-environment-inputs.rill	run	SourceRejected:R0400:import has no public target:Inputs	-	-	-	-	-
-prototypes/14-environment-inputs.rill	test	SourceRejected:R0400:import has no public target:Inputs	-	-	-	-	-
+prototypes/14-environment-inputs.rill	run	SourceRejected:R0400:import has no public target:EnvErrorKind	-	-	-	-	-
+prototypes/14-environment-inputs.rill	test	SourceRejected:R0400:import has no public target:EnvErrorKind	-	-	-	-	-
 prototypes/15-secure-random.rill	run	SourceRejected:R0400:import has no public target:randomBytes	-	-	-	-	-
 prototypes/15-secure-random.rill	test	SourceRejected:R0400:import has no public target:randomBytes	-	-	-	-	-
 prototypes/16-sql-codecs/main.rill	run	SourceRejected:R0400:import has no public target:import std::sql::Parameter;	-	-	-	-	-
