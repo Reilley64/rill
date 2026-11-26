@@ -238,10 +238,10 @@ fn the_log_string_root_sets_the_graph_depth() {
             let report = analyze_ownership(receipt, AnalysisLimits::default());
             let mut depths = Vec::new();
             for (prefix, triple) in [
-                ("implement log(text: string)", (2582, 126, 6)),
-                ("implement log(text: &string)", (2579, 124, 5)),
-                ("implement panic(message: string)", (2545, 103, 5)),
-                ("implement panic(message: &string)", (2542, 101, 4)),
+                ("implement log(text: string)", (2366, 126, 6)),
+                ("implement log(text: &string)", (2363, 124, 5)),
+                ("implement panic(message: string)", (2329, 103, 5)),
+                ("implement panic(message: &string)", (2326, 101, 4)),
             ] {
                 let root = output_root(&report, prefix);
                 let module = module_of(graph, root.site().module);
@@ -371,31 +371,31 @@ fn unsupported_output_siblings_stay_incomplete_at_their_call_and_pay_nothing_mor
 }
 
 const GROUPED: [(&str, &str, (usize, usize, usize)); 6] = [
-    ("literal", "import std::log;\nlog(\"x\");\n", (4318, 104, 5)),
+    ("literal", "import std::log;\nlog(\"x\");\n", (4158, 104, 5)),
     (
         "literal group",
         "import std::log;\nlog((\"x\"));\n",
-        (4324, 105, 6),
+        (4164, 105, 6),
     ),
     (
         "literal scope",
         "import std::log;\n{ log(\"x\"); }\n",
-        (4323, 105, 6),
+        (4163, 105, 6),
     ),
     (
         "borrow",
         "import std::log;\nlet s = \"x\";\nlog(&s);\n",
-        (4429, 155, 6),
+        (4269, 155, 6),
     ),
     (
         "borrow groups",
         "import std::log;\nlet s = \"x\";\nlog(((&s)));\n",
-        (4441, 157, 8),
+        (4281, 157, 8),
     ),
     (
         "move",
         "import std::log;\nlet s = \"x\";\nlog(s);\n",
-        (4419, 152, 5),
+        (4259, 152, 5),
     ),
 ];
 

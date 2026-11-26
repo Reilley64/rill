@@ -212,7 +212,7 @@ fn the_env_bridges_are_screened_before_they_are_charged_and_charged_by_key() {
                 let used = typed.statistics();
                 crate::limit::assert_triple(
                     (used.work, used.entries, used.max_depth),
-                    (444_459, 48_983, 12),
+                    (426_041, 53_700, 12),
                     test_mode,
                 );
                 let exact = AnalysisLimits {

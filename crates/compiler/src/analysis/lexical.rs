@@ -3,7 +3,7 @@ use super::*;
 
 #[derive(Debug, Default)]
 pub(super) struct Lexical<'g> {
-    modules: BTreeMap<&'g ModuleKey, ScopeIndex<'g>>,
+    modules: Vec<ScopeIndex<'g>>,
 }
 
 #[derive(Debug)]
@@ -62,7 +62,7 @@ impl<'g> Analyzer<'g> {
                     )?;
                 }
             }
-            lexical.modules.insert(&module.key, scopes);
+            lexical.modules.push(scopes);
         }
         self.lexical = Some(Arc::new(lexical));
         Ok(())
@@ -79,7 +79,7 @@ impl<'g> Analyzer<'g> {
             return Ok(None);
         };
         self.step(1)?;
-        let scopes = &lexical.modules[&module.key];
+        let scopes = &lexical.modules[self.slot(module)];
         let mut scope = scopes.enclosing_block[node];
         while let Some(start) = scope {
             self.step(1)?;

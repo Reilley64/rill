@@ -331,11 +331,6 @@ pub(super) fn scoped_summary<'g>(
     let Some(module) = inventory.graph().installed_routine_source() else {
         return Ok(None);
     };
-    keyed::charge(
-        &role.implementation.id.module,
-        inventory.headers().len(),
-        budget,
-    )?;
     let Some(metadata) = inventory.headers().get(&role.implementation.id) else {
         return Ok(None);
     };

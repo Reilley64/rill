@@ -53,27 +53,25 @@ pub(in crate::analysis) fn filters_agree<'g>(
 ) -> Work<bool> {
     budget.reserve(inputs.len())?;
     let inputs: Vec<_> = inputs.iter().map(|ty| Some(ty.clone())).collect();
-    let domains =
-        |filters: &[Substitution<'g>], budget: &mut Budget| -> Work<BTreeMap<_, Vec<_>>> {
-            budget.reserve(filters.len())?;
-            let filters: Vec<_> = filters.iter().map(|s| (s.position, &s.argument)).collect();
-            let mut grouped = BTreeMap::new();
-            for hit in patterns::project(family, &inputs, &filters, true, budget)? {
-                budget.reserve(2)?;
-                grouped
-                    .entry(&hit.body.source.declaration)
-                    .or_insert_with(Vec::new)
-                    .push(hit.observed_domain.unwrap());
-            }
-            Ok(grouped)
-        };
+    let domains = |filters: &[Substitution<'g>], budget: &mut Budget| -> Work<PathMap<_, Vec<_>>> {
+        budget.reserve(filters.len())?;
+        let filters: Vec<_> = filters.iter().map(|s| (s.position, &s.argument)).collect();
+        let mut grouped = PathMap::new();
+        for hit in patterns::project(family, &inputs, &filters, true, budget)? {
+            budget.reserve(2)?;
+            grouped
+                .get_or_insert_with(&hit.body.source.declaration, Vec::new, budget)?
+                .push(hit.observed_domain.unwrap());
+        }
+        Ok(grouped)
+    };
     let left = domains(left, budget)?;
     let right = domains(right, budget)?;
     for body in &family.implementations {
         budget.step(1)?;
         let id = &body.source.declaration;
-        let l = left.get(id).map_or(&[][..], Vec::as_slice);
-        let r = right.get(id).map_or(&[][..], Vec::as_slice);
+        let l = left.get(id, budget)?.map_or(&[][..], Vec::as_slice);
+        let r = right.get(id, budget)?.map_or(&[][..], Vec::as_slice);
         if !patterns::included(l, r, budget)? || !patterns::included(r, l, budget)? {
             return Ok(false);
         }
@@ -92,18 +90,18 @@ pub(in crate::analysis) fn rank<'g>(
     if viable.is_empty() {
         return Ok(Some(HypotheticalOutcome::NoMatch));
     }
-    let mut covers = BTreeMap::new();
+    let mut covers = PathMap::new();
     for candidate in viable {
         budget.step(1)?;
         let id = &candidate.body.source.declaration;
-        if let Some(full) = covers.get_mut(id) {
+        if let Some(full) = covers.get_mut(id, budget)? {
             *full |= candidate.covers;
         } else {
             budget.reserve(1)?;
-            covers.insert(id, candidate.covers);
+            covers.insert(id, candidate.covers, budget)?;
         }
     }
-    for (&body, &full) in &covers {
+    for (&body, &full) in covers.iter() {
         budget.step(1)?;
         if !full {
             continue;

@@ -243,12 +243,12 @@ fn outer_disposer_runs_once_then_drops_the_remaining_text_fields() {
             for (name, pinned, caller) in [
                 (
                     "normal",
-                    stats(6_634, 542, 3),
+                    stats(5_664, 542, 3),
                     &[("disposer", "value: Note")][..],
                 ),
                 (
                     "explicit",
-                    stats(6_784, 622, 3),
+                    stats(5_814, 622, 3),
                     &[
                         ("disposer", "value: Note"),
                         ("init", "release(value)"),
@@ -257,7 +257,7 @@ fn outer_disposer_runs_once_then_drops_the_remaining_text_fields() {
                 ),
                 (
                     "canonical",
-                    stats(6_746, 604, 3),
+                    stats(5_776, 604, 3),
                     &[("disposer", "value: Note"), ("init", "dispose(value)")][..],
                 ),
             ] {
@@ -323,7 +323,7 @@ fn outer_disposer_runs_once_then_drops_the_remaining_text_fields() {
                 max_depth: 5,
             };
             crate::limit::assert_graph_limit(&analyze_ownership(receipt, old));
-            let pinned = stats(205_828, 5_963, 5);
+            let pinned = stats(198_998, 5_963, 5);
             assert_eq!(graph.statistics(), pinned);
             assert_eq!(graph.completion(), GraphCompletion::SourceRejected);
             let (exact, short) = caps(pinned);
@@ -355,17 +355,17 @@ fn text_fields_reject_reread_and_moves_outside_the_active_disposer() {
             let rejected = [
                 (
                     "outside",
-                    stats(2_775, 179, 3),
+                    stats(2_455, 179, 3),
                     ("R0501", "value.moved", "value: Note"),
                 ),
                 (
                     "outsideLocal",
-                    stats(2_786, 188, 3),
+                    stats(2_466, 188, 3),
                     ("R0501", "value.head", "value: Note"),
                 ),
                 (
                     "reread",
-                    stats(6_442, 470, 3),
+                    stats(5_472, 470, 3),
                     ("R0200", "value.text", "value.text"),
                 ),
             ];
@@ -415,7 +415,7 @@ fn a_written_field_disposal_is_a_verified_graph_edge() {
         |_, module, receipt| {
             let id = &named(module, "manual").id;
             let query = |limits| lower_body(receipt, module, id, limits).unwrap();
-            let pinned = stats(6_568, 518, 3);
+            let pinned = stats(5_598, 518, 3);
             let target = query(AnalysisLimits::default());
             assert_eq!(target.completion(), Completion::Checked);
             assert_eq!(target.statistics(), pinned);
@@ -518,7 +518,7 @@ fn nested_record_disposer_runs_once_then_drops_the_remaining_fields() {
                 (
                     "nested",
                     "Nested",
-                    stats(7_763, 985, 3),
+                    stats(6_903, 985, 3),
                     [
                         &[
                             ("move", "value: Nested.moved -> saved"),
@@ -538,7 +538,7 @@ fn nested_record_disposer_runs_once_then_drops_the_remaining_fields() {
                 (
                     "leaf",
                     "Leaf",
-                    stats(7_374, 807, 3),
+                    stats(6_514, 807, 3),
                     [
                         &[
                             ("dispose", "value: Leaf.child.text"),
@@ -555,7 +555,7 @@ fn nested_record_disposer_runs_once_then_drops_the_remaining_fields() {
                 (
                     "bare",
                     "Bare",
-                    stats(7_375, 807, 3),
+                    stats(6_515, 807, 3),
                     [
                         &[
                             ("dispose", "value: Bare.manual"),
@@ -575,7 +575,7 @@ fn nested_record_disposer_runs_once_then_drops_the_remaining_fields() {
                 (
                     "grouped",
                     "Grouped",
-                    stats(7_376, 807, 3),
+                    stats(6_516, 807, 3),
                     [
                         &[
                             ("dispose", "value: Grouped.manual"),
@@ -642,7 +642,7 @@ fn nested_record_disposer_runs_once_then_drops_the_remaining_fields() {
 
             // Rule 6: a dead `dispose(value.manual)` grants no edge and
             // leaves `manual` to the epilogue.
-            let pinned = stats(7_276, 766, 4);
+            let pinned = stats(6_416, 766, 4);
             let target = query("dead")(AnalysisLimits::default());
             assert_eq!(target.completion(), Completion::Checked);
             assert_eq!(target.statistics(), pinned);
@@ -670,12 +670,12 @@ fn nested_record_disposer_runs_once_then_drops_the_remaining_fields() {
             for (name, pinned, expected) in [
                 (
                     "twice",
-                    stats(7_276, 781, 3),
+                    stats(6_416, 781, 3),
                     ("R0200", "dispose(value.manual)", "dispose(value.manual)"),
                 ),
                 (
                     "outside",
-                    stats(3_459, 336, 3),
+                    stats(3_069, 336, 3),
                     ("R0501", "dispose(value.manual)", "value: Nested"),
                 ),
             ] {
@@ -704,8 +704,8 @@ fn nested_record_disposer_runs_once_then_drops_the_remaining_fields() {
             // lowered. Outside an active disposer, a written field disposal
             // checks in the targeted query but is not a verified graph edge.
             for (name, pinned, graph_blocker) in [
-                ("explicit", stats(3_377, 287, 3), "value"),
-                ("canonical", stats(3_377, 287, 3), "value"),
+                ("explicit", stats(2_987, 287, 3), "value"),
+                ("canonical", stats(2_987, 287, 3), "value"),
             ] {
                 let target = query(name)(AnalysisLimits::default());
                 assert_eq!(target.completion(), Completion::Incomplete, "{name}");
@@ -720,7 +720,7 @@ fn nested_record_disposer_runs_once_then_drops_the_remaining_fields() {
                     graph_blocker.as_bytes()
                 );
             }
-            let pinned = stats(3_343, 374, 3);
+            let pinned = stats(3_133, 374, 3);
             let target = query("ordinaryField")(AnalysisLimits::default());
             assert_eq!(target.completion(), Completion::Checked);
             assert_eq!(target.statistics(), pinned);
@@ -744,7 +744,7 @@ fn nested_record_disposer_runs_once_then_drops_the_remaining_fields() {
             );
 
             // The whole receipt for this source.
-            let pinned = stats(226_583, 8_459, 5);
+            let pinned = stats(217_403, 8_459, 5);
             assert_eq!(graph.statistics(), pinned);
             assert_eq!(graph.completion(), GraphCompletion::SourceRejected);
             let (exact, short) = caps(pinned);
@@ -783,10 +783,10 @@ fn written_field_disposal_siblings_keep_their_parent_caps() {
         |_, module, receipt| {
             let graph = analyze_ownership(receipt, AnalysisLimits::default());
             for (name, pinned, blocker) in [
-                ("flatFlag", stats(6_465, 476, 3), "dispose(value.flag)"),
-                ("groupedFlag", stats(6_466, 476, 3), "dispose((value.flag))"),
-                ("projected", stats(2_588, 186, 3), "dispose(parcel.text)"),
-                ("local", stats(2_661, 222, 4), "dispose(parcel.text)"),
+                ("flatFlag", stats(5_495, 476, 3), "dispose(value.flag)"),
+                ("groupedFlag", stats(5_496, 476, 3), "dispose((value.flag))"),
+                ("projected", stats(2_448, 186, 3), "dispose(parcel.text)"),
+                ("local", stats(2_521, 222, 4), "dispose(parcel.text)"),
             ] {
                 let id = &named(module, name).id;
                 let query = |limits| lower_body(receipt, module, id, limits).unwrap();
@@ -809,7 +809,7 @@ fn written_field_disposal_siblings_keep_their_parent_caps() {
                 assert!(matches!(active.dependencies(), [edge]
                     if edge.contract == DependencyContract::BuiltinDispose));
             }
-            let pinned = stats(198_256, 5_257, 5);
+            let pinned = stats(193_396, 5_257, 5);
             assert_eq!(graph.statistics(), pinned);
             assert_eq!(graph.completion(), GraphCompletion::Incomplete);
             let (exact, short) = caps(pinned);

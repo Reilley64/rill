@@ -204,7 +204,6 @@ impl<'g> DisposerLookup<'_, 'g> {
                 }
                 let headers = inventory.headers();
                 for id in [dispose, winner] {
-                    keyed::charge(&id.module, headers.len(), budget)?;
                     if !headers.get(id).is_some_and(|h| h.requirements.is_empty()) {
                         return Err(Stop::Pending(node));
                     }
@@ -720,7 +719,6 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             return Err(pending());
         }
         let headers = &self.typed.inventory().type_facts().declarations;
-        keyed::charge(&parent_id.module, headers.len(), self.budget)?;
         let facts = headers.get(parent_id).ok_or_else(pending)?;
         let DeclarationShape::Enum { variants } = &facts.shape else {
             return Err(pending());
@@ -1207,7 +1205,6 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             return Ok(false);
         }
         let declarations = &self.typed.inventory().type_facts().declarations;
-        keyed::charge(&call.callee.module, declarations.len(), self.budget)?;
         let Some(function) = declarations.get(call.callee) else {
             return Ok(false);
         };
@@ -1269,7 +1266,6 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             return Err(Stop::Pending(node));
         }
         let declarations = &self.typed.inventory().type_facts().declarations;
-        keyed::charge(&call.callee.module, declarations.len(), self.budget)?;
         let signature = declarations.get(call.callee).ok_or(Stop::Pending(node))?;
         let DeclarationShape::Function { parameters, result } = &signature.shape else {
             return Err(Stop::Pending(node));
@@ -1611,7 +1607,6 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         }
         let inventory = self.typed.inventory();
         let declarations = &inventory.type_facts().declarations;
-        keyed::charge(&declaration.module, declarations.len(), self.budget)?;
         let Some(facts) = declarations.get(declaration) else {
             return Ok(None);
         };
@@ -6808,7 +6803,6 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             return Err(Stop::Pending(node));
         }
         let declarations = &self.typed.inventory().type_facts().declarations;
-        keyed::charge(&call.callee.module, declarations.len(), self.budget)?;
         let header = declarations.get(call.callee).ok_or(Stop::Pending(node))?;
         let (formal, contents) =
             retained_two_hop_bool_contract(header).ok_or(Stop::Pending(node))?;
@@ -7569,7 +7563,6 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             return Err(pending());
         }
         let headers = &self.typed.inventory().type_facts().declarations;
-        keyed::charge(&call.callee.module, headers.len(), self.budget)?;
         let header = headers
             .get(call.callee)
             .filter(|header| std::ptr::eq(call.callee, &header.declaration.id))
@@ -7728,7 +7721,6 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             return Err(pending());
         }
         let headers = &self.typed.inventory().type_facts().declarations;
-        keyed::charge(&call.callee.module, headers.len(), self.budget)?;
         let header = headers
             .get(call.callee)
             .filter(|header| std::ptr::eq(call.callee, &header.declaration.id))
@@ -7848,7 +7840,6 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             .and_then(|id| self.typed.bodies().goal(id).ok())
             .ok_or_else(pending)?;
         let metadata = self.typed.inventory().headers();
-        keyed::charge(&call.callee.module, metadata.len(), self.budget)?;
         let metadata = metadata.get(call.callee).ok_or_else(pending)?;
         let [requirement] = metadata.requirements.as_slice() else {
             return Err(pending());
@@ -7965,7 +7956,6 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         }
         let typed = self.typed;
         let ordinary = typed.inventory();
-        keyed::charge(&call.callee.module, ordinary.family_probes(), self.budget)?;
         let family = ordinary.captured_family(call.callee).ok_or_else(pending)?;
         self.budget.step(family.implementations.len())?;
         let header = &family
