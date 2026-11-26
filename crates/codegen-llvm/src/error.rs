@@ -49,3 +49,23 @@ impl fmt::Display for BackendError {
 }
 
 impl std::error::Error for BackendError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use compiler::source::Snapshot;
+
+    #[test]
+    fn a_refusal_is_an_internal_error_named_without_debug_output() {
+        let source = Snapshot::capture("main.rill", b"import std::log;\nlet flag = true;\n")
+            .expect("a snapshot");
+        let span = source.span(21, 25).expect("a span");
+        let error =
+            BackendError::unsupported_at("main.rill", &span, "an operation with no lowering yet");
+        assert!(matches!(error, BackendError::Internal(_)));
+        assert_eq!(
+            error.to_string(),
+            "backend failure: the backend cannot lower an operation with no lowering yet at main.rill:2:5, which the compilable-program rule admitted"
+        );
+    }
+}
