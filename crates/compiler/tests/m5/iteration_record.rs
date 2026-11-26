@@ -120,7 +120,7 @@ fn record_yield_cleans_the_partial_item_then_the_suffix() {
         SOURCE,
         |request, module, receipt, typed| {
             let capture = loader::load_installed(request.clone()).unwrap();
-            let receipt_stats = stats(497_043, 61_387, 12);
+            let receipt_stats = stats(502_164, 64_359, 12);
             assert_eq!(receipt.statistics(), receipt_stats);
             let (exact, short) = limits(receipt_stats);
             let at = analyze_typed(&capture, exact);

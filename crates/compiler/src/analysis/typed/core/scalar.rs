@@ -2,6 +2,7 @@
 use super::*;
 use crate::analysis::ordinary::{Compatibility, FamilyFacts, ImplementationFacts, patterns};
 use crate::loader::DeclarationId;
+use crate::loader::keyed::DeclarationTable;
 use crate::parser::NodeKind;
 use std::sync::Arc;
 
@@ -68,7 +69,7 @@ pub(in crate::analysis) struct PrimitiveCore<'g> {
     pub equality: Option<&'g Declaration>,
     pub providers: Vec<PrimitiveProvider<'g>>,
     pub protection: Vec<PrimitiveProtection<'g>>,
-    pub bridges: std::collections::BTreeMap<&'g DeclarationId, PrimitiveOperation>,
+    pub bridges: DeclarationTable<'g, PrimitiveOperation>,
 }
 
 impl PrimitiveCore<'_> {
@@ -344,6 +345,13 @@ impl<'g> PrimitiveCore<'g> {
             let module = pinned_module(graph, "format.rill", budget)?.unwrap();
             self.check_providers(inventory, module, show, PrimitiveRole::Show, budget)?;
         }
+        self.bridges.follow_order(
+            graph
+                .modules()
+                .iter()
+                .flat_map(|module| module.declarations.iter().map(|d| &d.id)),
+        );
+        debug_assert!(self.bridges.keys().is_sorted());
         Ok(())
     }
 
@@ -383,6 +391,11 @@ impl<'g> PrimitiveCore<'g> {
                 None
             };
             if let Some(binding) = binding {
+                if !self.bridges.is_sized() {
+                    let count = inventory.graph().declaration_count();
+                    budget.reserve(count)?;
+                    self.bridges.size_for(inventory.graph().id(), count);
+                }
                 budget.reserve(1)?;
                 self.bridges
                     .insert(&binding.declaration.id, binding.operation);

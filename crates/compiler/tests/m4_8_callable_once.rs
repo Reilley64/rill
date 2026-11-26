@@ -130,33 +130,33 @@ fn check_sources(entry: &Path) {
             "unused-once",
             WRAPPER.into(),
             Incomplete,
-            Some((427265, 52776, 12)),
+            Some((429221, 54732, 12)),
         ),
         (
             "declared-only",
             declared_only.into(),
             Incomplete,
-            Some((426743, 52722, 12)),
+            Some((428699, 54678, 12)),
         ),
         (
             "erased",
             format!("{erased}{CALLER}"),
             Incomplete,
-            Some((429913, 53000, 12)),
+            Some((431875, 54962, 12)),
         ),
         (
             "missing",
             format!("{missing}{CALLER}"),
             Incomplete,
-            Some((429455, 52916, 12)),
+            Some((431420, 54881, 12)),
         ),
         (
             "borrowed-once",
             borrowed_once.into(),
             SourceRejected,
-            Some((428875, 53070, 12)),
+            Some((433640, 55686, 12)),
         ),
-        ("local", local.into(), Checked, Some((428782, 53125, 12))),
+        ("local", local.into(), Checked, Some((433547, 55741, 12))),
         (
             "unclosed-actual",
             format!(
@@ -183,7 +183,7 @@ fn check_sources(entry: &Path) {
             "capture-unpaid",
             format!("{WRAPPER}{capture}"),
             Incomplete,
-            Some((432315, 53433, 12)),
+            Some((434289, 55407, 12)),
         ),
         (
             "sibling",
@@ -195,31 +195,31 @@ fn check_sources(entry: &Path) {
             "discarded-output",
             output.into(),
             Incomplete,
-            Some((430176, 53132, 12)),
+            Some((432138, 55094, 12)),
         ),
         (
             "declared-shared-actual",
             shared_actual,
             Checked,
-            Some((430697, 53158, 12)),
+            Some((435466, 55778, 12)),
         ),
         (
             "declared-shared-only",
             shared.into(),
             Incomplete,
-            Some((426743, 52725, 12)),
+            Some((428699, 54681, 12)),
         ),
         (
             "declared-shared-output-discard",
             shared_discard.into(),
             Incomplete,
-            Some((431028, 53280, 12)),
+            Some((432993, 55245, 12)),
         ),
         (
             "shared-two-actuals",
             format!("{shared_second}{shared}{SHARED_CALLER}"),
             Checked,
-            Some((433519, 53430, 12)),
+            Some((438300, 56062, 12)),
         ),
         (
             "shared-unclosed",
@@ -227,7 +227,7 @@ fn check_sources(entry: &Path) {
                 "{shared}{SHARED_CALLER}function open(job: &() => bool): bool {{ return run(job); }}\n"
             ),
             Incomplete,
-            Some((432068, 53139, 12)),
+            Some((434039, 55110, 12)),
         ),
         (
             "shared-dead-only",
@@ -235,19 +235,19 @@ fn check_sources(entry: &Path) {
                 "{shared}function caller(flag: bool): bool {{ let f: () => bool = () => flag; if (false) {{ return run(&f); }} return flag; }}\n"
             ),
             Incomplete,
-            Some((429609, 53032, 12)),
+            Some((431574, 54997, 12)),
         ),
         (
             "shared-public",
             format!("export {shared}{SHARED_CALLER}"),
             Incomplete,
-            Some((429455, 52982, 12)),
+            Some((431420, 54947, 12)),
         ),
         (
             "shared-grouped",
             format!("{shared}{}", SHARED_CALLER.replace("run(&f)", "run((&f))")),
             Incomplete,
-            Some((429681, 53010, 12)),
+            Some((431646, 54975, 12)),
         ),
         (
             "shared-scoped",
@@ -255,7 +255,7 @@ fn check_sources(entry: &Path) {
                 "{shared}function caller(flag: bool): bool {{ let f: () => bool = () => flag; {{ return run(&f); }} }}\n"
             ),
             Incomplete,
-            Some((429460, 52986, 12)),
+            Some((431425, 54951, 12)),
         ),
         (
             "shared-loop",
@@ -263,7 +263,7 @@ fn check_sources(entry: &Path) {
                 "{shared}function caller(flag: bool): bool {{ let f: () => bool = () => flag; while (flag) {{ return run(&f); }} return false; }}\n"
             ),
             Incomplete,
-            Some((429639, 53050, 12)),
+            Some((431604, 55015, 12)),
         ),
         (
             "shared-result-capture",
@@ -271,20 +271,20 @@ fn check_sources(entry: &Path) {
                 "{shared}function caller(flag: bool): bool {{ let res: Result<bool, i32> = Result.Ok(flag); let f: () => bool = () => isOk(&res); return run(&f); }}\n"
             ),
             Incomplete,
-            Some((430996, 53206, 12)),
+            Some((432964, 55174, 12)),
         ),
         (
             "shared-formal-actual",
             format!("{shared}function caller(f: () => bool): bool {{ return run(&f); }}\n"),
             Incomplete,
-            Some((429080, 52899, 12)),
+            Some((431042, 54861, 12)),
         ),
         // The 17-source M4 baseline: no wrapper route to discover.
         (
             "baseline",
             include_str!("../../../tests/installed/typed/main.rill").into(),
             Checked,
-            Some((486782, 59722, 12)),
+            Some((491852, 62506, 12)),
         ),
     ] {
         if name == "baseline" {

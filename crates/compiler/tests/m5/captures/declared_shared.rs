@@ -107,7 +107,7 @@ fn declared_shared_formal_reads_the_lent_actual_in_one_call_frame() {
             let stats = typed.statistics();
             assert_eq!(
                 (stats.work, stats.entries, stats.max_depth),
-                (430_697, 53_158, 12)
+                (435_466, 55_778, 12)
             );
             let graph = analyze_ownership(receipt, AnalysisLimits::default());
             let target = check_local_capture_root(module, receipt, &graph, "caller", None);
@@ -187,7 +187,7 @@ fn declared_shared_frame_checks_the_lent_owner_and_rejects_without_mir() {
             let stats = typed.statistics();
             assert_eq!(
                 (stats.work, stats.entries, stats.max_depth),
-                (439_803, 54_220, 12)
+                (444_616, 56_884, 12)
             );
             let graph = analyze_ownership(receipt, AnalysisLimits::default());
             for (name, rejection, caps) in [
@@ -262,7 +262,7 @@ fn declared_shared_siblings_keep_their_parent_caps() {
                 (ResultUseBlocker::Storage, "&mut f"),
             ]
             .as_slice(),
-            (429_397, 52_972, 12),
+            (431_362, 54_937, 12),
         ),
         (
             "bound",
@@ -270,7 +270,7 @@ fn declared_shared_siblings_keep_their_parent_caps() {
                 "{SHARED}function caller(flag: bool): bool {{ let f: () => bool = () => flag; let out = run(&f); return out; }}\n"
             ),
             [(ResultUseBlocker::CallBoundary, "job()")].as_slice(),
-            (429_491, 53_011, 12),
+            (431_459, 54_979, 12),
         ),
         // Review ci-uaa1 (ri-785.7 #1): an owned once wrapper whose body
         // invokes another function, not its formal.
@@ -278,7 +278,7 @@ fn declared_shared_siblings_keep_their_parent_caps() {
             "otherOwned",
             "function other(): bool { return true; }\nfunction invokeOther<F>(job: F): bool where callableOnce(F, [], bool) { return other(); }\nfunction callerOther(flag: bool): bool { return invokeOther(() => flag); }\n".to_string(),
             [(ResultUseBlocker::Containment, "job: F")].as_slice(),
-            (430_662, 52_948, 12),
+            (432_627, 54_913, 12),
         ),
     ] {
         probe_report(

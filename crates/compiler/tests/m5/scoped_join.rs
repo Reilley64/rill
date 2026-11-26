@@ -1537,9 +1537,9 @@ function joined(numbers: List<i32>, otherInput: List<i32>): [i32, i32] {{
                     assert_eq!(
                         observed(typed_stats),
                         if live {
-                            (505328, 62668, 12)
+                            (510650, 65548, 12)
                         } else {
-                            (505329, 62670, 12)
+                            (510651, 65550, 12)
                         }
                     );
                     let (exact, short) = budget_caps(typed_stats);
@@ -1968,15 +1968,15 @@ fn unsupported_reference_children_preserve_prior_typed_caps() {
                 (
                     "input: &i32, work: () => &i32",
                     "() => input, work",
-                    499786,
-                    61177,
+                    501931,
+                    63322,
                     12,
                 ),
                 (
                     "input: &i32",
                     "() => input, () => { let local = 2i32; return &(local + 1i32); }",
-                    501481,
-                    61487,
+                    503626,
+                    63632,
                     14,
                 ),
             ] {
@@ -2380,10 +2380,10 @@ fn unsupported_comparison_operands_keep_their_old_typed_budgets() {
             // Exact a1f4db7 caps on the original result-order capture, changing
             // only the Boolean child's displayed expression.
             for (expr, max_work, max_entries, max_depth) in [
-                ("29i32 == (&numbers)[1u64]", 503479, 62015, 12),
-                ("((29i32)) == (((&numbers)[1u64]))", 504192, 62107, 14),
-                ("(&numbers)[1u64] == (2i32+27i32)", 503884, 62081, 12),
-                ("((&numbers)[1u64]+0i32) == 29i32", 503889, 62081, 14),
+                ("29i32 == (&numbers)[1u64]", 505630, 64166, 12),
+                ("((29i32)) == (((&numbers)[1u64]))", 506343, 64258, 14),
+                ("(&numbers)[1u64] == (2i32+27i32)", 506035, 64232, 12),
+                ("((&numbers)[1u64]+0i32) == 29i32", 506040, 64232, 14),
             ] {
                 fs::write(
                     &request.entry,
@@ -3200,8 +3200,8 @@ fn installed_join_fresh_results_keep_the_written_occurrence() {
             let loaded = loader::load_installed(request.clone()).unwrap();
             captured_keys(&loaded, true);
             let typed_cost = Statistics {
-                work: 455_279,
-                entries: 56_889,
+                work: 460_267,
+                entries: 59_573,
                 max_depth: 12,
             };
             let (exact, short) = budget_caps(typed_cost);
@@ -3572,8 +3572,8 @@ fn an_unproved_join_does_not_invent_a_discard() {
             let loaded = loader::load_installed(request.clone()).unwrap();
             captured_keys(&loaded, true);
             let cost = Statistics {
-                work: 439_203,
-                entries: 54_439,
+                work: 441_201,
+                entries: 56_437,
                 max_depth: 12,
             };
             let (exact, short) = budget_caps(cost);
@@ -3699,8 +3699,8 @@ fn reference_pair_reserves_before_it_builds_each_slot() {
         |request, _, _| {
             let graph = loader::load_installed(request.clone()).unwrap();
             let pinned = compiler::analysis::Statistics {
-                work: 439_354,
-                entries: 54_590,
+                work: 444_330,
+                entries: 57_262,
                 max_depth: 12,
             };
             let (exact, short) = budget_caps(pinned);
@@ -3727,9 +3727,9 @@ fn reference_pair_reserves_before_it_builds_each_slot() {
             // different points: before the reorder every one of these stops at
             // 405,462 / 44,957 / 12.
             for (max_entries, stopped) in [
-                (50403, (357523, 50402, 12)),
-                (50401, (357520, 50399, 12)),
-                (50398, (357492, 50396, 12)),
+                (52407, (359527, 52406, 12)),
+                (52405, (359524, 52403, 12)),
+                (52402, (359496, 52400, 12)),
             ] {
                 let limited = analyze_typed(
                     &graph,

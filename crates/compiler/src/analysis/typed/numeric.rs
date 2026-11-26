@@ -5,9 +5,8 @@ use super::*;
 use crate::analysis::conversions::{self, ConversionFamily, RegistrationIssueKind, RoleHypothesis};
 use crate::analysis::{Binding, Declaration, DeclarationShape, Payload, Type};
 use crate::loader::keyed::DeclarationTable;
-use crate::loader::{DeclarationId, Implementation, Module, Namespace, Target};
+use crate::loader::{Implementation, Module, Namespace, Target};
 use crate::parser::NodeKind;
-use std::collections::BTreeMap;
 
 pub mod values;
 
@@ -17,8 +16,8 @@ pub(in crate::analysis) struct ConversionCore<'g> {
     pub try_into: Option<&'g Declaration>,
     pub families: DeclarationTable<'g, ConversionFamily<'g>>,
     pub numeric_error: Option<&'g Declaration>,
-    pub registered: BTreeMap<&'g DeclarationId, RegisteredConversion<'g>>,
-    pub bridges: BTreeMap<&'g DeclarationId, ConversionProvider>,
+    pub registered: DeclarationTable<'g, RegisteredConversion<'g>>,
+    pub bridges: DeclarationTable<'g, ConversionProvider>,
     bytes: Option<&'g Declaration>,
     list: Option<ListRole<'g>>,
 }
@@ -142,13 +141,39 @@ impl<'g> ConversionCore<'g> {
         list: Option<ListRole<'g>>,
         budget: &mut Budget,
     ) -> Work<()> {
+        self.fill(inventory, result, option, list, budget)?;
+        if self.registered.is_sized() {
+            let order = || {
+                inventory
+                    .graph()
+                    .modules()
+                    .iter()
+                    .flat_map(|module| module.declarations.iter().map(|d| &d.id))
+            };
+            self.registered.follow_order(order());
+            self.bridges.follow_order(order());
+            debug_assert!(self.registered.keys().is_sorted() && self.bridges.keys().is_sorted());
+        }
+        Ok(())
+    }
+
+    fn fill(
+        &mut self,
+        inventory: &OrdinaryAnalysis<'g>,
+        result: Option<ResultRole<'g>>,
+        option: Option<OptionRole<'g>>,
+        list: Option<ListRole<'g>>,
+        budget: &mut Budget,
+    ) -> Work<()> {
         let graph = inventory.graph();
         let Some(module) = pinned_module(graph, "convert.rill", budget)? else {
             return Ok(());
         };
         let count = graph.declaration_count();
-        budget.reserve(count)?;
+        budget.reserve(count.checked_mul(3).ok_or(())?)?;
         self.families.size_for(graph.id(), count);
+        self.registered.size_for(graph.id(), count);
+        self.bridges.size_for(graph.id(), count);
         for (name, alias, role) in [("into", "from", None), ("tryInto", "tryFrom", result)] {
             if name == "tryInto" && role.is_none() {
                 continue;

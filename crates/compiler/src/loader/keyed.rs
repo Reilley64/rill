@@ -68,11 +68,20 @@ pub(crate) fn module_position(
     Ok(modules.binary_search_by(|module| module.key.cmp(key)).ok())
 }
 
-pub(crate) fn module_slot(modules: &[Module], module: &Module) -> Option<usize> {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ModuleSlot(usize);
+
+impl ModuleSlot {
+    pub(crate) fn index(self) -> usize {
+        self.0
+    }
+}
+
+pub(crate) fn module_slot(modules: &[Module], module: &Module) -> Option<ModuleSlot> {
     let size = std::mem::size_of::<Module>();
     let at = (module as *const Module as usize).checked_sub(modules.as_ptr() as usize)?;
     let index = at / size;
-    (at % size == 0 && std::ptr::eq(modules.get(index)?, module)).then_some(index)
+    (at % size == 0 && std::ptr::eq(modules.get(index)?, module)).then_some(ModuleSlot(index))
 }
 
 pub(crate) struct ModuleTables<K, V>(Vec<BTreeMap<K, V>>);
@@ -100,27 +109,27 @@ impl<K: Ord, V> ModuleTables<K, V> {
 
     pub(crate) fn get(
         &self,
-        slot: usize,
+        slot: ModuleSlot,
         key: &K,
         meter: &mut impl Meter,
     ) -> Result<Option<&V>, ()> {
         meter.step(1)?;
-        Ok(self.0.get(slot).and_then(|table| table.get(key)))
+        Ok(self.0.get(slot.0).and_then(|table| table.get(key)))
     }
 
     pub(crate) fn get_mut(
         &mut self,
-        slot: usize,
+        slot: ModuleSlot,
         key: &K,
         meter: &mut impl Meter,
     ) -> Result<Option<&mut V>, ()> {
         meter.step(1)?;
-        Ok(self.0.get_mut(slot).and_then(|table| table.get_mut(key)))
+        Ok(self.0.get_mut(slot.0).and_then(|table| table.get_mut(key)))
     }
 
     pub(crate) fn insert(
         &mut self,
-        slot: usize,
+        slot: ModuleSlot,
         key: K,
         value: V,
         meter: &mut impl Meter,
@@ -128,24 +137,25 @@ impl<K: Ord, V> ModuleTables<K, V> {
         meter.step(1)?;
         Ok(self
             .0
-            .get_mut(slot)
+            .get_mut(slot.0)
             .expect("a module table is sized for its graph before it is filled")
             .insert(key, value))
     }
 
-    pub(crate) fn table(&self, slot: usize) -> Option<&BTreeMap<K, V>> {
-        self.0.get(slot)
+    pub(crate) fn table(&self, slot: ModuleSlot) -> Option<&BTreeMap<K, V>> {
+        self.0.get(slot.0)
     }
 
     pub(crate) fn len(&self) -> usize {
         self.0.iter().map(BTreeMap::len).sum()
     }
 
-    pub(crate) fn iter(&self) -> impl Iterator<Item = (usize, &K, &V)> {
-        self.0
-            .iter()
-            .enumerate()
-            .flat_map(|(slot, table)| table.iter().map(move |(key, value)| (slot, key, value)))
+    pub(crate) fn iter(&self) -> impl Iterator<Item = (ModuleSlot, &K, &V)> {
+        self.0.iter().enumerate().flat_map(|(slot, table)| {
+            table
+                .iter()
+                .map(move |(key, value)| (ModuleSlot(slot), key, value))
+        })
     }
 
     pub(crate) fn values(&self) -> impl Iterator<Item = &V> {
@@ -339,6 +349,10 @@ impl<'g, V> DeclarationTable<'g, V> {
     pub(crate) fn size_for(&mut self, context: GraphId, count: usize) {
         self.context = Some(context);
         self.slots = vec![None; count];
+    }
+
+    pub(crate) fn is_sized(&self) -> bool {
+        self.context.is_some()
     }
 
     fn index(&self, id: &DeclarationId) -> Option<usize> {
@@ -713,18 +727,27 @@ mod tests {
             (0, (3, 7), 2),
             (2, (5, 0), 4),
         ] {
-            assert_eq!(tables.insert(slot, key, value, &mut meter), Ok(None));
+            assert_eq!(
+                tables.insert(ModuleSlot(slot), key, value, &mut meter),
+                Ok(None)
+            );
         }
-        assert_eq!(tables.insert(0, (3, 7), 3, &mut meter), Ok(Some(2)));
+        assert_eq!(
+            tables.insert(ModuleSlot(0), (3, 7), 3, &mut meter),
+            Ok(Some(2))
+        );
         assert_eq!(meter.spent, 5);
-        assert_eq!(tables.get(0, &(3, 7), &mut meter), Ok(Some(&3)));
-        assert_eq!(tables.get(1, &(3, 7), &mut meter), Ok(None));
-        *tables.get_mut(2, &(5, 1), &mut meter).unwrap().unwrap() += 10;
+        assert_eq!(tables.get(ModuleSlot(0), &(3, 7), &mut meter), Ok(Some(&3)));
+        assert_eq!(tables.get(ModuleSlot(1), &(3, 7), &mut meter), Ok(None));
+        *tables
+            .get_mut(ModuleSlot(2), &(5, 1), &mut meter)
+            .unwrap()
+            .unwrap() += 10;
         assert_eq!(meter.spent, 8);
         assert_eq!(tables.len(), 4);
         let order: Vec<_> = tables
             .iter()
-            .map(|(slot, key, value)| (slot, *key, *value))
+            .map(|(slot, key, value)| (slot.index(), *key, *value))
             .collect();
         assert_eq!(
             order,
@@ -735,11 +758,15 @@ mod tests {
                 (2, (5, 1), 15)
             ]
         );
-        assert_eq!(tables.table(2).map(BTreeMap::len), Some(2));
-        assert!(tables.table(3).is_none());
+        assert_eq!(tables.table(ModuleSlot(2)).map(BTreeMap::len), Some(2));
+        assert!(tables.table(ModuleSlot(3)).is_none());
         let mut refused = Meterstick::with_limit(0);
-        assert!(tables.get(0, &(3, 7), &mut refused).is_err());
-        assert!(tables.insert(0, (1, 1), 9, &mut refused).is_err());
+        assert!(tables.get(ModuleSlot(0), &(3, 7), &mut refused).is_err());
+        assert!(
+            tables
+                .insert(ModuleSlot(0), (1, 1), 9, &mut refused)
+                .is_err()
+        );
         assert_eq!(tables.len(), 4);
     }
 }
