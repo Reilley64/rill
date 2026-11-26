@@ -273,6 +273,8 @@ class CommentCheckRunTests(unittest.TestCase):
         tasks = doctor.tomllib.loads((doctor.ROOT / "mise.toml").read_text())["tasks"]
         self.assertIn("check:comments", tasks["check"]["depends"])
         self.assertEqual(tasks["check:comments"]["run"], "python tools/check_comments.py")
+        self.assertIn("check:staged-executables", tasks["check"]["depends"])
+        self.assertEqual(tasks["check:staged-executables"]["run"], "python tools/check_staged_executables.py")
         for name in ["check.yml", "native.yml"]:
             workflow = yaml.load((doctor.ROOT / ".github/workflows" / name).read_text(), Loader=yaml.BaseLoader)
             checkouts = [step for job in workflow["jobs"].values() for step in job["steps"]
@@ -333,10 +335,11 @@ class WorkspaceTests(unittest.TestCase):
             ["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"],
             cwd=doctor.ROOT, text=True))
         allowed = {"rill-collection": set(), "rill-error-storage": set(),
-                   "rill-runtime": {"rill-collection"},
-                   "compiler": {"rill-collection", "rill-error-storage"},
+                   "rill-runtime": {"rill-collection"}, "rill-test-support": set(),
+                   "compiler": {"rill-collection", "rill-error-storage", "rill-test-support"},
                    "ide": {"compiler"}, "lsp": {"ide"},
-                   "codegen-llvm": {"compiler"}, "cli": {"compiler", "lsp", "codegen-llvm"}}
+                   "codegen-llvm": {"compiler", "rill-test-support"},
+                   "cli": {"compiler", "lsp", "codegen-llvm", "rill-test-support"}}
         packages = {package["name"]: package for package in metadata["packages"]}
         self.assertEqual(set(packages), set(allowed))
         for name, package in packages.items():
@@ -344,7 +347,8 @@ class WorkspaceTests(unittest.TestCase):
                 self.assertEqual(package["publish"], [])
                 internal = {dep["name"] for dep in package["dependencies"] if dep["name"] in packages}
                 self.assertLessEqual(internal, allowed[name])
-                if name in {"compiler", "ide", "lsp", "rill-collection", "rill-error-storage", "rill-runtime"}:
+                if name in {"compiler", "ide", "lsp", "rill-collection", "rill-error-storage", "rill-runtime",
+                            "rill-test-support"}:
                     self.assertFalse({"inkwell", "llvm-sys"} & {dep["name"] for dep in package["dependencies"]})
 
 
@@ -481,7 +485,7 @@ class TestTaskTests(unittest.TestCase):
         tasks = doctor.tomllib.loads((doctor.ROOT / "mise.toml").read_text())["tasks"]
         self.assertEqual(tasks["test"]["depends"], ["doctor"])
         self.assertEqual(tasks["test"]["run"],
-                         "cargo test --locked --no-default-features -p compiler -p ide -p lsp -p cli -p rill-collection -p rill-error-storage -p rill-runtime")
+                         "cargo test --locked --no-default-features -p compiler -p ide -p lsp -p cli -p rill-collection -p rill-error-storage -p rill-runtime -p rill-test-support")
         self.assertEqual(tasks["test:compiler"]["depends"], ["doctor"])
         self.assertEqual(tasks["test:compiler"]["run"],
                          "cargo test --locked -p compiler --no-default-features")
@@ -492,7 +496,7 @@ class TestTaskTests(unittest.TestCase):
         self.assertIn("check:rust", tasks["check"]["depends"])
         self.assertEqual(tasks["check:rust"]["run"], [
             "cargo fmt --all -- --check",
-            "cargo clippy --locked --no-default-features -p compiler -p ide -p lsp -p cli -p rill-collection -p rill-error-storage -p rill-runtime --all-targets -- -D warnings",
+            "cargo clippy --locked --no-default-features -p compiler -p ide -p lsp -p cli -p rill-collection -p rill-error-storage -p rill-runtime -p rill-test-support --all-targets -- -D warnings",
         ])
 
 

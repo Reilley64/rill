@@ -81,7 +81,7 @@ impl Workspace {
         if let Some(path) = path {
             command.env("PATH", path);
         }
-        support::run(&mut command).expect("run a staged executable")
+        rill_test_support::run_staged(&mut command).expect("run a staged executable")
     }
 
     fn names(&self, directory: &str) -> BTreeSet<String> {

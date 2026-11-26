@@ -8,6 +8,9 @@ publish.workspace = true
 compiler.workspace = true
 inkwell = { version = "=0.11.0", default-features = false, features = ["llvm23-1-force-static", "no-libffi-linking"] }
 
+[dev-dependencies]
+rill-test-support.workspace = true
+
 [target.'cfg(target_arch = "x86_64")'.dependencies]
 inkwell = { version = "=0.11.0", default-features = false, features = ["target-x86"] }
 

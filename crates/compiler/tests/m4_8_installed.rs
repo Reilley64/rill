@@ -47,7 +47,7 @@ fn installed_option_uses_pinned_sources_in_both_modes() {
         fs::create_dir_all(root.join(path)).unwrap();
     }
     let executable = root.join("bin/m48-installed-probe");
-    fs::copy(std::env::current_exe().unwrap(), &executable).unwrap();
+    rill_test_support::stage_current_exe(&executable).unwrap();
     let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../stdlib");
     for module in ["core.rill", "option.rill"] {
         fs::copy(source.join(module), root.join("lib/rill/std").join(module)).unwrap();
@@ -66,16 +66,17 @@ fn installed_option_uses_pinned_sources_in_both_modes() {
     ",
     )
     .unwrap();
-    let output = Command::new(executable)
-        .args([
-            "--exact",
-            "installed_option_uses_pinned_sources_in_both_modes",
-            "--nocapture",
-        ])
-        .env("RILL_INSTALLED_PROBE_ROOT", &root)
-        .current_dir(root.join("app"))
-        .output()
-        .unwrap();
+    let output = rill_test_support::run_staged(
+        Command::new(executable)
+            .args([
+                "--exact",
+                "installed_option_uses_pinned_sources_in_both_modes",
+                "--nocapture",
+            ])
+            .env("RILL_INSTALLED_PROBE_ROOT", &root)
+            .current_dir(root.join("app")),
+    )
+    .unwrap();
     assert!(
         output.status.success(),
         "{}\n{}",
