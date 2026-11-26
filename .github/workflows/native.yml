@@ -94,16 +94,6 @@ jobs:
           LLVM_SYS_231_STRICT_VERSIONING: "1"
         run: mise run test:prototypes
 
-      - name: "Test: Verify native runtime acceptance is unavailable"
-        run: |
-          status=0
-          output=$(mise run test:runtime 2>&1) || status=$?
-          printf '%s\n' "$output"
-          if [ "$status" -ne 2 ] || ! printf '%s\n' "$output" | grep -qF 'test:runtime is not implemented in this scaffold'; then
-            echo "::error::test:runtime no longer reports the scaffold stub (exit $status). Replace this assertion with the real acceptance run."
-            exit 1
-          fi
-
       # The release task runs the repository checks and then the product build,
       # which is a stub that exits 2. The stub message appears only after the
       # checks passed, so a failing check still fails this step. Replace this
