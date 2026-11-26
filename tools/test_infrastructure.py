@@ -3,6 +3,7 @@ import io
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 import sys
 import tempfile
@@ -451,6 +452,57 @@ class NativeAcceptanceTests(unittest.TestCase):
                 result = self.run_step(script, self.RUNTIME_STEP, "mise run test:runtime")
                 self.assertNotEqual(result.returncode, 0)
                 self.assertIn("::error::test:runtime no longer reports the scaffold stub", result.stdout)
+
+    CACHE_PIN = re.compile(r"^actions/cache/(restore|save)@[0-9a-f]{40}$")
+
+    def cache_steps(self):
+        workflow = yaml.load((doctor.ROOT / ".github/workflows/native.yml").read_text(), Loader=yaml.BaseLoader)
+        steps = workflow["jobs"]["native"]["steps"]
+        return steps, [step for step in steps if step.get("uses", "").startswith("actions/cache")]
+
+    def test_the_cargo_cache_is_restored_by_every_run_and_keyed_without_the_commit(self):
+        steps, cache = self.cache_steps()
+        restore = [step for step in cache if "/restore@" in step["uses"]]
+        self.assertEqual(len(restore), 1)
+        [restore] = restore
+        self.assertRegex(restore["uses"], self.CACHE_PIN)
+        self.assertNotIn("if", restore)
+        self.assertNotIn("github.sha", restore["with"]["key"])
+        self.assertIn("hashFiles('Cargo.lock', 'mise.toml', 'mise.lock')", restore["with"]["key"])
+        self.assertIn("matrix.os", restore["with"]["key"])
+        self.assertNotIn("github.sha", restore["with"].get("restore-keys", ""))
+        self.assertLess(steps.index(restore), next(i for i, s in enumerate(steps) if "setup:llvm" in s.get("run", "")))
+
+    def test_a_platform_never_restores_another_platforms_cache(self):
+        workflow = yaml.load((doctor.ROOT / ".github/workflows/native.yml").read_text(), Loader=yaml.BaseLoader)
+        systems = [entry["os"] for entry in workflow["jobs"]["native"]["strategy"]["matrix"]["include"]]
+        [restore] = [step for step in self.cache_steps()[1] if "/restore@" in step["uses"]]
+
+        def render(template, system):
+            return template.replace("${{ matrix.os }}", system).replace("${{ hashFiles('Cargo.lock', 'mise.toml', 'mise.lock') }}", "HASH")
+
+        for system in systems:
+            prefixes = [render(line, system) for line in restore["with"]["restore-keys"].splitlines()]
+            for other in systems:
+                with self.subTest(system=system, other=other):
+                    key = render(restore["with"]["key"], other)
+                    self.assertEqual(any(key.startswith(prefix) for prefix in prefixes), system == other)
+
+    def test_only_main_and_integration_runs_save_the_cargo_cache_once_per_lockfile(self):
+        steps, cache = self.cache_steps()
+        [restore] = [step for step in cache if "/restore@" in step["uses"]]
+        save = [step for step in cache if "/save@" in step["uses"]]
+        self.assertEqual(len(save), 1)
+        [save] = save
+        self.assertRegex(save["uses"], self.CACHE_PIN)
+        self.assertEqual(save["with"]["path"], restore["with"]["path"])
+        self.assertEqual(save["with"]["key"], restore["with"]["key"])
+        self.assertEqual(steps[-1], save)
+        condition = save["if"]
+        self.assertIn(f"steps.{restore['id']}.outputs.cache-hit != 'true'", condition)
+        self.assertIn("github.ref == 'refs/heads/main'", condition)
+        self.assertIn("startsWith(github.ref, 'refs/heads/integration/')", condition)
+        self.assertNotIn("pull_request", condition)
 
     def run_release(self, mise_script):
         guard = '[ "$1 $2" != "run verify:release" ] && exit 64\n'
