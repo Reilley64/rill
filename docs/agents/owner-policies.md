@@ -6,7 +6,7 @@ Policies the owner set for work in this rig. Follow them in every brief and repo
 
 1. Merge only on integration branches. Never rebase and never force push. Preserve found work: commit it or carry it forward.
 2. Keep PR #73 a draft until the chief of staff (`rill/staff.chief-of-staff`) marks it ready.
-3. Commit nothing to `main`, except docs-only changes the owner has allowed the chief of staff to land. Put any other change on a pushed branch.
+3. Push nothing to `main`. Every change reaches `main` through a pull request with green checks, docs-only changes included.
 
 ## Checks
 

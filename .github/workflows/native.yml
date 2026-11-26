@@ -2,21 +2,8 @@ name: "Test: Native acceptance"
 
 on:
   push:
-    branches: [main]
-    paths: &native_paths
-      - 'crates/**'
-      - 'stdlib/**'
-      - 'runtime/**'
-      - 'tests/**'
-      - 'tools/unavailable.py'
-      - 'tools/llvm/**'
-      - 'Cargo.toml'
-      - 'Cargo.lock'
-      - 'mise.toml'
-      - 'mise.lock'
-      - '.github/workflows/native.yml'
+    branches: [main, 'integration/**']
   pull_request:
-    paths: *native_paths
   workflow_dispatch:
 
 permissions:
@@ -39,10 +26,35 @@ jobs:
         os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, macos-15-intel]
 
     steps:
+      # A pull request run checks out the merge commit. Its first parent is the
+      # base, so two commits are enough to list the pull request's changed files.
       - name: "Source: Check out the repository"
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+        with:
+          fetch-depth: 2
+
+      # Native acceptance is a required check on every pull request, so these
+      # jobs always run. A pull request that touches no native path skips the
+      # steps below. Skipped steps end the job green.
+      - name: "Setup: Decide whether native paths changed"
+        id: scope
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          native=true
+          if [ "$EVENT_NAME" = pull_request ]; then
+            native=false
+            files=$(git diff --name-only HEAD^1 HEAD)
+            while IFS= read -r file; do
+              case "$file" in
+                crates/* | stdlib/* | runtime/* | tests/* | tools/llvm/* | tools/unavailable.py | Cargo.toml | Cargo.lock | mise.toml | mise.lock | .github/workflows/native.yml) native=true ;;
+              esac
+            done <<< "$files"
+          fi
+          echo "native=$native" >> "$GITHUB_OUTPUT"
 
       - name: "Setup: Install mise"
+        if: steps.scope.outputs.native == 'true'
         uses: jdx/mise-action@5228313ee0372e111a38da051671ca30fc5a96db # v3
         with:
           version: 2026.11.8
@@ -50,6 +62,7 @@ jobs:
           cache: false
 
       - name: "Setup: Install the locked tools"
+        if: steps.scope.outputs.native == 'true'
         run: mise install --locked
 
       # This gate is unavailable, not successful, until native acceptance exists.
@@ -58,6 +71,7 @@ jobs:
       # message, so a red job means the stub changed or the task broke. Replace
       # this step with `mise run test:runtime` when native acceptance exists.
       - name: "Test: Verify native runtime acceptance is unavailable"
+        if: steps.scope.outputs.native == 'true'
         run: |
           status=0
           output=$(mise run test:runtime 2>&1) || status=$?
