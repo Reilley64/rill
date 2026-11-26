@@ -209,12 +209,71 @@ class WorkflowTests(unittest.TestCase):
                                  "${{ github.workspace }}/target/ci/rustup")
 
 
+class WorkflowTriggerTests(unittest.TestCase):
+    def test_workflows_run_on_main_and_integration_pushes_and_on_every_pull_request(self):
+        for name in ["check.yml", "native.yml"]:
+            workflow = yaml.load((doctor.ROOT / ".github/workflows" / name).read_text(), Loader=yaml.BaseLoader)
+            with self.subTest(workflow=name):
+                self.assertEqual(workflow["on"]["push"], {"branches": ["main", "integration/**"]})
+                self.assertIn("pull_request", workflow["on"])
+                self.assertFalse(workflow["on"]["pull_request"], "a pull request filter leaves required checks pending")
+                self.assertIn("workflow_dispatch", workflow["on"])
+
+
 class NativeAcceptanceTests(unittest.TestCase):
     STEP = "Test: Verify native runtime acceptance is unavailable"
+    SCOPE = "Setup: Decide whether native paths changed"
+
+    def native_steps(self):
+        workflow = yaml.load((doctor.ROOT / ".github/workflows/native.yml").read_text(), Loader=yaml.BaseLoader)
+        return workflow["jobs"]["native"]["steps"]
+
+    def scope(self, event, *changed):
+        script = next(step["run"] for step in self.native_steps() if step["name"] == self.SCOPE)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            git = lambda *args: subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *args],
+                                               cwd=root, check=True, capture_output=True)
+            git("init", "-q")
+            (root / "README.md").write_text("base\n")
+            git("add", "-A")
+            git("commit", "-q", "-m", "base")
+            for file in changed:
+                (root / file).parent.mkdir(parents=True, exist_ok=True)
+                (root / file).write_text("changed\n")
+            git("add", "-A")
+            git("commit", "-q", "--allow-empty", "-m", "change")
+            output = root / "output"
+            env = {**os.environ, "EVENT_NAME": event, "GITHUB_OUTPUT": str(output)}
+            result = subprocess.run(["bash", "-e", "-c", script], cwd=root, capture_output=True, text=True, env=env)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return output.read_text().strip()
+
+    def test_a_docs_only_pull_request_skips_the_heavy_steps_and_a_code_pull_request_runs_them(self):
+        self.assertEqual(self.scope("pull_request", "docs/a.md", "tools/other.py", "README.md"), "native=false")
+        self.assertEqual(self.scope("pull_request"), "native=false")
+        for path in ["crates/cli/src/main.rs", "stdlib/a.rill", "runtime/a.c", "tests/a.rs", "tools/unavailable.py",
+                     "tools/llvm/a.py", "Cargo.toml", "Cargo.lock", "mise.toml", "mise.lock",
+                     ".github/workflows/native.yml"]:
+            with self.subTest(path=path):
+                self.assertEqual(self.scope("pull_request", "docs/a.md", path), "native=true")
+
+    def test_pushes_and_dispatch_always_run_the_heavy_steps(self):
+        for event in ["push", "workflow_dispatch"]:
+            with self.subTest(event=event):
+                self.assertEqual(self.scope(event, "docs/a.md"), "native=true")
+
+    def test_every_step_after_the_scope_step_is_gated_on_it(self):
+        steps = self.native_steps()
+        names = [step["name"] for step in steps]
+        self.assertEqual(names[:2], ["Source: Check out the repository", self.SCOPE])
+        for step in steps[2:]:
+            with self.subTest(step=step["name"]):
+                self.assertIn(step.get("if"), ["steps.scope.outputs.native == 'true'",
+                                               "github.event_name == 'workflow_dispatch'"])
 
     def run_step(self, mise_script):
-        workflow = yaml.load((doctor.ROOT / ".github/workflows/native.yml").read_text(), Loader=yaml.BaseLoader)
-        steps = workflow["jobs"]["native"]["steps"]
+        steps = self.native_steps()
         self.assertEqual([step["name"] for step in steps].count(self.STEP), 1)
         script = next(step["run"] for step in steps if step["name"] == self.STEP)
         self.assertEqual([step["name"] for step in steps if "mise run test:runtime" in step.get("run", "")],
