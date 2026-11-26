@@ -29,6 +29,8 @@ The ri-qlh record names no rejected alternative for Q33 or Q20. These are what t
 
 Ri-qlh.22.9 chose, as planner rulings and not owner decisions: the hidden build-time option `--check-allocations` of `rill build` and `rill run`, written before the entry and listed in no help text; generated code always defines the one-byte constant `rill_check_allocations` (1 with the option, 0 without), which the runtime reads, so nothing reads an environment variable at run time; and the report, exactly `live allocations: <N>` and a newline on standard error after startup cleanup, or after the panic line. Allocations the runtime makes before startup are not counted. Without the option nothing is counted or written. See [`runtime/README.md`](../../runtime/README.md).
 
+**Note, 2026-11-26 (ri-qlh.22.21).** The checking allocator no longer ships in the product archive, as this ADR's consequence "ships in no product build" requires. `rill-runtime` has a cargo feature `checking` that adds the counting `#[global_allocator]`, the report at exit and the test-support symbol `rill_rt_entry_stack_region`. The installation holds two archives under `lib/rill/runtime/<target>/`, `librill_runtime.a` (no `checking`) and `librill_runtime_checking.a`, and `--check-allocations` selects the second at link time. Generated code no longer defines `rill_check_allocations`: the archive is the only switch, so nothing can disagree with it. The option is parsed like `-o`: `build` takes it before or after the entry, and `run` before the entry, because every argument after the entry belongs to the program. See [`runtime/README.md`](../../runtime/README.md).
+
 ## Open
 
 The owner did not decide these. Nothing above decides them.

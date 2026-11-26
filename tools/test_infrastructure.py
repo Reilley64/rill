@@ -497,6 +497,7 @@ class TestTaskTests(unittest.TestCase):
         self.assertEqual(tasks["check:rust"]["run"], [
             "cargo fmt --all -- --check",
             "cargo clippy --locked --no-default-features -p compiler -p ide -p lsp -p cli -p rill-collection -p rill-error-storage -p rill-runtime -p rill-test-support --all-targets -- -D warnings",
+            "cargo clippy --locked -p rill-runtime --features checking --all-targets -- -D warnings",
         ])
 
 

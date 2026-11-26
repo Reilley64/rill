@@ -10,12 +10,13 @@ path = "src/main.rs"
 
 [features]
 default = ["llvm"]
-llvm = ["dep:codegen-llvm"]
+llvm = ["dep:codegen-llvm", "dep:libc"]
 
 [dependencies]
 compiler.workspace = true
 lsp.workspace = true
 codegen-llvm = { workspace = true, optional = true }
+libc = { version = "0.2", optional = true }
 
 [dev-dependencies]
 rill-test-support.workspace = true

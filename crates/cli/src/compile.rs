@@ -1,6 +1,5 @@
-use crate::check::{
-    self, ANALYSIS_INCOMPLETE, INVOCATION_ERROR, SOURCE_FAILURE, escape, report_failure,
-};
+use crate::check::{self, INVOCATION_ERROR, escape, report_failure};
+use crate::interrupt;
 use crate::native_libs::NATIVE_LIBS;
 use compiler::analysis::compilable::CompilableProgram;
 use compiler::analysis::typed::TypedReport;
@@ -11,12 +10,21 @@ use std::io;
 use std::os::unix::fs::DirBuilderExt;
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::{Path, PathBuf};
-use std::process::{Command, ExitCode};
+use std::process::{Command, ExitCode, Stdio};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 const HOST_TARGET: &str = env!("RILL_HOST_TARGET");
 const SIGNAL_STATUS: u8 = 128;
+const CHECKING_ARCHIVE: &str = "librill_runtime_checking.a";
+const PRODUCT_ARCHIVE: &str = "librill_runtime.a";
+
+const BACKEND_FAILURE: u8 = 3;
+const CC_FAILURE: u8 = 1;
+const INSTALLATION_FAILURE: u8 = 1;
+const OUTPUT_FAILURE: u8 = 1;
+const RUN_FAILURE: u8 = 1;
+const SCRATCH_FAILURE: u8 = 1;
 
 struct Failure {
     status: u8,
@@ -58,7 +66,10 @@ impl Scratch {
                 COUNTER.fetch_add(1, Ordering::Relaxed)
             ));
             match fs::DirBuilder::new().mode(0o700).create(&path) {
-                Ok(()) => return Ok(Self(path)),
+                Ok(()) => {
+                    interrupt::set_scratch(Some(path.clone()));
+                    return Ok(Self(path));
+                }
                 Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {}
                 Err(error) => return Err(error),
             }
@@ -69,6 +80,7 @@ impl Scratch {
 
 impl Drop for Scratch {
     fn drop(&mut self) {
+        interrupt::set_scratch(None);
         let _ = fs::remove_dir_all(&self.0);
     }
 }
@@ -84,6 +96,12 @@ pub fn build(entry: &str, output: Option<&str>, check_allocations: bool) -> Exit
 }
 
 pub fn run(entry: &str, arguments: &[OsString], check_allocations: bool) -> ExitCode {
+    if let Err(error) = interrupt::exit_on_signals() {
+        return report_failure(
+            &format!("cannot take over SIGINT and SIGTERM: {error}"),
+            RUN_FAILURE,
+        );
+    }
     check::with_program(entry, |graph, typed, program| {
         match run_built(entry, graph, typed, program, arguments, check_allocations) {
             Ok(code) => code,
@@ -112,7 +130,7 @@ fn build_to(
         ));
     }
     let scratch = Scratch::create().map_err(scratch_failure)?;
-    let object = emit(graph, typed, program, &scratch.0, check_allocations)?;
+    let object = emit(graph, typed, program, &scratch.0)?;
     let directory = match output.parent() {
         Some(parent) if !parent.as_os_str().is_empty() => parent,
         _ => Path::new("."),
@@ -122,10 +140,10 @@ fn build_to(
         |name| name.to_string_lossy().into_owned(),
     );
     let temporary = directory.join(format!(".{name}.rill-{}", std::process::id()));
-    let linked = link(&object, &temporary).and_then(|()| {
+    let linked = link(&object, &temporary, check_allocations).and_then(|()| {
         fs::rename(&temporary, output).map_err(|error| {
             Failure::new(
-                SOURCE_FAILURE,
+                OUTPUT_FAILURE,
                 format!("cannot write '{}': {error}", output.display()),
             )
         })
@@ -145,30 +163,32 @@ fn run_built(
     check_allocations: bool,
 ) -> Result<ExitCode, Failure> {
     let scratch = Scratch::create().map_err(scratch_failure)?;
-    let object = emit(graph, typed, program, &scratch.0, check_allocations)?;
+    let object = emit(graph, typed, program, &scratch.0)?;
     let executable = scratch.0.join("program");
-    link(&object, &executable)?;
-    let mut child = Command::new(&executable)
-        .arg0(entry)
+    link(&object, &executable, check_allocations)?;
+    let mut child = interrupt::unblock_signals(Command::new(&executable).arg0(entry))
         .args(arguments)
         .spawn()
         .map_err(|error| {
             Failure::new(
-                SOURCE_FAILURE,
+                RUN_FAILURE,
                 format!("cannot run the built program: {error}"),
             )
         })?;
+    interrupt::set_child(Some(child.id()));
     let status = child.wait().map_err(|error| {
         Failure::new(
-            SOURCE_FAILURE,
+            RUN_FAILURE,
             format!("cannot wait for the built program: {error}"),
         )
-    })?;
+    });
+    interrupt::set_child(None);
+    let status = status?;
     drop(scratch);
     let code = match (status.code(), status.signal()) {
         (Some(code), _) => code,
         (None, Some(signal)) => i32::from(SIGNAL_STATUS) + signal,
-        (None, None) => i32::from(SOURCE_FAILURE),
+        (None, None) => i32::from(RUN_FAILURE),
     };
     Ok(ExitCode::from(u8::try_from(code).unwrap_or(u8::MAX)))
 }
@@ -178,60 +198,62 @@ fn emit(
     typed: &TypedReport<'_>,
     program: &CompilableProgram<'_, '_>,
     scratch: &Path,
-    check_allocations: bool,
 ) -> Result<PathBuf, Failure> {
     let object = scratch.join("program.o");
-    codegen_llvm::emit_object(graph, typed, program, &object, check_allocations).map_err(
-        |error| {
-            Failure::new(
-                ANALYSIS_INCOMPLETE,
-                format!(
-                    "the backend failed: {error}; this is a compiler failure, not a source error"
-                ),
-            )
-        },
-    )?;
+    codegen_llvm::emit_object(graph, typed, program, &object).map_err(|error| {
+        Failure::new(
+            BACKEND_FAILURE,
+            format!("the backend failed: {error}; this is a compiler failure, not a source error"),
+        )
+    })?;
     Ok(object)
 }
 
-fn link(object: &Path, executable: &Path) -> Result<(), Failure> {
-    let archive = runtime_archive()?;
-    let output = Command::new("cc")
+fn link(object: &Path, executable: &Path, check_allocations: bool) -> Result<(), Failure> {
+    let archive = runtime_archive(if check_allocations {
+        CHECKING_ARCHIVE
+    } else {
+        PRODUCT_ARCHIVE
+    })?;
+    let child = interrupt::unblock_signals(&mut Command::new("cc"))
         .arg("-o")
         .arg(executable)
         .arg(object)
         .arg(&archive)
         .args(NATIVE_LIBS)
-        .output()
-        .map_err(|error| Failure::new(SOURCE_FAILURE, format!("cannot run cc: {error}")))?;
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .map_err(|error| Failure::new(CC_FAILURE, format!("cannot run cc: {error}")))?;
+    interrupt::set_child(Some(child.id()));
+    let output = child.wait_with_output();
+    interrupt::set_child(None);
+    let output =
+        output.map_err(|error| Failure::new(CC_FAILURE, format!("cannot wait for cc: {error}")))?;
     if output.status.success() {
         return Ok(());
     }
     let mut failure = Failure::new(
-        SOURCE_FAILURE,
+        CC_FAILURE,
         format!("cc failed to link the program ({})", output.status),
     );
     failure.tool_output = output.stderr;
     Err(failure)
 }
 
-fn runtime_archive() -> Result<PathBuf, Failure> {
+fn runtime_archive(name: &str) -> Result<PathBuf, Failure> {
     let archive = std::env::current_exe()
         .and_then(fs::canonicalize)
         .ok()
         .and_then(|executable| Some(executable.parent()?.parent()?.to_path_buf()))
-        .map(|prefix| {
-            prefix
-                .join("lib/rill/runtime")
-                .join(HOST_TARGET)
-                .join("librill_runtime.a")
-        })
+        .map(|prefix| prefix.join("lib/rill/runtime").join(HOST_TARGET).join(name))
         .filter(|archive| archive.is_file());
     archive.ok_or_else(|| {
         Failure::new(
-            SOURCE_FAILURE,
+            INSTALLATION_FAILURE,
             format!(
-                "the installation has no runtime archive at lib/rill/runtime/{}/librill_runtime.a",
+                "the installation has no runtime archive at lib/rill/runtime/{}/{name}",
                 escape(HOST_TARGET)
             ),
         )
@@ -240,7 +262,7 @@ fn runtime_archive() -> Result<PathBuf, Failure> {
 
 fn scratch_failure(error: io::Error) -> Failure {
     Failure::new(
-        SOURCE_FAILURE,
+        SCRATCH_FAILURE,
         format!("cannot create a temporary directory: {error}"),
     )
 }

@@ -10,6 +10,11 @@ crate-type = ["staticlib", "rlib"]
 test = false
 doctest = false
 
+[features]
+# The checking archive behind the hidden `--check-allocations`: counts live allocations and reports them
+# at exit, and exports `rill_rt_entry_stack_region` for tests. No product archive enables it.
+checking = []
+
 [dependencies]
 rill-collection = { path = "../collection" }
 libc = "0.2"

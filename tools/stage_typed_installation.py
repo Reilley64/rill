@@ -17,6 +17,25 @@ SOURCE_LISTS = [ROOT / "tests/installed/typed" / name
                 for name in ("stdlib-sources.txt", "routine-sources.txt")]
 
 
+def runtime_archive(records: list) -> Path:
+    [archive] = [Path(name) for record in records
+                 if record["reason"] == "compiler-artifact"
+                 and record["target"]["name"] == "rill_runtime"
+                 for name in record["filenames"] if name.endswith("librill_runtime.a")]
+    return archive
+
+
+def checking_runtime_archive() -> Path:
+    """The runtime archive built with the `checking` feature, which only `rill build --check-allocations` links."""
+    target = Path(os.environ.get("CARGO_TARGET_DIR", ROOT / "target")) / "checking-runtime"
+    cargo = subprocess.run(
+        ["cargo", "build", "--locked", "--target", PROFILE, "-p", "rill-runtime", "--features", "checking",
+         "--target-dir", str(target), "--message-format=json-render-diagnostics"],
+        cwd=ROOT, check=True, capture_output=True, text=True,
+    )
+    return runtime_archive([json.loads(line) for line in cargo.stdout.splitlines()])
+
+
 def stage(prefix: Path, llvm: bool = False) -> None:
     if prefix.exists():
         raise ValueError(f"installation prefix already exists: {prefix}")
@@ -33,10 +52,6 @@ def stage(prefix: Path, llvm: bool = False) -> None:
     records = [json.loads(line) for line in cargo.stdout.splitlines()]
     executables = {record["target"]["name"]: Path(record["executable"])
                    for record in records if record.get("executable")}
-    [runtime_archive] = [Path(name) for record in records
-                         if record["reason"] == "compiler-artifact"
-                         and record["target"]["name"] == "rill_runtime"
-                         for name in record["filenames"] if name.endswith("librill_runtime.a")]
     [compiler] = [record["package_id"] for record in records
                   if record["reason"] == "compiler-artifact"
                   and record["target"]["name"] == "compiler"
@@ -47,11 +62,13 @@ def stage(prefix: Path, llvm: bool = False) -> None:
     runtime = f"lib/rill/runtime/{PROFILE}"
     inputs = {
         "bin/rill": executables["rill"],
-        f"{runtime}/librill_runtime.a": runtime_archive,
+        f"{runtime}/librill_runtime.a": runtime_archive(records),
         f"{runtime}/librill_ownership.rlib": build / "librill_ownership.rlib",
         f"{runtime}/error.rs": ROOT / "runtime/error/src/lib.rs",
     }
-    if not llvm:
+    if llvm:
+        inputs[f"{runtime}/librill_runtime_checking.a"] = checking_runtime_archive()
+    else:
         inputs["bin/m4_8_installed"] = executables["m4_8_installed"]
     for source_list in SOURCE_LISTS:
         for name in source_list.read_text(encoding="utf-8").splitlines():

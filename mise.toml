@@ -32,7 +32,7 @@ depends = ["check:rust", "check:m5", "check:docs", "check:comments", "check:stag
 [tasks."check:rust"]
 description = "Check Rust formatting and LLVM-free clippy"
 depends = ["doctor"]
-run = ["cargo fmt --all -- --check", "cargo clippy --locked --no-default-features -p compiler -p ide -p lsp -p cli -p rill-collection -p rill-error-storage -p rill-runtime -p rill-test-support --all-targets -- -D warnings"]
+run = ["cargo fmt --all -- --check", "cargo clippy --locked --no-default-features -p compiler -p ide -p lsp -p cli -p rill-collection -p rill-error-storage -p rill-runtime -p rill-test-support --all-targets -- -D warnings", "cargo clippy --locked -p rill-runtime --features checking --all-targets -- -D warnings"]
 
 [tasks.test]
 description = "Run implemented LLVM-free Rust component tests, not complete Rill product acceptance"

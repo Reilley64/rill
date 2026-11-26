@@ -4,8 +4,11 @@
 //! environment, then calls `rill_startup` and `rill_startup_cleanup`, which generated code
 //! provides, on a managed 1 MiB entry stack with a guard page, and returns 0. `main` also sets `SIGPIPE` to ignored, so a write to a closed pipe
 //! fails with `EPIPE` instead of ending the process.
+#[cfg(feature = "checking")]
 mod counting;
 mod entry_stack;
+#[cfg(feature = "checking")]
+mod stack_region;
 
 use std::alloc::{self, Layout};
 use std::ffi::{CStr, c_char, c_int};
@@ -22,7 +25,6 @@ const SIG_IGN: usize = 1;
 unsafe extern "C" {
     fn rill_startup();
     fn rill_startup_cleanup();
-    static rill_check_allocations: u8;
     fn _exit(status: c_int) -> !;
     fn signal(signal: c_int, handler: usize) -> usize;
 }
@@ -35,9 +37,9 @@ struct Captured {
 static CAPTURED: OnceLock<Captured> = OnceLock::new();
 
 /// Ignores `SIGPIPE`, captures the arguments and environment, runs startup, then its cleanup,
-/// on the entry stack, and returns 0. When the program defines `rill_check_allocations` as 1,
-/// counting of live allocations starts after the capture and the count is reported on standard
-/// error after cleanup, or after the panic line.
+/// on the entry stack, and returns 0. In the `checking` build, counting of live allocations
+/// starts after the capture and the count is reported on standard error after cleanup, or after
+/// the panic line.
 ///
 /// # Safety
 ///
@@ -56,10 +58,8 @@ pub unsafe extern "C" fn main(argc: c_int, argv: *const *const c_char) -> c_int 
         }
     };
     let _ = CAPTURED.set(captured);
-    // SAFETY: generated code defines `rill_check_allocations` as one byte.
-    if unsafe { rill_check_allocations } != 0 {
-        counting::start();
-    }
+    #[cfg(feature = "checking")]
+    counting::start();
     if let Err(message) = entry_stack::run_on_entry_stack(run_startup) {
         panic_exit(message);
     }
@@ -75,6 +75,10 @@ extern "C" fn run_startup() {
     }
 }
 
+#[cfg(not(feature = "checking"))]
+fn report_live_allocations() {}
+
+#[cfg(feature = "checking")]
 fn report_live_allocations() {
     if let Some(live) = counting::stop() {
         let mut line = [0u8; 48];

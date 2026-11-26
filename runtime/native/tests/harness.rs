@@ -12,13 +12,9 @@ const STARTUP: &str = r#"
 #include <stdio.h>
 #include <string.h>
 
-#ifdef CHECK_ALLOCATIONS
-const uint8_t rill_check_allocations = 1;
-#else
-const uint8_t rill_check_allocations = 0;
-#endif
-
+#ifdef CHECKING
 void rill_rt_entry_stack_region(uintptr_t *low, uintptr_t *high);
+#endif
 
 void rill_rt_write_line(const uint8_t *ptr, size_t len);
 _Noreturn void rill_rt_panic(const uint8_t *ptr, size_t len);
@@ -34,6 +30,7 @@ const uint8_t *rill_rt_env(size_t index, size_t *len);
 
 static volatile uint8_t sink;
 
+#ifdef CHECKING
 static void describe_stack(const char *label) {
     volatile uint8_t local = 0;
     uintptr_t low, high;
@@ -43,6 +40,7 @@ static void describe_stack(const char *label) {
     snprintf(text, sizeof text, "%s %s %zu", label, at >= low && at < high ? "inside" : "outside", (size_t)(high - low));
     LINE(text);
 }
+#endif
 
 static int mode_is(const char *name) {
     size_t len;
@@ -69,6 +67,7 @@ void rill_startup(void) {
             const uint8_t *entry = rill_rt_env(i, &len);
             rill_rt_write_line(entry, len);
         }
+#ifdef CHECKING
     } else if (mode_is("stack")) {
         describe_stack("startup");
         volatile uint8_t buffer[900 * 1024];
@@ -87,6 +86,7 @@ void rill_startup(void) {
         LINE("lowest byte readable");
         sink = *(volatile uint8_t *)(low - 1);
         LINE("guard readable");
+#endif
     } else if (mode_is("leak")) {
         uint8_t *block = rill_rt_allocate(16, 8);
         block = rill_rt_grow(block, 16, 8, 4096);
@@ -112,9 +112,11 @@ void rill_startup(void) {
 }
 
 void rill_startup_cleanup(void) {
+#ifdef CHECKING
     if (mode_is("stack")) {
         describe_stack("cleanup");
     }
+#endif
     LINE("cleanup");
 }
 "#;
@@ -132,7 +134,7 @@ const NATIVE_LIBS: &[&str] = &[
     "-lc",
 ];
 
-fn static_library() -> PathBuf {
+fn static_library(checking: bool) -> PathBuf {
     let executable = std::env::current_exe().expect("test executable path");
     let profile_directory = executable
         .parent()
@@ -141,10 +143,16 @@ fn static_library() -> PathBuf {
     let target_directory = profile_directory.parent().expect("target directory");
     let profile = profile_directory.file_name().and_then(|name| name.to_str());
     let mut build = Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
-    build
-        .args(["build", "--locked", "-p", "rill-runtime", "--target-dir"])
-        .arg(target_directory)
-        .current_dir(env!("CARGO_MANIFEST_DIR"));
+    build.args(["build", "--locked", "-p", "rill-runtime", "--target-dir"]);
+    let mut archive = if checking {
+        build.arg(target_directory.join("checking-runtime"));
+        build.args(["--features", "checking"]);
+        target_directory.join("checking-runtime")
+    } else {
+        build.arg(target_directory);
+        target_directory.to_path_buf()
+    };
+    build.current_dir(env!("CARGO_MANIFEST_DIR"));
     match profile {
         Some("debug") => {}
         Some(name) => {
@@ -154,23 +162,24 @@ fn static_library() -> PathBuf {
     }
     let status = build.status().expect("cargo build of the runtime");
     assert!(status.success(), "cargo build of the runtime failed");
-    let archive = profile_directory.join("librill_runtime.a");
+    archive.push(profile.expect("profile directory has a name"));
+    archive.push("librill_runtime.a");
     assert!(archive.exists(), "{} was not built", archive.display());
     archive
 }
 
-fn build_executable(name: &str, defines: &[&str]) -> PathBuf {
+fn build_executable(name: &str, checking: bool) -> PathBuf {
     let directory = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("harness");
     fs::create_dir_all(&directory).unwrap();
     let source = directory.join("startup.c");
     fs::write(&source, STARTUP).unwrap();
     let program = directory.join(name);
     let output = Command::new("cc")
-        .args(defines)
+        .args(checking.then_some("-DCHECKING"))
         .arg("-o")
         .arg(&program)
         .arg(&source)
-        .arg(static_library())
+        .arg(static_library(checking))
         .args(NATIVE_LIBS)
         .output()
         .expect("host cc");
@@ -184,12 +193,12 @@ fn build_executable(name: &str, defines: &[&str]) -> PathBuf {
 
 fn executable() -> &'static Path {
     static EXECUTABLE: OnceLock<PathBuf> = OnceLock::new();
-    EXECUTABLE.get_or_init(|| build_executable("startup", &[]))
+    EXECUTABLE.get_or_init(|| build_executable("startup", false))
 }
 
 fn checking_executable() -> &'static Path {
     static EXECUTABLE: OnceLock<PathBuf> = OnceLock::new();
-    EXECUTABLE.get_or_init(|| build_executable("checking", &["-DCHECK_ALLOCATIONS"]))
+    EXECUTABLE.get_or_init(|| build_executable("checking", true))
 }
 
 fn run(arguments: Vec<OsString>) -> Output {
@@ -301,18 +310,18 @@ fn allocator_functions_allocate_grow_and_release() {
 
 #[test]
 fn startup_and_cleanup_run_inside_a_one_mebibyte_region() {
-    let output = run(mode("stack"));
+    let output = run_checking(mode("stack"));
     assert_eq!(
         String::from_utf8_lossy(&output.stdout),
         "startup inside 1048576\nbuffer inside\ncleanup inside 1048576\ncleanup\n"
     );
-    assert_eq!(output.stderr, b"");
+    assert_eq!(output.stderr, b"live allocations: 0\n");
     assert_eq!(output.status.code(), Some(0));
 }
 
 #[test]
 fn the_byte_below_the_region_cannot_be_read() {
-    let output = run(mode("below"));
+    let output = run_checking(mode("below"));
     assert_eq!(output.stdout, b"lowest byte readable\n");
     let signal = output.status.signal();
     assert!(
@@ -323,7 +332,7 @@ fn the_byte_below_the_region_cannot_be_read() {
 }
 
 #[test]
-fn without_the_flag_nothing_is_reported_even_with_a_live_allocation() {
+fn the_product_archive_reports_nothing_even_with_a_live_allocation() {
     let output = run(mode("leak"));
     assert_eq!(output.stdout, b"cleanup\n");
     assert_eq!(output.stderr, b"");
@@ -365,4 +374,37 @@ fn the_checking_allocator_reports_after_the_panic_line() {
         b"panic: something went wrong\nlive allocations: 0\n"
     );
     assert_eq!(output.status.code(), Some(101));
+}
+
+fn defined_symbols(archive: &Path) -> String {
+    let mut nm = Command::new("nm");
+    nm.arg("-g");
+    nm.arg(if cfg!(target_os = "macos") {
+        "-U"
+    } else {
+        "--defined-only"
+    });
+    String::from_utf8_lossy(&nm.arg(archive).output().expect("nm").stdout).into_owned()
+}
+
+#[test]
+fn the_product_archive_exports_no_counting_allocator_and_no_test_support_symbol() {
+    let product = defined_symbols(&static_library(false));
+    let checking = defined_symbols(&static_library(true));
+    for name in ["rill_rt_entry_stack_region", "counting"] {
+        assert!(
+            checking.contains(name),
+            "the checking archive lists no {name}"
+        );
+        assert!(
+            !product.contains(name),
+            "the product archive lists {name}:\n{product}"
+        );
+    }
+    for name in ["rill_rt_allocate", "rill_rt_write_line", "main"] {
+        assert!(
+            product.contains(name),
+            "the product archive lists no {name}"
+        );
+    }
 }

@@ -1,26 +1,6 @@
 use std::ffi::c_void;
-use std::sync::atomic::{AtomicUsize, Ordering};
 
 const USABLE_BYTES: usize = 1024 * 1024;
-
-static LOW: AtomicUsize = AtomicUsize::new(0);
-static HIGH: AtomicUsize = AtomicUsize::new(0);
-
-/// Writes the bounds of the entry stack's usable bytes to `low` and `high`: the lowest usable
-/// address and one past the highest. Both are 0 outside the entry stack's lifetime, that is
-/// before `main` switches to it and after it switches back. The guard page lies just below `low`.
-///
-/// # Safety
-///
-/// `low` and `high` are each valid for one write.
-#[unsafe(no_mangle)]
-pub unsafe extern "C" fn rill_rt_entry_stack_region(low: *mut usize, high: *mut usize) {
-    // SAFETY: the caller passes writable `low` and `high`.
-    unsafe {
-        *low = LOW.load(Ordering::Relaxed);
-        *high = HIGH.load(Ordering::Relaxed);
-    }
-}
 
 pub fn run_on_entry_stack(entry: extern "C" fn()) -> Result<(), &'static [u8]> {
     // SAFETY: `sysconf` only reads a system constant.
@@ -52,13 +32,13 @@ pub fn run_on_entry_stack(entry: extern "C" fn()) -> Result<(), &'static [u8]> {
     // SAFETY: `mapped` is the length of the mapping, so the result is its one-past-the-end
     // address.
     let top = unsafe { base.cast::<u8>().add(mapped) };
-    LOW.store(top.addr() - usable, Ordering::Relaxed);
-    HIGH.store(top.addr(), Ordering::Relaxed);
+    #[cfg(feature = "checking")]
+    crate::stack_region::publish(top.addr() - usable, top.addr());
     // SAFETY: `top` is the page-aligned end of the mapping, so it is 16-byte aligned, and
     // the `usable` bytes below it are writable.
     unsafe { switch_and_call(top, entry) };
-    LOW.store(0, Ordering::Relaxed);
-    HIGH.store(0, Ordering::Relaxed);
+    #[cfg(feature = "checking")]
+    crate::stack_region::publish(0, 0);
     unmap(base, mapped);
     Ok(())
 }

@@ -6,6 +6,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::OnceLock;
+use std::time::{Duration, Instant};
 
 mod support;
 
@@ -108,19 +109,31 @@ impl Drop for Workspace {
     }
 }
 
-fn install_runtime_archive(root: &Path) {
-    static ARCHIVE: OnceLock<PathBuf> = OnceLock::new();
-    let archive = ARCHIVE.get_or_init(|| {
+fn runtime_archive(checking: bool) -> &'static Path {
+    static PRODUCT: OnceLock<PathBuf> = OnceLock::new();
+    static CHECKING: OnceLock<PathBuf> = OnceLock::new();
+    let archive = if checking { &CHECKING } else { &PRODUCT };
+    archive.get_or_init(|| {
         let executable = std::env::current_exe().expect("test executable path");
         let profile_directory = executable
             .parent()
             .and_then(Path::parent)
             .expect("profile directory above deps");
-        let target_directory = profile_directory.parent().expect("target directory");
+        let mut target_directory = profile_directory
+            .parent()
+            .expect("target directory")
+            .to_path_buf();
+        let mut built = profile_directory.to_path_buf();
         let mut build = Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()));
+        build.args(["build", "--locked", "-p", "rill-runtime"]);
+        if checking {
+            build.args(["--features", "checking"]);
+            target_directory.push("checking-runtime");
+            built = target_directory.join(profile_directory.file_name().unwrap());
+        }
         build
-            .args(["build", "--locked", "-p", "rill-runtime", "--target-dir"])
-            .arg(target_directory)
+            .arg("--target-dir")
+            .arg(&target_directory)
             .current_dir(env!("CARGO_MANIFEST_DIR"));
         match profile_directory.file_name().and_then(|name| name.to_str()) {
             Some("debug") => {}
@@ -136,13 +149,16 @@ fn install_runtime_archive(root: &Path) {
                 .success(),
             "cargo build of the runtime failed"
         );
-        profile_directory.join("librill_runtime.a")
-    });
+        built.join("librill_runtime.a")
+    })
+}
+
+fn install_runtime_archive(root: &Path) {
+    let directory = root.join("lib/rill/runtime").join(TARGET);
+    fs::copy(runtime_archive(false), directory.join("librill_runtime.a")).unwrap();
     fs::copy(
-        archive,
-        root.join("lib/rill/runtime")
-            .join(TARGET)
-            .join("librill_runtime.a"),
+        runtime_archive(true),
+        directory.join("librill_runtime_checking.a"),
     )
     .unwrap();
 }
@@ -214,6 +230,58 @@ fn build_with_check_allocations_makes_a_program_that_reports_zero() {
     let plain = workspace.rill(&["build", &entry, "-o", "app/plain"]);
     assert_eq!(plain.status.code(), Some(0), "{}", stderr(&plain));
     assert_hello(&workspace.command(&workspace.work.join("app/plain"), &[], None));
+}
+
+#[test]
+fn build_takes_check_allocations_before_or_after_the_entry_and_around_o() {
+    let workspace = Workspace::new("check-build-positions");
+    let entry = workspace.entry("hello-world.rill", HELLO);
+    let invocations: [Vec<&str>; 4] = [
+        vec!["build", "--check-allocations", &entry, "-o", "app/checked"],
+        vec!["build", &entry, "--check-allocations", "-o", "app/checked"],
+        vec!["build", &entry, "-o", "app/checked", "--check-allocations"],
+        vec!["build", &entry, "-o", "app/checked"],
+    ];
+    for (index, args) in invocations.iter().enumerate() {
+        let output = workspace.rill(args);
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{args:?}: {}",
+            stderr(&output)
+        );
+        let program = workspace.command(&workspace.work.join("app/checked"), &[], None);
+        if index < 3 {
+            assert_checked_hello(&program);
+        } else {
+            assert_hello(&program);
+        }
+    }
+}
+
+#[test]
+fn a_missing_runtime_archive_names_the_archive_the_build_needs() {
+    let installation = Installation::stage("prototypes-no-archive");
+    let source = installation.root.join("app/hello-world.rill");
+    fs::write(&source, HELLO).unwrap();
+    for (flags, archive) in [
+        (&[][..], "librill_runtime.a"),
+        (&["--check-allocations"][..], "librill_runtime_checking.a"),
+    ] {
+        let mut command = Command::new(installation.root.join("bin/rill"));
+        command
+            .arg("build")
+            .args(flags)
+            .arg(&source)
+            .current_dir(&installation.root);
+        let output = rill_test_support::run_staged(&mut command).unwrap();
+        assert_eq!(output.status.code(), Some(1), "{}", stderr(&output));
+        assert!(
+            stderr(&output).contains(&format!("lib/rill/runtime/{TARGET}/{archive}")),
+            "{}",
+            stderr(&output)
+        );
+    }
 }
 
 #[test]
@@ -503,4 +571,111 @@ fn run_returns_128_plus_the_signal_and_prints_nothing_when_the_program_dies_by_o
     }
     fs::remove_dir_all(workspace.work.join("fake-bin")).unwrap();
     assert_eq!(workspace.files(), before);
+}
+
+fn sleeping_cc(workspace: &Workspace) -> String {
+    let directory = workspace.work.join("fake-bin");
+    fs::create_dir_all(&directory).unwrap();
+    let started = workspace.work.join("started");
+    let cc = directory.join("cc");
+    fs::write(
+        &cc,
+        format!(
+            "#!/bin/sh\nprintf '#!/bin/sh\\n: > {}\\nexec /bin/sleep 30\\n' > \"$2\"\n/bin/chmod +x \"$2\"\n",
+            started.display()
+        ),
+    )
+    .unwrap();
+    fs::set_permissions(&cc, fs::Permissions::from_mode(0o755)).unwrap();
+    directory.into_os_string().into_string().unwrap()
+}
+
+#[test]
+fn an_interrupted_run_stops_the_program_removes_its_directory_and_exits_130() {
+    let workspace = Workspace::new("interrupt");
+    let entry = workspace.entry("hello-world.rill", HELLO);
+    let before = workspace.files();
+    let path = sleeping_cc(&workspace);
+    let started = workspace.work.join("started");
+    let mut command = Command::new(&workspace.rill);
+    command
+        .args(["run", &entry])
+        .current_dir(&workspace.work)
+        .env("TMPDIR", &workspace.temporary)
+        .env("PATH", &path);
+    let child = rill_test_support::spawn_staged(&mut command).expect("start rill run");
+    let deadline = Instant::now() + Duration::from_secs(120);
+    while !started.exists() {
+        assert!(Instant::now() < deadline, "the program never started");
+        std::thread::park_timeout(Duration::from_millis(10));
+    }
+    assert!(
+        !workspace.names("tmp").is_empty(),
+        "the program runs from a scratch directory"
+    );
+    let interrupted = Instant::now();
+    // SAFETY: `kill` takes a process id and a signal number and touches no memory.
+    let sent = unsafe { libc::kill(i32::try_from(child.id()).unwrap(), libc::SIGINT) };
+    assert_eq!(sent, 0);
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        interrupted.elapsed() < Duration::from_secs(20),
+        "the waiting program was not stopped"
+    );
+    assert_eq!(output.status.code(), Some(130), "{}", stderr(&output));
+    assert!(output.stdout.is_empty(), "{output:?}");
+    workspace.assert_no_scratch();
+    fs::remove_file(&started).unwrap();
+    fs::remove_dir_all(workspace.work.join("fake-bin")).unwrap();
+    assert_eq!(workspace.files(), before);
+}
+
+fn dynamic_libraries(program: &Path) -> BTreeSet<String> {
+    if cfg!(target_os = "macos") {
+        let output = Command::new("otool")
+            .arg("-L")
+            .arg(program)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .lines()
+            .skip(1)
+            .map(|line| line.split_whitespace().next().unwrap().to_owned())
+            .collect()
+    } else {
+        let output = Command::new("readelf")
+            .arg("-d")
+            .arg(program)
+            .output()
+            .unwrap();
+        assert!(output.status.success(), "{output:?}");
+        String::from_utf8(output.stdout)
+            .unwrap()
+            .lines()
+            .filter(|line| line.contains("(NEEDED)"))
+            .map(|line| {
+                let start = line.find('[').unwrap() + 1;
+                line[start..line.rfind(']').unwrap()].to_owned()
+            })
+            .collect()
+    }
+}
+
+#[test]
+fn a_built_program_links_exactly_these_dynamic_libraries() {
+    let workspace = Workspace::new("dynamic");
+    let entry = workspace.entry("hello-world.rill", HELLO);
+    let output = workspace.rill(&["build", &entry, "-o", "app/linked"]);
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    let expected: &[&str] = if cfg!(target_os = "macos") {
+        &["/usr/lib/libSystem.B.dylib", "/usr/lib/libiconv.2.dylib"]
+    } else {
+        &["libc.so.6", "libgcc_s.so.1"]
+    };
+    assert_eq!(
+        dynamic_libraries(&workspace.work.join("app/linked")),
+        expected.iter().map(|name| (*name).to_owned()).collect()
+    );
 }

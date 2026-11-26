@@ -2,6 +2,8 @@ mod check;
 #[cfg(feature = "llvm")]
 mod compile;
 #[cfg(feature = "llvm")]
+mod interrupt;
+#[cfg(feature = "llvm")]
 mod native_libs;
 
 use std::env;
@@ -39,7 +41,8 @@ expectation. build and run then lower the program to an object and link it
 with the runtime archive of that layout through the host cc. run passes every
 argument after the entry to the program untouched, with the entry as argument
 zero, and exits with the program's status, or 128 plus the signal number when
-a signal ends it. build and run leave no executable on a failure. The other
+a signal ends it. SIGINT or SIGTERM sent to run stops the program, deletes the
+executable and exits 130 or 143. build and run leave no executable on a failure. The other
 commands do not read source files, generate code, execute user code, run
 expectations, or start an LSP server, and do not open
 entry paths.
@@ -94,27 +97,20 @@ failure. The driver contract also defines interruption (130).
 ";
 
 fn main() -> ExitCode {
-    let raw: Vec<OsString> = env::args_os().skip(1).collect();
+    #[cfg_attr(not(feature = "llvm"), allow(unused_mut))]
+    let mut raw: Vec<OsString> = env::args_os().skip(1).collect();
+    #[cfg(feature = "llvm")]
+    let check_allocations = take_check_allocations(&mut raw);
     let program_arguments = cfg!(feature = "llvm") && raw.first().is_some_and(|arg| arg == "run");
-    let takes_flag = cfg!(feature = "llvm")
-        && raw
-            .first()
-            .is_some_and(|arg| arg == "build" || arg == "run");
-    let check_allocations =
-        takes_flag && raw.get(1).is_some_and(|arg| arg == "--check-allocations");
-    let entry_at = 1 + usize::from(check_allocations);
     let checked = if program_arguments {
-        raw.len().min(entry_at + 1)
+        raw.len().min(2)
     } else {
         raw.len()
     };
     let args: Option<Vec<_>> = raw[..checked].iter().map(|arg| arg.to_str()).collect();
-    let Some(mut args) = args else {
+    let Some(args) = args else {
         return fail("arguments must be valid UTF-8");
     };
-    if check_allocations {
-        args.remove(1);
-    }
 
     let Some(command) = args.first().copied() else {
         return fail("expected a command; use 'rill --help'");
@@ -147,9 +143,7 @@ fn main() -> ExitCode {
                 #[cfg(feature = "llvm")]
                 ("build", Some(entry)) => build(entry, &rest[1..], check_allocations),
                 #[cfg(feature = "llvm")]
-                ("run", Some(entry)) => {
-                    compile::run(entry, &raw[entry_at + 1..], check_allocations)
-                }
+                ("run", Some(entry)) => compile::run(entry, &raw[2..], check_allocations),
                 #[cfg(feature = "llvm")]
                 ("build" | "run", None) => fail(&format!(
                     "{command} expects an entry path; use 'rill --help'"
@@ -165,6 +159,32 @@ fn main() -> ExitCode {
         }
         _ => fail("unknown command; use 'rill --help'"),
     }
+}
+
+#[cfg(feature = "llvm")]
+fn take_check_allocations(raw: &mut Vec<OsString>) -> bool {
+    let Some(command) = raw.first().and_then(|command| command.to_str()) else {
+        return false;
+    };
+    let (builds, runs) = (command == "build", command == "run");
+    if !builds && !runs {
+        return false;
+    }
+    let mut found = false;
+    let mut index = 1;
+    while index < raw.len() {
+        let arg = &raw[index];
+        if arg == "--check-allocations" {
+            raw.remove(index);
+            found = true;
+            continue;
+        }
+        if runs && !arg.to_str().is_some_and(|arg| arg.starts_with('-')) {
+            break;
+        }
+        index += if builds && arg == "-o" { 2 } else { 1 };
+    }
+    found
 }
 
 #[cfg(feature = "llvm")]

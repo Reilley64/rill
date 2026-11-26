@@ -28,6 +28,8 @@ These are findings, not decisions. The exact feature set, the cut of LLVM and th
 - Provisioning needs the network once, then a checksum. Nobody builds LLVM except through the manual workflow.
 - The system C++ runtime becomes a runtime dependency of `rill` on every platform, and a missing one is a missing prerequisite, like `cc`.
 
+**Note, 2026-11-26 (ri-qlh.22.21).** A program that `rill build` links depends on these dynamic libraries and no others; `crates/cli/tests/prototypes.rs` pins them for each hosted platform. macOS (arm64 and x86-64): `libSystem.B.dylib` and `libiconv.2.dylib`, so iconv is a dependency beyond libSystem. Linux (x86-64 and arm64): `libc.so.6` and `libgcc_s.so.1`, so gcc's runtime library is a dependency beyond libc. The link line also names `-lutil`, `-lrt`, `-lpthread`, `-lm` and `-ldl`; the Ubuntu 24.04 `cc` links with `--as-needed` and keeps none of them, so they are not dependencies there. On a distribution whose `cc` does not pass `--as-needed`, a program keeps them. The measurement of `libc.so.6` and `libgcc_s.so.1` on Ubuntu 24.04 arm64 with gcc 13.3 was by `readelf -d`; the x86-64 and macOS lists are the test's results in CI.
+
 ## Considered options
 
 - **Cut the upstream LLVM archives.** They are 1.5 to 2 GB, and upstream ships no macOS x86-64 archive for this release. Whether `llvm-config` survives deleting libraries from a full archive was untested, so this route is untested, not ruled out.

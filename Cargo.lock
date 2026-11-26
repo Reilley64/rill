@@ -30,6 +30,7 @@ version = "0.1.0-dev"
 dependencies = [
  "codegen-llvm",
  "compiler",
+ "libc",
  "lsp",
  "rill-test-support",
 ]
