@@ -397,16 +397,80 @@ class WorkflowTests(unittest.TestCase):
                                  "${{ github.workspace }}/target/ci/rustup")
 
 
+class WorkflowTriggerTests(unittest.TestCase):
+    def test_workflows_run_on_main_and_integration_pushes_and_on_every_pull_request(self):
+        for name in ["check.yml", "native.yml"]:
+            workflow = yaml.load((doctor.ROOT / ".github/workflows" / name).read_text(), Loader=yaml.BaseLoader)
+            with self.subTest(workflow=name):
+                self.assertEqual(workflow["on"]["push"], {"branches": ["main", "integration/**"]})
+                self.assertIn("pull_request", workflow["on"])
+                self.assertFalse(workflow["on"]["pull_request"], "a pull request filter leaves required checks pending")
+                self.assertIn("workflow_dispatch", workflow["on"])
+
+
 class NativeAcceptanceTests(unittest.TestCase):
     BUILD_STEP = "Build: Stage the prototypes installation"
     TEST_STEP = "Test: Run the prototype acceptance through the staged rill"
     RUNTIME_STEP = "Test: Verify native runtime acceptance is unavailable"
     RELEASE_STEP = "Build and test: Verify release acceptance stops at the unavailable build task"
+    SCOPE = "Setup: Decide whether native paths changed"
     BUILD_STUB = f'exec "{sys.executable}" tools/unavailable.py build\n'
 
-    def run_step(self, mise_script, step_name, command):
+    def native_steps(self):
         workflow = yaml.load((doctor.ROOT / ".github/workflows/native.yml").read_text(), Loader=yaml.BaseLoader)
-        steps = workflow["jobs"]["native"]["steps"]
+        return workflow["jobs"]["native"]["steps"]
+
+    def scope(self, event, *changed):
+        script = next(step["run"] for step in self.native_steps() if step["name"] == self.SCOPE)
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            git = lambda *args: subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", *args],
+                                               cwd=root, check=True, capture_output=True)
+            git("init", "-q")
+            (root / "README.md").write_text("base\n")
+            git("add", "-A")
+            git("commit", "-q", "-m", "base")
+            for file in changed:
+                (root / file).parent.mkdir(parents=True, exist_ok=True)
+                (root / file).write_text("changed\n")
+            git("add", "-A")
+            git("commit", "-q", "--allow-empty", "-m", "change")
+            output = root / "output"
+            env = {**os.environ, "EVENT_NAME": event, "GITHUB_OUTPUT": str(output)}
+            result = subprocess.run(["bash", "-e", "-c", script], cwd=root, capture_output=True, text=True, env=env)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            return output.read_text().strip()
+
+    def test_a_docs_only_pull_request_skips_the_heavy_steps_and_a_code_pull_request_runs_them(self):
+        self.assertEqual(self.scope("pull_request", "docs/a.md", "tools/other.py", "README.md"), "native=false")
+        self.assertEqual(self.scope("pull_request"), "native=false")
+        for path in ["crates/cli/src/main.rs", "stdlib/a.rill", "runtime/a.c", "tests/a.rs", "tools/unavailable.py",
+                     "tools/stage_typed_installation.py", "tools/llvm/a.py", "Cargo.toml", "Cargo.lock", "mise.toml", "mise.lock",
+                     ".github/workflows/native.yml"]:
+            with self.subTest(path=path):
+                self.assertEqual(self.scope("pull_request", "docs/a.md", path), "native=true")
+
+    def test_pushes_and_dispatch_always_run_the_heavy_steps(self):
+        for event in ["push", "workflow_dispatch"]:
+            with self.subTest(event=event):
+                self.assertEqual(self.scope(event, "docs/a.md"), "native=true")
+
+    def test_every_step_after_the_scope_step_is_gated_on_it(self):
+        steps = self.native_steps()
+        names = [step["name"] for step in steps]
+        self.assertEqual(names[:2], ["Source: Check out the repository", self.SCOPE])
+        for step in steps[2:]:
+            with self.subTest(step=step["name"]):
+                self.assertIn(step.get("if"), ["steps.scope.outputs.native == 'true'",
+                                               "github.event_name == 'workflow_dispatch'"])
+        for name in ["Setup: Restore the Cargo build cache", "Setup: Install the trimmed LLVM",
+                     "Test: Run the LLVM backend smoke", self.BUILD_STEP, self.TEST_STEP, self.RUNTIME_STEP]:
+            with self.subTest(step=name):
+                [step] = [step for step in steps if step["name"] == name]
+                self.assertEqual(step["if"], "steps.scope.outputs.native == 'true'")
+
+    def run_step(self, mise_script, step_name, command):
+        steps = self.native_steps()
         self.assertEqual([step["name"] for step in steps].count(step_name), 1)
         script = next(step["run"] for step in steps if step["name"] == step_name)
         self.assertEqual([step["name"] for step in steps if command in step.get("run", "")], [step_name])
@@ -419,8 +483,7 @@ class NativeAcceptanceTests(unittest.TestCase):
                                   capture_output=True, text=True, env=env)
 
     def test_the_prototype_steps_run_the_real_tasks_against_the_llvm_prefix(self):
-        workflow = yaml.load((doctor.ROOT / ".github/workflows/native.yml").read_text(), Loader=yaml.BaseLoader)
-        steps = workflow["jobs"]["native"]["steps"]
+        steps = self.native_steps()
         names = [step["name"] for step in steps]
         for name, command in [(self.BUILD_STEP, "mise run build:prototypes"),
                               (self.TEST_STEP, "mise run test:prototypes")]:
@@ -433,10 +496,9 @@ class NativeAcceptanceTests(unittest.TestCase):
         self.assertLess(names.index(self.BUILD_STEP), names.index(self.TEST_STEP))
         self.assertEqual([step["name"] for step in steps if "test:runtime" in step.get("run", "")], [self.RUNTIME_STEP])
 
-    def test_the_runtime_stub_is_asserted_on_every_run(self):
-        workflow = yaml.load((doctor.ROOT / ".github/workflows/native.yml").read_text(), Loader=yaml.BaseLoader)
-        step = next(step for step in workflow["jobs"]["native"]["steps"] if step["name"] == self.RUNTIME_STEP)
-        self.assertNotIn("if", step)
+    def test_the_runtime_stub_is_asserted_on_every_run_that_runs_the_native_steps(self):
+        step = next(step for step in self.native_steps() if step["name"] == self.RUNTIME_STEP)
+        self.assertEqual(step["if"], "steps.scope.outputs.native == 'true'")
 
     def test_the_runtime_stub_is_asserted_so_the_job_is_not_red_by_design(self):
         result = self.run_step(
@@ -457,8 +519,7 @@ class NativeAcceptanceTests(unittest.TestCase):
         return self.run_step(guard + mise_script, self.RELEASE_STEP, "mise run verify:release")
 
     def test_the_release_step_runs_only_on_dispatch(self):
-        workflow = yaml.load((doctor.ROOT / ".github/workflows/native.yml").read_text(), Loader=yaml.BaseLoader)
-        step = next(step for step in workflow["jobs"]["native"]["steps"] if step["name"] == self.RELEASE_STEP)
+        step = next(step for step in self.native_steps() if step["name"] == self.RELEASE_STEP)
         self.assertEqual(step["if"], "github.event_name == 'workflow_dispatch'")
 
     def test_the_build_stub_after_passing_checks_is_asserted(self):
