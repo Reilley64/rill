@@ -8,6 +8,9 @@ publish.workspace = true
 rill-collection = { path = "../../runtime/collection" }
 rill-error-storage = { path = "../../runtime/error" }
 
+[dev-dependencies]
+rill-test-support.workspace = true
+
 [[example]]
 name = "m4_8_installed"
 path = "../../tests/installed/typed/runner.rs"

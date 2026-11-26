@@ -13,7 +13,7 @@ impl Installation {
     }
 
     fn rill(&self, args: &[&str]) -> Output {
-        support::run(
+        rill_test_support::run_staged(
             Command::new(self.root.join("bin/rill"))
                 .args(args)
                 .current_dir(self.root.join("app")),
@@ -175,8 +175,10 @@ fn a_bad_option_exits_two_before_anything_is_read() {
 #[test]
 fn a_binary_outside_an_installation_fails_without_a_pass() {
     let manifest = concat!(env!("CARGO_MANIFEST_DIR"), "/Cargo.toml");
-    let output =
-        support::run(Command::new(env!("CARGO_BIN_EXE_rill")).args(["check", manifest])).unwrap();
+    let output = rill_test_support::run_staged(
+        Command::new(env!("CARGO_BIN_EXE_rill")).args(["check", manifest]),
+    )
+    .unwrap();
     assert_eq!(output.status.code(), Some(1), "{}", stderr(&output));
     assert!(output.stdout.is_empty(), "{output:?}");
     assert!(

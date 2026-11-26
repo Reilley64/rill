@@ -81,7 +81,7 @@ impl Workspace {
         if let Some(path) = path {
             command.env("PATH", path);
         }
-        support::run(&mut command).expect("run a staged executable")
+        rill_test_support::run_staged(&mut command).expect("run a staged executable")
     }
 
     fn names(&self, directory: &str) -> BTreeSet<String> {
@@ -241,6 +241,75 @@ fn run_prints_hello_world_and_leaves_nothing_behind() {
     assert_hello(&output);
     assert_eq!(workspace.files(), before);
     workspace.assert_no_scratch();
+}
+
+const ECHO_PROGRAM: &str = r#"#include <stdio.h>
+int main(int argc, char **argv) {
+    for (int i = 0; i < argc; i++) {
+        for (const char *p = argv[i]; *p; p++) printf("%02x", (unsigned char)*p);
+        printf("\n");
+    }
+    return 0;
+}
+"#;
+
+const ECHO_CC: &str = "#!/bin/sh\nexec /usr/bin/cc -o \"$2\" \"$(dirname \"$0\")/echo.c\"\n";
+
+#[test]
+fn run_passes_the_entry_as_argument_zero_and_the_rest_untouched_and_in_order() {
+    use std::os::unix::ffi::OsStrExt;
+    use std::os::unix::fs::PermissionsExt;
+    let workspace = Workspace::new("arguments");
+    let entry = workspace.entry("hello-world.rill", HELLO);
+    let bin = workspace.work.join("bin");
+    fs::create_dir_all(&bin).unwrap();
+    let cc = bin.join("cc");
+    fs::write(bin.join("echo.c"), ECHO_PROGRAM).unwrap();
+    fs::write(&cc, ECHO_CC).unwrap();
+    fs::set_permissions(&cc, fs::Permissions::from_mode(0o755)).unwrap();
+    let before = workspace.files();
+    let arguments: [&[u8]; 5] = [
+        b"first",
+        b"\xff\xfe-not-utf-8",
+        b"",
+        b"--check-allocations",
+        b"last",
+    ];
+    let mut command = Command::new(&workspace.rill);
+    command
+        .arg("run")
+        .arg(&entry)
+        .args(
+            arguments
+                .iter()
+                .map(|bytes| std::ffi::OsStr::from_bytes(bytes)),
+        )
+        .current_dir(&workspace.work)
+        .env("TMPDIR", &workspace.temporary)
+        .env("PATH", format!("{}:/usr/bin:/bin", bin.display()));
+    let output = rill_test_support::run_staged(&mut command).expect("run a staged executable");
+    assert_eq!(output.status.code(), Some(0), "{}", stderr(&output));
+    let hex = |bytes: &[u8]| {
+        bytes
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect::<String>()
+    };
+    let mut expected = format!("{}\n", hex(entry.as_bytes()));
+    for bytes in arguments {
+        expected += &format!("{}\n", hex(bytes));
+    }
+    assert_eq!(String::from_utf8_lossy(&output.stdout), expected);
+    assert!(output.stderr.is_empty(), "{}", stderr(&output));
+    workspace.assert_no_scratch();
+    fs::remove_dir_all(&bin).unwrap();
+    assert_eq!(
+        workspace.files(),
+        before
+            .difference(&BTreeSet::from(["bin".to_owned()]))
+            .cloned()
+            .collect()
+    );
 }
 
 #[test]

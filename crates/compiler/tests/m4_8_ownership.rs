@@ -212,7 +212,7 @@ fn installed_ownership_requires_the_built_archive() {
         fs::create_dir_all(root.join(path)).unwrap();
     }
     let executable = root.join("bin/m48-ownership-probe");
-    fs::copy(std::env::current_exe().unwrap(), &executable).unwrap();
+    rill_test_support::stage_current_exe(&executable).unwrap();
     let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../stdlib");
     for module in include_str!("../../../tests/installed/typed/stdlib-sources.txt")
         .lines()
@@ -238,16 +238,17 @@ fn installed_ownership_requires_the_built_archive() {
     ",
     )
     .unwrap();
-    let output = Command::new(executable)
-        .args([
-            "--exact",
-            "installed_ownership_requires_the_built_archive",
-            "--nocapture",
-        ])
-        .env("RILL_OWNERSHIP_PROBE_ROOT", &root)
-        .current_dir(root.join("app"))
-        .output()
-        .unwrap();
+    let output = rill_test_support::run_staged(
+        Command::new(executable)
+            .args([
+                "--exact",
+                "installed_ownership_requires_the_built_archive",
+                "--nocapture",
+            ])
+            .env("RILL_OWNERSHIP_PROBE_ROOT", &root)
+            .current_dir(root.join("app")),
+    )
+    .unwrap();
     assert!(
         output.status.success(),
         "{}\n{}",

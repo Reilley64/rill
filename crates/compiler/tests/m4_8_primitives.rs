@@ -44,13 +44,14 @@ fn installed_primitive_providers() {
         fs::copy(source.join(file), prefix.join("lib/rill/std").join(file)).unwrap();
     }
     let executable = prefix.join("bin/primitive-probe");
-    fs::copy(std::env::current_exe().unwrap(), &executable).unwrap();
-    let output = Command::new(executable)
-        .args(["--exact", "installed_primitive_providers", "--nocapture"])
-        .env("RILL_PRIMITIVES_TEST_PREFIX", &prefix)
-        .current_dir(prefix.join("app"))
-        .output()
-        .unwrap();
+    rill_test_support::stage_current_exe(&executable).unwrap();
+    let output = rill_test_support::run_staged(
+        Command::new(executable)
+            .args(["--exact", "installed_primitive_providers", "--nocapture"])
+            .env("RILL_PRIMITIVES_TEST_PREFIX", &prefix)
+            .current_dir(prefix.join("app")),
+    )
+    .unwrap();
     assert!(
         output.status.success(),
         "{}\n{}",

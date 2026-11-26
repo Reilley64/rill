@@ -66,17 +66,18 @@ fn private_once_checks_the_actual_shared_pair() {
         )
         .unwrap();
         let probe = root.join("bin/probe");
-        fs::copy(std::env::current_exe().unwrap(), &probe).unwrap();
-        let output = Command::new(probe)
-            .current_dir(root.join("app"))
-            .env("RILL_M4_ONCE_TEST_PREFIX", &root)
-            .args([
-                "--nocapture",
-                "--exact",
-                "private_once_checks_the_actual_shared_pair",
-            ])
-            .output()
-            .unwrap();
+        rill_test_support::stage_current_exe(&probe).unwrap();
+        let output = rill_test_support::run_staged(
+            Command::new(probe)
+                .current_dir(root.join("app"))
+                .env("RILL_M4_ONCE_TEST_PREFIX", &root)
+                .args([
+                    "--nocapture",
+                    "--exact",
+                    "private_once_checks_the_actual_shared_pair",
+                ]),
+        )
+        .unwrap();
         print!("{}", String::from_utf8_lossy(&output.stdout));
         assert!(
             output.status.success(),

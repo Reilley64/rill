@@ -2,7 +2,7 @@ use compiler::analysis::compilable::messages;
 use compiler::analysis::compilable::{
     Blocker, Compilability, CompilableProgram, ProgramAnalysis, UNSUPPORTED_SHAPE,
 };
-use compiler::analysis::typed::analyze_typed;
+use compiler::analysis::typed::{TypedReport, analyze_typed};
 use compiler::analysis::{AnalysisLimits, Statistics};
 use compiler::loader::{self, FailureKind, Graph, InstalledRequest, Limits};
 use compiler::source::Span;
@@ -23,16 +23,16 @@ struct Diagnostic {
 }
 
 pub fn run(entry: &str) -> ExitCode {
-    with_program(entry, |_, _| ExitCode::SUCCESS)
+    with_program(entry, |_, _, _| ExitCode::SUCCESS)
 }
 
-/// Run the front end on `entry` and call `compilable` with the graph and the
-/// program when it is compilable. Every other outcome is reported on standard
-/// error and returned as its driver status; `check`, `build` and `run` all
-/// decide this here and nowhere else.
+/// Run the front end on `entry` and call `compilable` with the graph, its
+/// typed report and the program when it is compilable. Every other outcome is
+/// reported on standard error and returned as its driver status; `check`,
+/// `build` and `run` all decide this here and nowhere else.
 pub fn with_program(
     entry: &str,
-    compilable: impl FnOnce(&Graph, &CompilableProgram<'_, '_>) -> ExitCode,
+    compilable: impl FnOnce(&Graph, &TypedReport<'_>, &CompilableProgram<'_, '_>) -> ExitCode,
 ) -> ExitCode {
     if !Path::new(entry).is_file() {
         return invocation(&format!("entry '{}' is not a readable file", escape(entry)));
@@ -52,7 +52,7 @@ pub fn with_program(
     let typed = analyze_typed(&graph, limits);
     let analysis = ProgramAnalysis::new(&graph, &typed, limits);
     match analysis.compilability() {
-        Compilability::Compilable(program) => compilable(&graph, &program),
+        Compilability::Compilable(program) => compilable(&graph, &typed, &program),
         Compilability::Blocked(Blocker::Incomplete { site }) => reject(vec![Diagnostic {
             code: Some(UNSUPPORTED_SHAPE),
             message: "valid source whose shape the compiler cannot compile yet".into(),

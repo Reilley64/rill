@@ -56,6 +56,7 @@ pub(super) fn load(
         .and_then(Path::parent)
         .and_then(Path::parent);
     let mut routine_index = None;
+    let mut env_index = None;
     match engine.run(prefix) {
         Ok((bindings, implementations, prelude, ownership_archive)) => Ok(Graph {
             id: engine.id,
@@ -71,10 +72,17 @@ pub(super) fn load(
                     {
                         routine_index = Some(index);
                     }
+                    if installed.is_some()
+                        && module.key.origin == Origin::Standard
+                        && module.key.path == "env.rill"
+                    {
+                        env_index = Some(index);
+                    }
                     module
                 })
                 .collect(),
             routine_index,
+            env_index,
             declaration_count: engine.next_ordinal,
             implementation_at: {
                 let mut at = vec![None; engine.next_ordinal];
