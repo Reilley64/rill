@@ -33,8 +33,8 @@ function writeWhileMemberLive(): i32 {
   let e = 5i32; let mut h = Own2 { v: 1i32, r: &e }; h.r = &h.v; h.v = 2i32; let n = *h.r; return n;
 }
 "#,
-    typed_stats: (464514, 50978, 12),
-    graph: (GraphCompletion::SourceRejected, (209162, 7678, 6)),
+    typed_stats: (446760, 55775, 12),
+    graph: (GraphCompletion::SourceRejected, (205172, 7678, 6)),
     roots: &[
         Root {
             name: "p1WriteAfterCopy",
@@ -44,7 +44,7 @@ function writeWhileMemberLive(): i32 {
                 related: r####"&h.v"####,
             },
             graph: None,
-            stats: (3804, 647, 5),
+            stats: (3594, 647, 5),
         },
         Root {
             name: "p2ReplaceAfterCopy",
@@ -54,7 +54,7 @@ function writeWhileMemberLive(): i32 {
                 related: r####"&h.v"####,
             },
             graph: None,
-            stats: (4491, 837, 5),
+            stats: (4211, 837, 5),
         },
         Root {
             name: "p6WriteAfterCallCopy",
@@ -64,7 +64,7 @@ function writeWhileMemberLive(): i32 {
                 related: r####"&h.v"####,
             },
             graph: None,
-            stats: (3888, 698, 5),
+            stats: (3678, 698, 5),
         },
         Root {
             name: "p18InnerScopeDies",
@@ -74,7 +74,7 @@ function writeWhileMemberLive(): i32 {
                 related: r####"&h2.v"####,
             },
             graph: None,
-            stats: (5829, 1324, 6),
+            stats: (5339, 1324, 6),
         },
         Root {
             name: "writeWhileMemberLive",
@@ -84,7 +84,7 @@ function writeWhileMemberLive(): i32 {
                 related: r####"&h.v"####,
             },
             graph: None,
-            stats: (3248, 521, 5),
+            stats: (3108, 521, 5),
         },
     ],
     sequences: &[],
@@ -117,8 +117,8 @@ function returnTheRecord(): Own2 {
   let e = 5i32; let mut h = Own2 { v: 1i32, r: &e }; h.r = &h.v; return h;
 }
 "#,
-    typed_stats: (454421, 49345, 12),
-    graph: (GraphCompletion::SourceRejected, (198789, 5863, 5)),
+    typed_stats: (436785, 54072, 12),
+    graph: (GraphCompletion::SourceRejected, (195359, 5863, 5)),
     roots: &[
         Root {
             name: "p3ReturnTheCopy",
@@ -128,7 +128,7 @@ function returnTheRecord(): Own2 {
                 related: r####"&h.v"####,
             },
             graph: None,
-            stats: (4037, 615, 5),
+            stats: (3757, 615, 5),
         },
         Root {
             name: "p15ReturnTheCopysReference",
@@ -138,7 +138,7 @@ function returnTheRecord(): Own2 {
                 related: r####"&h.v"####,
             },
             graph: None,
-            stats: (4144, 674, 5),
+            stats: (3864, 674, 5),
         },
         Root {
             name: "returnTheRecord",
@@ -148,7 +148,7 @@ function returnTheRecord(): Own2 {
                 related: r####"&h.v"####,
             },
             graph: None,
-            stats: (3434, 461, 5),
+            stats: (3224, 461, 5),
         },
     ],
     sequences: &[],
@@ -179,8 +179,8 @@ function p13MoveWhileBorrowed(): i32 {
   let e = 5i32; let mut h = OwnS { v: 1i32, s: "a", r: &e }; let k = &h.v; let g = h; return *k;
 }
 "#,
-    typed_stats: (455185, 49467, 12),
-    graph: (GraphCompletion::SourceRejected, (197964, 5698, 5)),
+    typed_stats: (437536, 54208, 12),
+    graph: (GraphCompletion::SourceRejected, (194674, 5698, 5)),
     roots: &[
         Root {
             name: "p11MoveIntoCall",
@@ -190,7 +190,7 @@ function p13MoveWhileBorrowed(): i32 {
                 related: r####"&h.v"####,
             },
             graph: None,
-            stats: (3594, 547, 5),
+            stats: (3384, 547, 5),
         },
         Root {
             name: "p12MoveIntoLet",
@@ -200,7 +200,7 @@ function p13MoveWhileBorrowed(): i32 {
                 related: r####"&h.v"####,
             },
             graph: None,
-            stats: (3609, 549, 5),
+            stats: (3399, 549, 5),
         },
         Root {
             name: "p13MoveWhileBorrowed",
@@ -210,7 +210,7 @@ function p13MoveWhileBorrowed(): i32 {
                 related: r####"&h.v"####,
             },
             graph: None,
-            stats: (3469, 485, 5),
+            stats: (3259, 485, 5),
         },
     ],
     sequences: &[],
@@ -252,44 +252,44 @@ function deadLoanBeforeCopy(): i32 {
   let e = 5i32; let mut h = Own2 { v: 1i32, r: &e }; let k = &h.v; return take2(h);
 }
 "#,
-    typed_stats: (466169, 50691, 12),
-    graph: (GraphCompletion::Incomplete, (209905, 7723, 5)),
+    typed_stats: (448235, 55523, 12),
+    graph: (GraphCompletion::Incomplete, (205565, 7723, 5)),
     roots: &[
         Root {
             name: "p7CopyIntoLet",
             want: Want::Checked,
             graph: None,
-            stats: (3827, 638, 5),
+            stats: (3617, 638, 5),
         },
         Root {
             name: "p8CopyIntoCall",
             want: Want::Checked,
             graph: None,
-            stats: (6649, 910, 5),
+            stats: (6229, 910, 5),
         },
         Root {
             name: "p9CopyDeadBeforeWrite",
             want: Want::Checked,
             graph: None,
-            stats: (4056, 780, 5),
+            stats: (3846, 780, 5),
         },
         Root {
             name: "p10CopyWhileSharedBorrowed",
             want: Want::Checked,
             graph: None,
-            stats: (3958, 703, 5),
+            stats: (3748, 703, 5),
         },
         Root {
             name: "p17CopyIntoReferenceReturningCall",
             want: Want::Checked,
             graph: None,
-            stats: (6802, 977, 5),
+            stats: (6382, 977, 5),
         },
         Root {
             name: "deadLoanBeforeCopy",
             want: Want::Checked,
             graph: None,
-            stats: (6554, 861, 5),
+            stats: (6134, 861, 5),
         },
     ],
     sequences: &[
@@ -411,13 +411,13 @@ function p14MoveAfterLoanDied(): i32 {
   let e = 5i32; let mut h = OwnS { v: 1i32, s: "a", r: &e }; let k = &h.v; return takeS(h);
 }
 "#,
-    typed_stats: (449108, 48629, 12),
-    graph: (GraphCompletion::Incomplete, (192033, 4795, 5)),
+    typed_stats: (431573, 53314, 12),
+    graph: (GraphCompletion::Incomplete, (189163, 4795, 5)),
     roots: &[Root {
         name: "p14MoveAfterLoanDied",
         want: Want::Checked,
         graph: None,
-        stats: (6262, 722, 5),
+        stats: (5842, 722, 5),
     }],
     sequences: &[(
         "p14MoveAfterLoanDied",
@@ -462,8 +462,8 @@ function p16StoreIntoBox(): Box1 {
   let e = 5i32; let mut h = Own2 { v: 1i32, r: &e }; h.r = &h.v; return store(h);
 }
 "#,
-    typed_stats: (458603, 49659, 12),
-    graph: (GraphCompletion::Incomplete, (198575, 5054, 5)),
+    typed_stats: (440634, 54407, 12),
+    graph: (GraphCompletion::Incomplete, (195005, 5054, 5)),
     roots: &[
         Root {
             name: "p4ReturnThroughPass",
@@ -471,7 +471,7 @@ function p16StoreIntoBox(): Box1 {
                 blocker: r####"pass(h)"####,
             },
             graph: None,
-            stats: (2946, 218, 3),
+            stats: (2736, 218, 3),
         },
         Root {
             name: "p5WriteAfterPass",
@@ -479,7 +479,7 @@ function p16StoreIntoBox(): Box1 {
                 blocker: r####"pass(h)"####,
             },
             graph: None,
-            stats: (2984, 228, 3),
+            stats: (2774, 228, 3),
         },
         Root {
             name: "p16StoreIntoBox",
@@ -487,7 +487,7 @@ function p16StoreIntoBox(): Box1 {
                 blocker: r####"store(h)"####,
             },
             graph: None,
-            stats: (2943, 217, 3),
+            stats: (2733, 217, 3),
         },
     ],
     sequences: &[],
@@ -552,20 +552,20 @@ function ownMutMember(): i32 {
   h.m = &mut h.v; return takeOwn(h);
 }
 "#,
-    typed_stats: (480373, 52337, 12),
-    graph: (GraphCompletion::SourceRejected, (218448, 8865, 5)),
+    typed_stats: (462146, 57309, 12),
+    graph: (GraphCompletion::SourceRejected, (213618, 8865, 5)),
     roots: &[
         Root {
             name: "replaceOwn",
             want: Want::Checked,
             graph: None,
-            stats: (3562, 658, 5),
+            stats: (3422, 658, 5),
         },
         Root {
             name: "replaceOwn2",
             want: Want::Checked,
             graph: None,
-            stats: (3297, 541, 5),
+            stats: (3157, 541, 5),
         },
         Root {
             name: "replaceOwnM",
@@ -573,7 +573,7 @@ function ownMutMember(): i32 {
                 blocker: r####"{\n  let mut a = 1i32; let mut h = OwnM { v: 1i32, m: &mut a }; h.m = &mut h.v;\n  return 0i32;\n}"####,
             },
             graph: None,
-            stats: (3257, 527, 5),
+            stats: (3117, 527, 5),
         },
         Root {
             name: "ownWrite",
@@ -583,7 +583,7 @@ function ownMutMember(): i32 {
                 related: r####"&h.v"####,
             },
             graph: None,
-            stats: (3646, 708, 5),
+            stats: (3506, 708, 5),
         },
         Root {
             name: "ownReturn",
@@ -593,7 +593,7 @@ function ownMutMember(): i32 {
                 related: r####"&h.v"####,
             },
             graph: None,
-            stats: (3976, 729, 5),
+            stats: (3766, 729, 5),
         },
         Root {
             name: "ownTake",
@@ -603,7 +603,7 @@ function ownMutMember(): i32 {
                 related: r####"&h.v"####,
             },
             graph: None,
-            stats: (4032, 760, 5),
+            stats: (3822, 760, 5),
         },
         Root {
             name: "ownLet",
@@ -613,7 +613,7 @@ function ownMutMember(): i32 {
                 related: r####"&h.v"####,
             },
             graph: None,
-            stats: (4046, 762, 5),
+            stats: (3836, 762, 5),
         },
         Root {
             name: "ownMTake",
@@ -623,7 +623,7 @@ function ownMutMember(): i32 {
                 related: r####"&mut h.v"####,
             },
             graph: None,
-            stats: (3760, 624, 5),
+            stats: (3550, 624, 5),
         },
         Root {
             name: "ownMutMember",
@@ -633,7 +633,7 @@ function ownMutMember(): i32 {
                 related: r####"&mut h.v"####,
             },
             graph: None,
-            stats: (4035, 760, 5),
+            stats: (3825, 760, 5),
         },
     ],
     sequences: &[
@@ -753,8 +753,8 @@ function moveMatchWrapper(): i32 {
   let n = match (Option.Some(h)) { Option.Some(x) => 0i32, Option.None => 1i32 }; return n;
 }
 "#,
-    typed_stats: (493175, 54895, 12),
-    graph: (GraphCompletion::Incomplete, (222385, 6116, 5)),
+    typed_stats: (474857, 59958, 12),
+    graph: (GraphCompletion::Incomplete, (216715, 6116, 5)),
     roots: &[
         Root {
             name: "moveStructField",
@@ -762,7 +762,7 @@ function moveMatchWrapper(): i32 {
                 blocker: r####"w"####,
             },
             graph: None,
-            stats: (3583, 462, 1),
+            stats: (3233, 462, 1),
         },
         Root {
             name: "moveStructReturn",
@@ -770,7 +770,7 @@ function moveMatchWrapper(): i32 {
                 blocker: r####"Wrap { o: h }"####,
             },
             graph: None,
-            stats: (3448, 471, 2),
+            stats: (3238, 471, 2),
         },
         Root {
             name: "moveMemberStore",
@@ -778,7 +778,7 @@ function moveMatchWrapper(): i32 {
                 blocker: r####"w"####,
             },
             graph: None,
-            stats: (3583, 462, 1),
+            stats: (3233, 462, 1),
         },
         Root {
             name: "moveRecordUpdate",
@@ -786,7 +786,7 @@ function moveMatchWrapper(): i32 {
                 blocker: r####"Own2 { ...h, v: 2i32 }"####,
             },
             graph: None,
-            stats: (3551, 479, 3),
+            stats: (3271, 479, 3),
         },
         Root {
             name: "moveTuple",
@@ -794,7 +794,7 @@ function moveMatchWrapper(): i32 {
                 blocker: r####"t"####,
             },
             graph: None,
-            stats: (3380, 469, 2),
+            stats: (3240, 469, 2),
         },
         Root {
             name: "moveTupleReturn",
@@ -802,7 +802,7 @@ function moveMatchWrapper(): i32 {
                 blocker: r####"[h, 1i32]"####,
             },
             graph: None,
-            stats: (3389, 477, 2),
+            stats: (3249, 477, 2),
         },
         Root {
             name: "moveList",
@@ -810,7 +810,7 @@ function moveMatchWrapper(): i32 {
                 blocker: r####"l"####,
             },
             graph: None,
-            stats: (3016, 404, 1),
+            stats: (2876, 404, 1),
         },
         Root {
             name: "moveListReturn",
@@ -818,7 +818,7 @@ function moveMatchWrapper(): i32 {
                 blocker: r####"[h]"####,
             },
             graph: None,
-            stats: (3025, 412, 2),
+            stats: (2885, 412, 2),
         },
         Root {
             name: "moveWrapperReturn",
@@ -826,7 +826,7 @@ function moveMatchWrapper(): i32 {
                 blocker: r####"Option.Some(h)"####,
             },
             graph: None,
-            stats: (3025, 412, 2),
+            stats: (2885, 412, 2),
         },
         Root {
             name: "moveResultReturn",
@@ -834,7 +834,7 @@ function moveMatchWrapper(): i32 {
                 blocker: r####"Result.Ok(h)"####,
             },
             graph: None,
-            stats: (3025, 412, 2),
+            stats: (2885, 412, 2),
         },
         Root {
             name: "moveMatch",
@@ -842,7 +842,7 @@ function moveMatchWrapper(): i32 {
                 blocker: r####"match (h) { x => 0i32 }"####,
             },
             graph: None,
-            stats: (3048, 420, 3),
+            stats: (2908, 420, 3),
         },
         Root {
             name: "moveMatchCall",
@@ -850,7 +850,7 @@ function moveMatchWrapper(): i32 {
                 blocker: r####"match (take2(h)) { 0i32 => 0i32, _ => 1i32 }"####,
             },
             graph: None,
-            stats: (3048, 420, 3),
+            stats: (2908, 420, 3),
         },
         Root {
             name: "moveArrowCall",
@@ -858,7 +858,7 @@ function moveMatchWrapper(): i32 {
                 blocker: r####"f()"####,
             },
             graph: None,
-            stats: (3038, 419, 3),
+            stats: (2898, 419, 3),
         },
         Root {
             name: "moveWrapperLet",
@@ -866,7 +866,7 @@ function moveMatchWrapper(): i32 {
                 blocker: r####"o"####,
             },
             graph: None,
-            stats: (3016, 404, 1),
+            stats: (2876, 404, 1),
         },
         Root {
             name: "moveMatchWrapper",
@@ -874,7 +874,7 @@ function moveMatchWrapper(): i32 {
                 blocker: r####"match (Option.Some(h)) { Option.Some(x) => 0i32, Option.None => 1i32 }"####,
             },
             graph: None,
-            stats: (3048, 420, 3),
+            stats: (2908, 420, 3),
         },
     ],
     sequences: &[],
@@ -942,7 +942,7 @@ function q1StoreIntoCallerBox(): i32 {
         "pending Storage @ slot.r = o.r;",
         "pending Storage @ &mut b",
     ],
-    stats: (451081, 48834, 12),
+    stats: (433567, 53533, 12),
 };
 
 const STORE_INTO_CALLER_REFERENCE: TypedForm = TypedForm {
@@ -954,7 +954,7 @@ function q2StoreIntoCallerReference(): i32 {
 }
 "#,
     signals: &["pending Storage @ *slot = o.r;", "pending Storage @ &mut b"],
-    stats: (449494, 48699, 12),
+    stats: (431976, 53384, 12),
 };
 
 /// Ruling 25 condition 3, the probe ci-0xlg lacks: the copy `g` outliving `h`
@@ -985,7 +985,7 @@ function p19DisposeTheOriginal(): i32 {
         "obligation FamilySelection @ dispose(h)",
         "pending TypedInput @ dispose(h)",
     ],
-    stats: (447867, 48568, 12),
+    stats: (430460, 53232, 12),
 };
 
 const DISPOSE_PLAIN: TypedForm = TypedForm {
@@ -999,7 +999,7 @@ function disposePlain(): i32 {
         "obligation FamilySelection @ dispose(h)",
         "pending TypedInput @ dispose(h)",
     ],
-    stats: (446295, 48275, 12),
+    stats: (428889, 52918, 12),
 };
 
 /// Probe ci-0xlg P19. `dispose(h)` of any record, with or without a self-borrow
@@ -1027,7 +1027,7 @@ function captured(): i32 {
 }
 "#,
     signals: &["pending Containment @ () => h"],
-    stats: (446735, 48480, 12),
+    stats: (429334, 53144, 12),
 };
 
 /// An arrow that captures the record stops in the typed analysis, before any

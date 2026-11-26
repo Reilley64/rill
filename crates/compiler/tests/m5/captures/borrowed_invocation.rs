@@ -249,7 +249,7 @@ fn borrowed_once_and_unproved_bodies_do_not_issue_receipts() {
             }
         "#,
             true,
-            caps(446_458, 48_425, 12),
+            caps(429_076, 53_075, 12),
         ),
         (
             r#"
@@ -261,7 +261,7 @@ fn borrowed_once_and_unproved_bodies_do_not_issue_receipts() {
             }
         "#,
             false,
-            caps(444_649, 48_232, 12),
+            caps(427_259, 52_882, 12),
         ),
         (
             r#"
@@ -277,7 +277,7 @@ fn borrowed_once_and_unproved_bodies_do_not_issue_receipts() {
             }
         "#,
             false,
-            caps(449_008, 48_683, 12),
+            caps(431_615, 53_375, 12),
         ),
     ] {
         probe_report(

@@ -205,11 +205,6 @@ impl<'a, 'g> Facts<'a, 'g> {
             return Ok(None);
         };
         let inventory = self.typed.inventory();
-        keyed::charge(
-            &implementation.family.module,
-            inventory.family_probes(),
-            budget,
-        )?;
         let Some(family) = inventory.captured_family(&implementation.family) else {
             return Ok(None);
         };

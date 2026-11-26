@@ -321,7 +321,6 @@ impl<'a, 'g> Check<'a, 'g> {
         })() else {
             return Ok(None);
         };
-        keyed::charge(&id.module, self.inventory.headers().len(), self.budget)?;
         Ok((|| {
             let metadata = self.inventory.headers().get(id)?;
             let [requirement] = metadata.requirements.as_slice() else {

@@ -571,31 +571,31 @@ fn unsupported_option_relay_siblings_keep_parent_caps() {
             "callerNonmonomorphic",
             "generic(input)",
             (3101, 284, 4),
-            [(198541, 5926, 5), (195691, 5792, 4)],
+            [(196021, 5926, 5), (195691, 5792, 4)],
         ),
         (
             "callerComputed",
             "relay(((relay(input))))",
             (3109, 288, 4),
-            [(198789, 5930, 5), (195939, 5796, 4)],
+            [(196269, 5930, 5), (195939, 5796, 4)],
         ),
         (
             "callerPipe",
             "input |> relay(_)",
-            (3168, 283, 4),
-            [(198548, 5925, 5), (195629, 5791, 4)],
+            (3098, 283, 4),
+            [(195958, 5925, 5), (195629, 5791, 4)],
         ),
         (
             "callerGroupPipe",
             "(input |> relay(_))",
             (3104, 285, 4),
-            [(198604, 5927, 5), (195754, 5793, 4)],
+            [(196084, 5927, 5), (195754, 5793, 4)],
         ),
         (
             "callerMultiple",
             "choose(input, input)",
             (3103, 285, 4),
-            [(198603, 5927, 5), (195753, 5793, 4)],
+            [(196083, 5927, 5), (195753, 5793, 4)],
         ),
     ] {
         relay_caller_keeps_caps(test, name, call, Completion::Incomplete, target, graph);
@@ -614,20 +614,20 @@ fn admitted_option_relay_callers_keep_their_caps() {
         (
             "callerDirect",
             "relay(input)",
-            (9232, 1677, 4),
-            [(200996, 6758, 5), (198554, 6624, 4)],
+            (9092, 1677, 4),
+            [(198406, 6758, 5), (198554, 6624, 4)],
         ),
         (
             "callerGroup",
             "((relay(((input)))))",
-            (9252, 1685, 8),
-            [(201248, 6762, 8), (198806, 6628, 8)],
+            (9112, 1685, 8),
+            [(198658, 6762, 8), (198806, 6628, 8)],
         ),
         (
             "callerExclusive",
             "relayExclusive(input)",
-            (9182, 1677, 4),
-            [(200963, 6758, 5), (198521, 6624, 4)],
+            (9042, 1677, 4),
+            [(198373, 6758, 5), (198521, 6624, 4)],
         ),
     ] {
         relay_caller_keeps_caps(test, name, call, Completion::Checked, target, graph);
@@ -700,9 +700,9 @@ fn exported_and_scoped_relay_callees_keep_parent_caps() {
                 "relayExport(input)?",
                 (3127, 297, 4),
                 if shared {
-                    (201_169, 6_441, 5)
+                    (198_649, 6_441, 5)
                 } else {
-                    (201_152, 6_441, 5)
+                    (198_632, 6_441, 5)
                 },
             ),
             (
@@ -711,9 +711,9 @@ fn exported_and_scoped_relay_callees_keep_parent_caps() {
                 "relayLocal(input)?",
                 (3130, 298, 4),
                 if shared {
-                    (201_231, 6_442, 5)
+                    (198_711, 6_442, 5)
                 } else {
-                    (201_214, 6_442, 5)
+                    (198_694, 6_442, 5)
                 },
             ),
         ] {
