@@ -68,13 +68,14 @@ fn installed_conversions() {
         fs::copy(source.join(file), root.join("lib/rill/std").join(file)).unwrap();
     }
     let executable = root.join("bin/conversion-probe");
-    fs::copy(std::env::current_exe().unwrap(), &executable).unwrap();
-    let output = Command::new(executable)
-        .args(["--exact", "installed_conversions", "--nocapture"])
-        .env("RILL_CONVERSION_TEST_ROOT", &root)
-        .current_dir(root.join("app"))
-        .output()
-        .unwrap();
+    rill_test_support::stage_current_exe(&executable).unwrap();
+    let output = rill_test_support::run_staged(
+        Command::new(executable)
+            .args(["--exact", "installed_conversions", "--nocapture"])
+            .env("RILL_CONVERSION_TEST_ROOT", &root)
+            .current_dir(root.join("app")),
+    )
+    .unwrap();
     assert!(
         output.status.success(),
         "{}\n{}",

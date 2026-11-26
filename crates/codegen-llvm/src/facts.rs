@@ -360,7 +360,7 @@ mod tests {
         );
         assert_eq!(
             substitution_at_call_of(&graph, &facts, "inner", &[]).unwrap_err(),
-            "the backend cannot lower a type argument with no lowering yet at main.rill:2:37"
+            "backend failure: the backend cannot lower a type argument with no lowering yet at main.rill:2:37, which the compilable-program rule admitted"
         );
         assert_eq!(
             substitution_at_call_of(&graph, &facts, "outer", &[]),

@@ -1,3 +1,4 @@
+use compiler::analysis::compilable::messages;
 use compiler::analysis::compilable::{
     Blocker, Compilability, CompilableProgram, ProgramAnalysis, UNSUPPORTED_SHAPE,
 };
@@ -57,17 +58,22 @@ pub fn with_program(
             message: "valid source whose shape the compiler cannot compile yet".into(),
             span: Some(site.span.clone()),
         }]),
-        Compilability::Blocked(Blocker::SourceRejected { finding }) => reject(vec![Diagnostic {
-            code: Some(finding.code()),
-            message: ownership_message(finding.code()).into(),
-            span: Some(finding.site.span.clone()),
-        }]),
+        Compilability::Blocked(Blocker::SourceRejected { findings }) => reject(
+            findings
+                .into_iter()
+                .map(|finding| Diagnostic {
+                    code: Some(finding.code()),
+                    message: messages::ownership(finding.code()).into(),
+                    span: Some(finding.site.span.clone()),
+                })
+                .collect(),
+        ),
         Compilability::Blocked(Blocker::TypedRejected { findings }) => {
             let mut diagnostics: Vec<_> = findings
                 .into_iter()
                 .map(|finding| Diagnostic {
                     code: finding.code,
-                    message: finding.description,
+                    message: finding.description.into(),
                     span: Some(finding.site.span.clone()),
                 })
                 .collect();
@@ -81,9 +87,16 @@ pub fn with_program(
             }
             reject(diagnostics)
         }
-        Compilability::Blocked(Blocker::TypedUnlocated { core_blockers }) => incomplete(&format!(
-            "typed analysis could not finish and names no source site (blocked on {core_blockers:?})"
-        )),
+        Compilability::Blocked(Blocker::TypedUnlocated { core_blockers }) => {
+            let reasons: Vec<&str> = core_blockers
+                .into_iter()
+                .map(messages::core_blocker)
+                .collect();
+            incomplete(&format!(
+                "typed analysis could not finish and names no source site ({})",
+                reasons.join("; ")
+            ))
+        }
         Compilability::Blocked(Blocker::ResourceLimit { statistics }) => {
             limit_reached(&exhausted(statistics, limits))
         }
@@ -131,16 +144,6 @@ fn load_failure(failure: loader::Failure) -> ExitCode {
         FailureKind::ResourceLimit => {
             limit_reached(&format!("the loader limit ({})", failure.message))
         }
-    }
-}
-
-fn ownership_message(code: &str) -> &'static str {
-    match code {
-        "R0200" => "value used after it was moved",
-        "R0201" => "conflicting access",
-        "R0202" => "reference escapes the value it borrows",
-        "R0203" => "value released while it is borrowed",
-        _ => "ownership rule violated",
     }
 }
 

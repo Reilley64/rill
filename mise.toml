@@ -27,17 +27,17 @@ run = "python tools/doctor.py"
 
 [tasks.check]
 description = "Run LLVM-free Rust tests, formatting, lint, documentation and fixture checks"
-depends = ["check:rust", "check:m5", "check:docs", "check:comments", "check:fixtures", "check:tools", "test"]
+depends = ["check:rust", "check:m5", "check:docs", "check:comments", "check:staged-executables", "check:fixtures", "check:tools", "test"]
 
 [tasks."check:rust"]
 description = "Check Rust formatting and LLVM-free clippy"
 depends = ["doctor"]
-run = ["cargo fmt --all -- --check", "cargo clippy --locked --no-default-features -p compiler -p ide -p lsp -p cli -p rill-collection -p rill-error-storage -p rill-runtime --all-targets -- -D warnings"]
+run = ["cargo fmt --all -- --check", "cargo clippy --locked --no-default-features -p compiler -p ide -p lsp -p cli -p rill-collection -p rill-error-storage -p rill-runtime -p rill-test-support --all-targets -- -D warnings"]
 
 [tasks.test]
 description = "Run implemented LLVM-free Rust component tests, not complete Rill product acceptance"
 depends = ["doctor"]
-run = "cargo test --locked --no-default-features -p compiler -p ide -p lsp -p cli -p rill-collection -p rill-error-storage -p rill-runtime"
+run = "cargo test --locked --no-default-features -p compiler -p ide -p lsp -p cli -p rill-collection -p rill-error-storage -p rill-runtime -p rill-test-support"
 
 [tasks."test:compiler"]
 description = "Run compiler unit, integration and documentation tests without LLVM"
@@ -79,6 +79,11 @@ run = ["python tools/check_docs.py", "python tools/row_tests.py check", "git dif
 description = "Refuse Rust comments added since the merge base with origin/main that are outside the keep list"
 depends = ["doctor"]
 run = "python tools/check_comments.py"
+
+[tasks."check:staged-executables"]
+description = "Refuse a Rust test that copies an executable without rill-test-support"
+depends = ["doctor"]
+run = "python tools/check_staged_executables.py"
 
 [tasks."check:fixtures"]
 depends = ["setup"]

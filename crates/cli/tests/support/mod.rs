@@ -1,8 +1,6 @@
 use std::{
-    fs, io,
+    fs,
     path::{Path, PathBuf},
-    process::{Command, Output, Stdio},
-    sync::Mutex,
 };
 
 pub(crate) const TARGET: &str = env!("RILL_HOST_TARGET");
@@ -21,7 +19,7 @@ impl Installation {
         for directory in [&root.join("bin"), &root.join("app"), &std, &runtime] {
             fs::create_dir_all(directory).unwrap();
         }
-        copy_executable(
+        rill_test_support::stage_executable(
             Path::new(env!("CARGO_BIN_EXE_rill")),
             &root.join("bin/rill"),
         )
@@ -50,27 +48,4 @@ impl Drop for Installation {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.root);
     }
-}
-
-static LAUNCH: Mutex<()> = Mutex::new(());
-
-pub(crate) fn copy_executable(from: &Path, to: &Path) -> io::Result<u64> {
-    let _launch = LAUNCH
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    fs::copy(from, to)
-}
-
-pub(crate) fn run(command: &mut Command) -> io::Result<Output> {
-    let child = {
-        let _launch = LAUNCH
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        command
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()?
-    };
-    child.wait_with_output()
 }

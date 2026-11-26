@@ -167,12 +167,6 @@ pub(crate) fn emit_object(
     object: &Path,
     check_allocations: bool,
 ) -> Result<(), BackendError> {
-    if let Some(disposer) = program.active_disposers().first() {
-        return Err(BackendError::unsupported(
-            disposer.site(),
-            "an active disposer",
-        ));
-    }
     let mut bodies = BTreeMap::new();
     bodies.insert(Body::Startup, program.startup());
     for body in program.functions() {

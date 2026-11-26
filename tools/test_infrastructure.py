@@ -273,6 +273,8 @@ class CommentCheckRunTests(unittest.TestCase):
         tasks = doctor.tomllib.loads((doctor.ROOT / "mise.toml").read_text())["tasks"]
         self.assertIn("check:comments", tasks["check"]["depends"])
         self.assertEqual(tasks["check:comments"]["run"], "python tools/check_comments.py")
+        self.assertIn("check:staged-executables", tasks["check"]["depends"])
+        self.assertEqual(tasks["check:staged-executables"]["run"], "python tools/check_staged_executables.py")
         for name in ["check.yml", "native.yml"]:
             workflow = yaml.load((doctor.ROOT / ".github/workflows" / name).read_text(), Loader=yaml.BaseLoader)
             checkouts = [step for job in workflow["jobs"].values() for step in job["steps"]
@@ -333,10 +335,11 @@ class WorkspaceTests(unittest.TestCase):
             ["cargo", "metadata", "--locked", "--no-deps", "--format-version", "1"],
             cwd=doctor.ROOT, text=True))
         allowed = {"rill-collection": set(), "rill-error-storage": set(),
-                   "rill-runtime": {"rill-collection"},
-                   "compiler": {"rill-collection", "rill-error-storage"},
+                   "rill-runtime": {"rill-collection"}, "rill-test-support": set(),
+                   "compiler": {"rill-collection", "rill-error-storage", "rill-test-support"},
                    "ide": {"compiler"}, "lsp": {"ide"},
-                   "codegen-llvm": {"compiler"}, "cli": {"compiler", "lsp", "codegen-llvm"}}
+                   "codegen-llvm": {"compiler", "rill-test-support"},
+                   "cli": {"compiler", "lsp", "codegen-llvm", "rill-test-support"}}
         packages = {package["name"]: package for package in metadata["packages"]}
         self.assertEqual(set(packages), set(allowed))
         for name, package in packages.items():
@@ -344,7 +347,8 @@ class WorkspaceTests(unittest.TestCase):
                 self.assertEqual(package["publish"], [])
                 internal = {dep["name"] for dep in package["dependencies"] if dep["name"] in packages}
                 self.assertLessEqual(internal, allowed[name])
-                if name in {"compiler", "ide", "lsp", "rill-collection", "rill-error-storage", "rill-runtime"}:
+                if name in {"compiler", "ide", "lsp", "rill-collection", "rill-error-storage", "rill-runtime",
+                            "rill-test-support"}:
                     self.assertFalse({"inkwell", "llvm-sys"} & {dep["name"] for dep in package["dependencies"]})
 
 
@@ -396,6 +400,7 @@ class WorkflowTests(unittest.TestCase):
 class NativeAcceptanceTests(unittest.TestCase):
     BUILD_STEP = "Build: Stage the prototypes installation"
     TEST_STEP = "Test: Run the prototype acceptance through the staged rill"
+    RUNTIME_STEP = "Test: Verify native runtime acceptance is unavailable"
     RELEASE_STEP = "Build and test: Verify release acceptance stops at the unavailable build task"
     BUILD_STUB = f'exec "{sys.executable}" tools/unavailable.py build\n'
 
@@ -426,7 +431,26 @@ class NativeAcceptanceTests(unittest.TestCase):
                                  "${{ github.workspace }}/target/toolchains/llvm-23.1.5/${{ matrix.llvm }}")
                 self.assertEqual(step["env"]["LLVM_SYS_231_STRICT_VERSIONING"], "1")
         self.assertLess(names.index(self.BUILD_STEP), names.index(self.TEST_STEP))
-        self.assertFalse([step for step in steps if "test:runtime" in step.get("run", "")])
+        self.assertEqual([step["name"] for step in steps if "test:runtime" in step.get("run", "")], [self.RUNTIME_STEP])
+
+    def test_the_runtime_stub_is_asserted_on_every_run(self):
+        workflow = yaml.load((doctor.ROOT / ".github/workflows/native.yml").read_text(), Loader=yaml.BaseLoader)
+        step = next(step for step in workflow["jobs"]["native"]["steps"] if step["name"] == self.RUNTIME_STEP)
+        self.assertNotIn("if", step)
+
+    def test_the_runtime_stub_is_asserted_so_the_job_is_not_red_by_design(self):
+        result = self.run_step(
+            f'[ "$1 $2" = "run test:runtime" ] && exec "{sys.executable}" tools/unavailable.py test:runtime\nexit 64\n',
+            self.RUNTIME_STEP, "mise run test:runtime")
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_a_real_runtime_result_or_other_failure_still_fails_the_runtime_step(self):
+        for script in ["exit 0\n", "echo 'compile error' >&2\nexit 1\n",
+                       "echo 'unrelated is not implemented in this scaffold' >&2\nexit 2\n"]:
+            with self.subTest(script=script):
+                result = self.run_step(script, self.RUNTIME_STEP, "mise run test:runtime")
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("::error::test:runtime no longer reports the scaffold stub", result.stdout)
 
     def run_release(self, mise_script):
         guard = '[ "$1 $2" != "run verify:release" ] && exit 64\n'
@@ -461,7 +485,7 @@ class TestTaskTests(unittest.TestCase):
         tasks = doctor.tomllib.loads((doctor.ROOT / "mise.toml").read_text())["tasks"]
         self.assertEqual(tasks["test"]["depends"], ["doctor"])
         self.assertEqual(tasks["test"]["run"],
-                         "cargo test --locked --no-default-features -p compiler -p ide -p lsp -p cli -p rill-collection -p rill-error-storage -p rill-runtime")
+                         "cargo test --locked --no-default-features -p compiler -p ide -p lsp -p cli -p rill-collection -p rill-error-storage -p rill-runtime -p rill-test-support")
         self.assertEqual(tasks["test:compiler"]["depends"], ["doctor"])
         self.assertEqual(tasks["test:compiler"]["run"],
                          "cargo test --locked -p compiler --no-default-features")
@@ -472,7 +496,7 @@ class TestTaskTests(unittest.TestCase):
         self.assertIn("check:rust", tasks["check"]["depends"])
         self.assertEqual(tasks["check:rust"]["run"], [
             "cargo fmt --all -- --check",
-            "cargo clippy --locked --no-default-features -p compiler -p ide -p lsp -p cli -p rill-collection -p rill-error-storage -p rill-runtime --all-targets -- -D warnings",
+            "cargo clippy --locked --no-default-features -p compiler -p ide -p lsp -p cli -p rill-collection -p rill-error-storage -p rill-runtime -p rill-test-support --all-targets -- -D warnings",
         ])
 
 

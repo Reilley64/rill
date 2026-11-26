@@ -16,3 +16,6 @@ llvm = ["dep:codegen-llvm"]
 compiler.workspace = true
 lsp.workspace = true
 codegen-llvm = { workspace = true, optional = true }
+
+[dev-dependencies]
+rill-test-support.workspace = true

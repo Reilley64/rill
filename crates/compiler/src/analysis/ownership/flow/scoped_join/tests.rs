@@ -3,8 +3,7 @@ use crate::analysis::typed::analyze_typed;
 use crate::loader::{self, InstalledRequest, Origin};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::sync::Mutex;
+use std::process::Command;
 
 const SOURCE: &str = r#"
 import std::{List, Result, Err};
@@ -734,10 +733,8 @@ fn installed_probe(name: &str, source: &str) {
     fs::write(root.join("main.rill"), source).unwrap();
     let executable = root.join("bin/probe");
     let test = format!("{}::{name}", module_path!());
-    static LAUNCH: Mutex<()> = Mutex::new(());
-    let child = {
-        let _launch = LAUNCH.lock().expect("probe launch lock poisoned");
-        fs::copy(std::env::current_exe().unwrap(), &executable).unwrap();
+    rill_test_support::stage_current_exe(&executable).unwrap();
+    let output = rill_test_support::run_staged(
         Command::new(executable)
             .env("RILL_JOIN_PROBE_ROOT", &root)
             .current_dir(&root)
@@ -745,14 +742,9 @@ fn installed_probe(name: &str, source: &str) {
                 "--exact",
                 test.strip_prefix("compiler::").unwrap(),
                 "--nocapture",
-            ])
-            .stdin(Stdio::null())
-            .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .spawn()
-            .unwrap()
-    };
-    let output = child.wait_with_output().unwrap();
+            ]),
+    )
+    .unwrap();
     assert!(
         output.status.success(),
         "{}\n{}",

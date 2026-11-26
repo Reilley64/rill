@@ -149,35 +149,6 @@ fn the_object_exports_the_startup_symbols_and_the_allocation_flag_and_nothing_el
 }
 
 #[test]
-fn an_admitted_shape_the_backend_cannot_lower_is_an_error_and_no_object() {
-    let Some(built) = support::emit(
-        "an_admitted_shape_the_backend_cannot_lower_is_an_error_and_no_object",
-        "let flag = true;\n",
-    ) else {
-        return;
-    };
-    let error = built.error.clone().expect("a backend error");
-    assert!(error.contains("cannot lower"), "{error}");
-    assert!(error.contains("main.rill"), "{error}");
-    assert!(!built.object().exists());
-}
-
-#[test]
-fn an_operation_the_backend_does_not_lower_is_named_without_debug_output() {
-    let Some(built) = support::emit(
-        "an_operation_the_backend_does_not_lower_is_named_without_debug_output",
-        &format!("{LOG}let mut s = \"a\";\nlet r = &mut s;\nlog(&s);\n"),
-    ) else {
-        return;
-    };
-    assert_eq!(
-        built.error.as_deref(),
-        Some("the backend cannot lower an operation with no lowering yet at main.rill:3:9")
-    );
-    assert!(!built.object().exists());
-}
-
-#[test]
 fn internal_function_symbols_are_named_from_stable_identifiers() {
     let Some(built) = support::emit(
         "internal_function_symbols_are_named_from_stable_identifiers",
