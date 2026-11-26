@@ -10,7 +10,8 @@
 //! To admit a shape, lower it in the backend first, add its variant to
 //! [`Shape`] and to [`Shape::ALL`], make the classifiers below admit it, and
 //! add its program to the coverage table. To narrow, remove it from all
-//! four. The classifiers match every `Operation`, `Terminator` and `Cleanup`
+//! four. A panic ends its block: the backend lowers nothing after it, so the
+//! walk does not read what follows. The classifiers match every `Operation`, `Terminator` and `Cleanup`
 //! variant with no wildcard, so a new MIR variant fails to compile until it is
 //! decided here.
 //!
@@ -46,6 +47,10 @@ pub enum Shape {
     BorrowStaticText,
     /// A shared borrow of a place.
     BorrowShared,
+    /// An exclusive borrow of a place.
+    BorrowExclusive,
+    /// A reborrow of an exclusive descriptor.
+    ReborrowExclusive,
     /// Copy a view into a place.
     CopyInto,
     /// Move a value into a place.
@@ -54,6 +59,10 @@ pub enum Shape {
     Call,
     /// Write one string and a newline to standard output.
     WriteLine,
+    /// Append a string view to the owned string an exclusive descriptor refers to.
+    AppendText,
+    /// End the program, reporting a string. Nothing after it is lowered.
+    Panic,
     /// A block of cleanup actions.
     Cleanup,
     /// A cleanup action that ends storage and does nothing else.
@@ -64,8 +73,12 @@ pub enum Shape {
     TextParameter,
     /// A parameter of type `&string`.
     TextViewParameter,
+    /// A parameter of type `&mut string`.
+    ExclusiveTextParameter,
     /// A result of type `void`.
     VoidResult,
+    /// A result of type `never`.
+    NeverResult,
 }
 
 impl Shape {
@@ -79,16 +92,22 @@ impl Shape {
         Shape::InitializeText,
         Shape::BorrowStaticText,
         Shape::BorrowShared,
+        Shape::BorrowExclusive,
+        Shape::ReborrowExclusive,
         Shape::CopyInto,
         Shape::MoveInto,
         Shape::Call,
         Shape::WriteLine,
+        Shape::AppendText,
+        Shape::Panic,
         Shape::Cleanup,
         Shape::EndStorage,
         Shape::DropText,
         Shape::TextParameter,
         Shape::TextViewParameter,
+        Shape::ExclusiveTextParameter,
         Shape::VoidResult,
+        Shape::NeverResult,
     ];
 }
 
@@ -247,6 +266,12 @@ impl<'a, 'g> Facts<'a, 'g> {
                 } if matches!(referent.as_ref(), TypeTerm::Primitive(ty) if ty.name() == "string") => {
                     Shape::TextViewParameter
                 }
+                TypeTerm::Reference {
+                    mutable: true,
+                    referent,
+                } if matches!(referent.as_ref(), TypeTerm::Primitive(ty) if ty.name() == "string") => {
+                    Shape::ExclusiveTextParameter
+                }
                 _ => return Ok(false),
             };
             shapes.note(shape, budget)?;
@@ -254,6 +279,7 @@ impl<'a, 'g> Facts<'a, 'g> {
         budget.step(1)?;
         let shape = match result.as_ref() {
             TypeTerm::Primitive(ty) if ty.name() == "void" => Shape::VoidResult,
+            TypeTerm::Primitive(ty) if ty.name() == "never" => Shape::NeverResult,
             _ => return Ok(false),
         };
         shapes.note(shape, budget)?;
@@ -305,6 +331,9 @@ pub(super) fn first_unadmitted<'g>(
         if !operation(block, facts, shapes, budget)? {
             return Ok(Some(block.site));
         }
+        if matches!(block.operation, Operation::Panic { .. }) {
+            return Ok(None);
+        }
         let (next, shape) = match block.terminator {
             Terminator::Goto(next) => (Some(next), Shape::Goto),
             Terminator::Return => (None, Shape::Return),
@@ -343,6 +372,19 @@ fn operation<'g>(
             holder,
             exclusive: false,
         } => (plain(source) && plain(holder)).then_some(Shape::BorrowShared),
+        Operation::Borrow {
+            source,
+            holder,
+            exclusive: true,
+        } => (plain(source) && plain(holder)).then_some(Shape::BorrowExclusive),
+        Operation::Reborrow {
+            parent,
+            holder,
+            exclusive: true,
+        } => (plain(parent) && plain(holder)).then_some(Shape::ReborrowExclusive),
+        Operation::AppendText { target, text } => {
+            (plain(target) && plain(text)).then_some(Shape::AppendText)
+        }
         Operation::Copy {
             from,
             into: Some(into),
@@ -353,6 +395,7 @@ fn operation<'g>(
         } => (plain(from) && plain(into)).then_some(Shape::MoveInto),
         Operation::Call(_) => facts.plain_call(site, budget)?.then_some(Shape::Call),
         Operation::WriteLine { text } => plain(text).then_some(Shape::WriteLine),
+        Operation::Panic { message } => plain(message).then_some(Shape::Panic),
         Operation::Cleanup(actions) => {
             for action in actions {
                 budget.step(1)?;
@@ -363,8 +406,8 @@ fn operation<'g>(
             }
             Some(Shape::Cleanup)
         }
-        Operation::Borrow {
-            exclusive: true, ..
+        Operation::Reborrow {
+            exclusive: false, ..
         }
         | Operation::Copy { into: None, .. }
         | Operation::Move { into: None, .. }
@@ -379,7 +422,6 @@ fn operation<'g>(
         | Operation::AdvanceOwnedListOptionText { .. }
         | Operation::OpenOwnedListRecordText { .. }
         | Operation::AdvanceOwnedListRecordText { .. }
-        | Operation::Reborrow { .. }
         | Operation::Dereference(_)
         | Operation::ReadListI32 { .. }
         | Operation::LookupListElement { .. }
@@ -432,8 +474,6 @@ fn operation<'g>(
         | Operation::InstallThroughTwoHop { .. }
         | Operation::Export(_)
         | Operation::Drop(_)
-        | Operation::Panic { .. }
-        | Operation::AppendText { .. }
         | Operation::DropCapture { .. } => None,
     };
     match shape {

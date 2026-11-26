@@ -314,32 +314,32 @@ const SIBLINGS: [(&str, &str, &str, Triple, Triple); 7] = [
         (1902, 8, 4),
     ),
     (
-        "panic",
-        "import std::panic;\npanic(\"boom\");\n",
-        "panic(\"boom\")",
-        (1892, 5, 3),
-        (1896, 7, 3),
+        "piped panic",
+        "import std::panic;\n\"x\" |> panic();\n",
+        "\"x\" |> panic()",
+        (1894, 5, 3),
+        (1894, 5, 3),
     ),
     (
-        "panic group",
-        "import std::panic;\npanic((\"boom\"));\n",
-        "panic((\"boom\"))",
-        (1895, 6, 3),
-        (1899, 8, 3),
+        "piped panic group",
+        "import std::panic;\n(\"x\") |> panic();\n",
+        "(\"x\") |> panic()",
+        (1897, 6, 3),
+        (1897, 6, 3),
     ),
     (
-        "panic scope",
-        "import std::panic;\n{ panic(\"boom\"); }\n",
-        "panic(\"boom\")",
-        (1896, 6, 4),
-        (1900, 8, 4),
+        "piped panic scope",
+        "import std::panic;\n{ \"x\" |> panic(); }\n",
+        "\"x\" |> panic()",
+        (1898, 6, 4),
+        (1898, 6, 4),
     ),
     (
-        "panic borrow",
-        "import std::panic;\nlet s = \"x\";\npanic(&s);\n",
+        "panic bound",
+        "import std::panic;\nlet s = \"x\";\nlet t = panic(&s);\n",
         "panic(&s)",
-        (1908, 15, 3),
-        (1911, 17, 3),
+        (1918, 19, 3),
+        (1918, 19, 3),
     ),
 ];
 
@@ -376,6 +376,80 @@ fn unsupported_output_siblings_stay_incomplete_at_their_call_and_pay_nothing_mor
                 "{name}"
             );
             assert!(parent_report.mir().is_none(), "{name}");
+        },
+    );
+}
+
+const PANICS: [(&str, &str, &[&str], Triple); 4] = [
+    (
+        "panic",
+        "import std::panic;\npanic(\"boom\");\n",
+        &[
+            "init \"boom\"",
+            "call implement panic(message: string): never",
+        ],
+        (4345, 85, 4),
+    ),
+    (
+        "panic group",
+        "import std::panic;\npanic((\"boom\"));\n",
+        &[
+            "init (\"boom\")",
+            "call implement panic(message: string): never",
+        ],
+        (4351, 86, 5),
+    ),
+    (
+        "panic scope",
+        "import std::panic;\n{ panic(\"boom\"); }\n",
+        &[
+            "init \"boom\"",
+            "call implement panic(message: string): never",
+        ],
+        (4350, 86, 5),
+    ),
+    (
+        "panic borrow",
+        "import std::panic;\nlet s = \"x\";\npanic(&s);\n",
+        &[
+            "init s",
+            "borrow s in &s",
+            "call implement panic(message: &string): never",
+        ],
+        (4413, 114, 5),
+    ),
+];
+
+#[test]
+fn a_top_level_panic_call_ends_startup_at_the_call_with_no_cleanup() {
+    let sources: Vec<String> = PANICS
+        .iter()
+        .map(|(_, body, ..)| format!("{}\n{body}", super::IMPORTS))
+        .collect();
+    let sources: Vec<&str> = sources.iter().map(String::as_str).collect();
+    programs(
+        "output::a_top_level_panic_call_ends_startup_at_the_call_with_no_cleanup",
+        &sources,
+        |index, graph, receipt| {
+            let (name, _, expected, triple) = PANICS[index];
+            let (module, targeted) = startup_report(graph, receipt);
+            assert_eq!(targeted.completion(), Completion::Incomplete, "{name}");
+            assert_eq!(
+                targeted.blocked_at().unwrap().module.path,
+                "output.rill",
+                "{name}"
+            );
+            assert_limits(receipt, module, BodyOwner::Startup, &targeted, triple);
+            let report = analyze_ownership(receipt, AnalysisLimits::default());
+            let root = startup(&report);
+            assert_eq!(root.completion(), Completion::Checked, "{name}");
+            let mir = root.mir().unwrap();
+            assert_eq!(sequence(&report, mir), expected, "{name}");
+            assert_eq!(
+                straight_blocks(mir, mir.entry).last().unwrap().terminator,
+                Terminator::FinishStartup,
+                "{name}"
+            );
         },
     );
 }
@@ -615,17 +689,81 @@ fn append_hello_lowers_to_an_exclusive_borrow_a_call_and_an_append() {
     );
 }
 
-const AFTER_PANIC: [(&str, &str, &str); 3] = [
-    ("feasible", "import std::{log, panic};\nlog(\"a\");\n", ""),
+const AFTER_PANIC: [(&str, &str, &str, &[&str]); 8] = [
+    (
+        "feasible",
+        "import std::{log, panic};\nlog(\"a\");\npanic(\"boom\");\n",
+        "",
+        &[
+            "init \"a\"",
+            "call implement log(text: string): void",
+            "init \"boom\"",
+            "call implement panic(message: string): never",
+        ],
+    ),
+    (
+        "feasible unsupported",
+        "import std::{log, panic};\n\"x\" |> log();\npanic(\"boom\");\n",
+        "\"x\" |> log()",
+        &[],
+    ),
     (
         "dead",
         "import std::{log, panic};\npanic(\"boom\");\nlog(\"after\");\n",
-        "panic(\"boom\")",
+        "",
+        &[
+            "init \"boom\"",
+            "call implement panic(message: string): never",
+        ],
+    ),
+    (
+        "dead unsupported",
+        "import std::{log, panic};\npanic(\"boom\");\n\"x\" |> log();\n",
+        "",
+        &[
+            "init \"boom\"",
+            "call implement panic(message: string): never",
+        ],
     ),
     (
         "scoped dead",
         "import std::{log, panic};\n{ panic(\"boom\"); log(\"after\"); }\n",
-        "panic(\"boom\")",
+        "",
+        &[
+            "init \"boom\"",
+            "call implement panic(message: string): never",
+        ],
+    ),
+    (
+        "scoped dead unsupported",
+        "import std::{log, panic};\n{ panic(\"boom\"); \"x\" |> log(); }\n",
+        "",
+        &[
+            "init \"boom\"",
+            "call implement panic(message: string): never",
+        ],
+    ),
+    (
+        "pruned local",
+        "import std::{log, panic};\npanic(\"boom\");\nlet s = \"after\";\nlog(&s);\n",
+        "",
+        &[
+            "init \"boom\"",
+            "call implement panic(message: string): never",
+        ],
+    ),
+    (
+        "pruned cleanup",
+        "import std::{log, panic};\nlet s = \"x\";\nlet t = \"y\";\n{ log(&t); panic(&s); }\n",
+        "",
+        &[
+            "init s",
+            "init t",
+            "borrow t in &t",
+            "call implement log(text: &string): void",
+            "borrow s in &s",
+            "call implement panic(message: &string): never",
+        ],
     ),
 ];
 
@@ -636,11 +774,12 @@ fn code_after_a_panic_grants_nothing_and_the_feasible_control_checks() {
         "output::code_after_a_panic_grants_nothing_and_the_feasible_control_checks",
         &sources,
         |index, _, receipt| {
-            let (name, _, blocker) = AFTER_PANIC[index];
+            let (name, _, blocker, expected) = AFTER_PANIC[index];
             let report = analyze_ownership(receipt, AnalysisLimits::default());
             let root = startup(&report);
             if blocker.is_empty() {
                 assert_eq!(root.completion(), Completion::Checked, "{name}");
+                assert_eq!(sequence(&report, root.mir().unwrap()), expected, "{name}");
                 return;
             }
             assert_eq!(root.completion(), Completion::Incomplete, "{name}");

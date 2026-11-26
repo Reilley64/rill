@@ -2346,6 +2346,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         let mut prefix = children.len();
         let mut straight = node == self.body;
         let mut forwarding = None;
+        let mut ends_program = false;
         for (index, &child) in children.iter().enumerate() {
             self.budget.step(1)?;
             let statement = &self.module.syntax.nodes[child];
@@ -2372,11 +2373,18 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
             };
             // Typed statement flow already composes nested exits.
             // An infeasible suffix introduces no slots or obligations.
-            if self
-                .fact(&control)
-                .is_some_and(|facts| !facts.flow.normal && !facts.flow.pending)
+            if let Some(facts) = self.fact(&control)
+                && !facts.flow.normal
+                && !facts.flow.pending
             {
                 prefix = index + 1;
+                ends_program = matches!(
+                    statement.kind,
+                    NodeKind::ExpressionStatement | NodeKind::Block
+                ) && facts.flow.diverges
+                    && !facts.flow.returns
+                    && facts.flow.breaks.is_empty()
+                    && facts.flow.continues.is_empty();
                 break;
             }
         }
@@ -2400,7 +2408,11 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
         } else {
             node
         };
-        let mut tail = self.cleanup_scope(exit_site, &locals, next)?;
+        let mut tail = if ends_program {
+            next
+        } else {
+            self.cleanup_scope(exit_site, &locals, next)?
+        };
         if node == self.body {
             if straight {
                 self.forwarding_statement = forwarding.map(|call| (call, prefix));
@@ -8151,8 +8163,7 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                     && selection.substitution.is_empty()
                     && selection.implementation.module == call.callee.module
                     && selection.implementation.kind == DeclarationKind::Implementation
-                    && substitution.argument == actual
-                    && result_is("void"),
+                    && substitution.argument == actual,
             )
         } else {
             return Err(pending());
@@ -8167,10 +8178,12 @@ impl<'a, 'g, 'b> Build<'a, 'g, 'b> {
                 Some(PrimitiveOperation::Panic) if result_is("never") => CallResult::Panic,
                 _ => return Err(pending()),
             }
-        } else if self.typed.output_family(call.callee) == Some(PrimitiveOperation::WriteLine) {
-            result
         } else {
-            return Err(pending());
+            match self.typed.output_family(call.callee) {
+                Some(PrimitiveOperation::WriteLine) if result_is("void") => result,
+                Some(PrimitiveOperation::Panic) if result_is("never") => result,
+                _ => return Err(pending()),
+            }
         };
         self.budget.reserve(2)?;
         let stage = self.slot(*argument, &actual)?;
